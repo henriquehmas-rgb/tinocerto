@@ -40,7 +40,13 @@ describe('RLS — isolamento de dois tenants em user_account', () => {
   });
 
   afterAll(async () => {
-    await adminPool.query('DELETE FROM user_account');
+    // Escopado pelos tenants do próprio teste (nunca DELETE sem WHERE) — e
+    // executado ANTES do delete de tenant, porque user_account.tenant_id
+    // referencia tenant(id): apagar o tenant primeiro violaria a FK.
+    await adminPool.query('DELETE FROM user_account WHERE tenant_id IN ($1, $2)', [
+      tenantAId,
+      tenantBId,
+    ]);
     await adminPool.query('DELETE FROM tenant WHERE id IN ($1, $2)', [tenantAId, tenantBId]);
     await adminPool.end();
   });
@@ -175,6 +181,17 @@ describe('RLS — isolamento de dois tenants em user_account', () => {
       const blind = await client2.query(
         `UPDATE user_account SET status = 'inativo' WHERE email = 'a@a.com'`,
       );
+
+      // Precondição explícita, via adminPool (sem RLS): prova que a linha
+      // de a@a.com de fato existe. Sem isso, rowCount === 0 seria uma
+      // asserção vazia — passaria tanto por RLS bloqueando de verdade
+      // quanto por a linha simplesmente não existir mais (ex.: ordem de
+      // execução alterada, afterAll de outro teste rodando cedo demais).
+      const exists = await adminPool.query('SELECT 1 FROM user_account WHERE tenant_id = $1', [
+        tenantAId,
+      ]);
+      expect(exists.rows.length).toBeGreaterThan(0);
+
       expect(blind.rowCount).toBe(0);
 
       await client2.query('COMMIT');
@@ -188,7 +205,7 @@ describe('RLS — isolamento de dois tenants em user_account', () => {
     await pool.end();
   });
 
-  it('sem SET LOCAL, nenhuma linha é visível (falha fechada)', async () => {
+  it('sem set_config, nenhuma linha é visível mesmo havendo dados (falha fechada)', async () => {
     // Precondição explícita: confirma, via o pool admin (que enxerga tudo,
     // sem RLS), que já existem linhas na tabela antes de afirmar que a
     // sessão sem tenant_id vê zero. Sem isso, "0 linhas" seria uma
@@ -213,6 +230,34 @@ describe('RLS — isolamento de dois tenants em user_account', () => {
     } catch (err) {
       await rollbackSafely(client);
       throw err;
+    } finally {
+      client.release();
+    }
+    await pool.end();
+  });
+
+  it('tenant B não lê nem edita a linha do tenant A na tabela tenant', async () => {
+    const pool = appRuntimePool();
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query(`SELECT set_config('app.tenant_id', $1, true)`, [tenantBId]);
+
+      const rows = await client.query('SELECT * FROM tenant');
+      expect(rows.rows).toHaveLength(1);
+      expect(rows.rows[0].id).toBe(tenantBId);
+
+      // Usa razao_social (não plano) porque app_runtime só tem GRANT de
+      // UPDATE nas colunas razao_social/timezone/moeda (ver migration
+      // identity_0002__tenant.sql) — plano/status são operação
+      // administrativa e nem chegam a ser avaliadas pela RLS: um UPDATE
+      // que sequer toque nessas colunas já falha por falta de privilégio
+      // de coluna, antes de qualquer verificação de linha.
+      await expect(
+        client.query(`UPDATE tenant SET razao_social = 'hackeado' WHERE id = $1`, [tenantAId]),
+      ).resolves.toMatchObject({ rowCount: 0 });
+
+      await client.query('ROLLBACK');
     } finally {
       client.release();
     }

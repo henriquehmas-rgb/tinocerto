@@ -18,3 +18,8 @@ GRANT USAGE ON SCHEMA public TO app_runtime;
 -- próprio GRANT explícito, na própria migration que a cria. Um GRANT
 -- automático em toda tabela futura tornaria "esqueci de habilitar RLS"
 -- um vazamento silencioso em vez de um erro imediato e óbvio.
+
+-- Revoga explicitamente qualquer ALTER DEFAULT PRIVILEGES residual de uma
+-- versão anterior desta migration (idempotente — não faz nada se não
+-- houver nenhum default privilege concedido).
+ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON TABLES FROM app_runtime;
