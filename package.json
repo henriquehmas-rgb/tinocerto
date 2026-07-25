@@ -1,0 +1,14 @@
+{
+  "name": "tinocerto",
+  "private": true,
+  "engines": { "node": ">=20.11" },
+  "scripts": {
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "lint": "pnpm -r lint",
+    "migrate": "pnpm --filter @tinocerto/api migrate"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4"
+  }
+}
