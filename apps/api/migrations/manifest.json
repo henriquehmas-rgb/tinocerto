@@ -1,3 +1,7 @@
 {
-  "migrations": []
+  "migrations": [
+    "identity_0001__setup_app_runtime_role.sql",
+    "identity_0002__tenant.sql",
+    "identity_0003__user_account.sql"
+  ]
 }
