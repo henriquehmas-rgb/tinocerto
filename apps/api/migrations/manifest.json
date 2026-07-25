@@ -3,6 +3,8 @@
     "identity_0001__setup_app_runtime_role.sql",
     "identity_0002__tenant.sql",
     "identity_0003__user_account.sql",
-    "org_graph_0001__org_unit.sql"
+    "org_graph_0001__org_unit.sql",
+    "identity_0004__role_and_assignment.sql",
+    "identity_0005__seed_system_roles.sql"
   ]
 }
