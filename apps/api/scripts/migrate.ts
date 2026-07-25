@@ -11,15 +11,17 @@ interface RunMigrationsOptions {
   pool: Pool;
   migrationsDir: string;
   manifestPath: string;
+  tableName?: string;
 }
 
 export async function runMigrations({
   pool,
   migrationsDir,
   manifestPath,
+  tableName = 'schema_migrations',
 }: RunMigrationsOptions): Promise<string[]> {
   await pool.query(`
-    CREATE TABLE IF NOT EXISTS schema_migrations (
+    CREATE TABLE IF NOT EXISTS ${tableName} (
       id serial PRIMARY KEY,
       filename text NOT NULL UNIQUE,
       applied_at timestamptz NOT NULL DEFAULT now()
@@ -28,7 +30,7 @@ export async function runMigrations({
 
   const manifest: Manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
   const alreadyApplied = new Set(
-    (await pool.query<{ filename: string }>('SELECT filename FROM schema_migrations')).rows.map(
+    (await pool.query<{ filename: string }>(`SELECT filename FROM ${tableName}`)).rows.map(
       (r) => r.filename,
     ),
   );
@@ -43,7 +45,7 @@ export async function runMigrations({
     try {
       await client.query('BEGIN');
       await client.query(sql);
-      await client.query('INSERT INTO schema_migrations (filename) VALUES ($1)', [filename]);
+      await client.query(`INSERT INTO ${tableName} (filename) VALUES ($1)`, [filename]);
       await client.query('COMMIT');
       applied.push(filename);
     } catch (err) {
