@@ -36,6 +36,16 @@ describe('TenantContext.run', () => {
 
     expect(result).toHaveLength(1);
     expect(result[0].email).toBe('ctx@teste.com');
+
+    // Prova de commit real: reconsulta via conexão INDEPENDENTE (adminPool,
+    // fora da transação de `ctx.run()`) -- se COMMIT não tivesse rodado, esta
+    // linha não existiria aqui, mesmo que a asserção acima (dentro da mesma
+    // transação) tivesse passado de qualquer forma.
+    const persisted = await adminPool.query(
+      `SELECT email FROM user_account WHERE tenant_id = $1 AND email = 'ctx@teste.com'`,
+      [tenantId],
+    );
+    expect(persisted.rows).toHaveLength(1);
   });
 
   it('faz ROLLBACK se a função lançar', async () => {

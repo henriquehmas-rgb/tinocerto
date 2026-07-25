@@ -5,6 +5,7 @@ export class TenantContext {
 
   async run<T>(tenantId: string, fn: (client: PoolClient) => Promise<T>): Promise<T> {
     const client = await this.pool.connect();
+    let errorToReport: Error | undefined;
     try {
       await client.query('BEGIN');
       // Postgres não aceita bind parameter em SET/SET LOCAL — set_config()
@@ -15,10 +16,20 @@ export class TenantContext {
       await client.query('COMMIT');
       return result;
     } catch (err) {
-      await client.query('ROLLBACK');
+      errorToReport = err instanceof Error ? err : new Error(String(err));
+      try {
+        await client.query('ROLLBACK');
+      } catch {
+        // Rollback falhou (ex.: conexão já caiu) -- o erro original de `err`
+        // é o que importa reportar; o client ainda assim é liberado marcado
+        // como corrompido logo abaixo, então o pool não recicla ele.
+      }
       throw err;
     } finally {
-      client.release();
+      // Passar o erro para release() avisa o pool para descartar esta
+      // conexão em vez de devolvê-la ao pool -- evita reciclar um client
+      // que pode estar em estado inconsistente após um erro na transação.
+      client.release(errorToReport);
     }
   }
 }
