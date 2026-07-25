@@ -1,12 +1,26 @@
-import { Pool } from 'pg';
+import { Pool, type PoolClient } from 'pg';
 
 // Pool de teste conectado explicitamente COMO app_runtime — nunca como
-// owner/superuser, replicando a conexão real da aplicação.
+// owner/superuser, replicando a conexão real da aplicação. Todo teste que
+// copiar este padrão (Tasks 6-14) deve conectar da mesma forma: se o teste
+// conectar como o role dono do banco, RLS nunca é exercitado de verdade.
 function appRuntimePool(): Pool {
   const url = new URL(process.env.DATABASE_URL!);
   url.username = 'app_runtime';
   url.password = 'app_runtime_dev_only';
   return new Pool({ connectionString: url.toString() });
+}
+
+// Helper de rollback seguro: garante ROLLBACK antes de release() mesmo
+// quando o erro já esperado (RLS) deixou a transação em estado abortado.
+// Sem isso, a conexão volta ao pool "suja" (em transação aberta ou
+// abortada) e contamina o próximo client.query() que a reutilizar.
+async function rollbackSafely(client: PoolClient): Promise<void> {
+  try {
+    await client.query('ROLLBACK');
+  } catch {
+    // Já abortada / já sem transação — nada a fazer.
+  }
 }
 
 describe('RLS — isolamento de dois tenants em user_account', () => {
@@ -31,46 +45,142 @@ describe('RLS — isolamento de dois tenants em user_account', () => {
     await adminPool.end();
   });
 
-  it('tenant A não lê nem escreve dado do tenant B', async () => {
+  it('conecta como app_runtime — não superuser, não bypassa RLS', async () => {
     const pool = appRuntimePool();
     const client = await pool.connect();
-
     try {
-      await client.query('BEGIN');
+      const result = await client.query<{ user: string; rolsuper: boolean; rolbypassrls: boolean }>(
+        `SELECT current_user AS user, rolsuper, rolbypassrls
+           FROM pg_roles WHERE rolname = current_user`,
+      );
+      expect(result.rows[0].user).toBe('app_runtime');
+      expect(result.rows[0].rolsuper).toBe(false);
+      expect(result.rows[0].rolbypassrls).toBe(false);
+    } finally {
+      client.release();
+      await pool.end();
+    }
+  });
+
+  it('tenant A não lê nem escreve dado do tenant B (SELECT/INSERT)', async () => {
+    const pool = appRuntimePool();
+
+    // Tenant A insere e COMMITa na própria transação.
+    const clientA = await pool.connect();
+    try {
+      await clientA.query('BEGIN');
       // SET LOCAL não aceita bind parameters ($1) na gramática do Postgres;
       // set_config(name, value, is_local=true) tem o mesmo efeito (escopo de
       // transação) mas aceita parâmetros com segurança.
-      await client.query("SELECT set_config('app.tenant_id', $1, true)", [tenantAId]);
-      await client.query(`INSERT INTO user_account (tenant_id, email) VALUES ($1, 'a@a.com')`, [
+      await clientA.query("SELECT set_config('app.tenant_id', $1, true)", [tenantAId]);
+      await clientA.query(`INSERT INTO user_account (tenant_id, email) VALUES ($1, 'a@a.com')`, [
         tenantAId,
       ]);
-      await client.query('COMMIT');
+      await clientA.query('COMMIT');
+    } catch (err) {
+      await rollbackSafely(clientA);
+      throw err;
     } finally {
-      client.release();
+      clientA.release();
     }
 
-    const client2 = await pool.connect();
+    // Tenant B insere e COMMITa na PRÓPRIA transação, separada da tentativa
+    // de forjar tenant_id abaixo. Se estivesse na mesma transação, o erro
+    // esperado do INSERT forjado abortaria a transação inteira no Postgres
+    // (uma vez abortada, COMMIT vira ROLLBACK silencioso) — derrubando
+    // também o insert legítimo de b@b.com que o teste quer validar.
+    const clientB1 = await pool.connect();
     try {
-      await client2.query('BEGIN');
-      await client2.query("SELECT set_config('app.tenant_id', $1, true)", [tenantBId]);
-      await client2.query(`INSERT INTO user_account (tenant_id, email) VALUES ($1, 'b@b.com')`, [
+      await clientB1.query('BEGIN');
+      await clientB1.query("SELECT set_config('app.tenant_id', $1, true)", [tenantBId]);
+      await clientB1.query(`INSERT INTO user_account (tenant_id, email) VALUES ($1, 'b@b.com')`, [
         tenantBId,
       ]);
 
       // Tenant B tenta ler tudo — só pode ver o próprio registro.
-      const rows = await client2.query('SELECT * FROM user_account');
+      const rows = await clientB1.query('SELECT * FROM user_account');
       expect(rows.rows).toHaveLength(1);
       expect(rows.rows[0].email).toBe('b@b.com');
 
-      // Tenant B tenta escrever um registro se passando por tenant A —
-      // o WITH CHECK deve recusar.
+      await clientB1.query('COMMIT');
+    } catch (err) {
+      await rollbackSafely(clientB1);
+      throw err;
+    } finally {
+      clientB1.release();
+    }
+
+    // Tentativa de forjar tenant_id, em transação PRÓPRIA — isolada para que
+    // o ROLLBACK dela não afete o insert de b@b.com já commitado acima.
+    const clientB2 = await pool.connect();
+    try {
+      await clientB2.query('BEGIN');
+      await clientB2.query("SELECT set_config('app.tenant_id', $1, true)", [tenantBId]);
+
+      // Tenant B tenta escrever um registro se passando por tenant A — o
+      // WITH CHECK da RESTRICTIVE deve recusar. Código 42501
+      // (insufficient_privilege) é o erro específico que o Postgres lança
+      // para violação de política RLS — .rejects.toThrow() genérico
+      // passaria mesmo se o INSERT falhasse por outro motivo (ex.: coluna
+      // errada, tabela sem permissão), mascarando um teste que não testa
+      // mais o que diz testar.
       await expect(
-        client2.query(`INSERT INTO user_account (tenant_id, email) VALUES ($1, 'forjado@a.com')`, [
+        clientB2.query(`INSERT INTO user_account (tenant_id, email) VALUES ($1, 'forjado@a.com')`, [
           tenantAId,
         ]),
-      ).rejects.toThrow();
+      ).rejects.toMatchObject({ code: '42501' });
+
+      await rollbackSafely(clientB2);
+    } catch (err) {
+      await rollbackSafely(clientB2);
+      throw err;
+    } finally {
+      clientB2.release();
+    }
+
+    await pool.end();
+  });
+
+  it('tenant B não move registro para o tenant A via UPDATE cross-tenant', async () => {
+    const pool = appRuntimePool();
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query("SELECT set_config('app.tenant_id', $1, true)", [tenantBId]);
+
+      // B tenta mover o PRÓPRIO registro para o tenant A trocando o
+      // tenant_id — o WITH CHECK da RESTRICTIVE recusa mesmo sendo o dono
+      // da linha, porque a linha resultante não pertenceria mais à sessão.
+      await expect(
+        client.query(`UPDATE user_account SET tenant_id = $1 WHERE email = 'b@b.com'`, [tenantAId]),
+      ).rejects.toMatchObject({ code: '42501' });
+
+      await rollbackSafely(client);
+    } catch (err) {
+      await rollbackSafely(client);
+      throw err;
+    } finally {
+      client.release();
+    }
+
+    // Em transação própria: B tenta atualizar (às cegas) uma linha que
+    // pertence ao tenant A. Aqui não há erro — a cláusula USING da
+    // RESTRICTIVE já filtra a linha do WHERE antes do UPDATE enxergá-la,
+    // então o resultado é 0 linhas afetadas, não uma exceção.
+    const client2 = await pool.connect();
+    try {
+      await client2.query('BEGIN');
+      await client2.query("SELECT set_config('app.tenant_id', $1, true)", [tenantBId]);
+
+      const blind = await client2.query(
+        `UPDATE user_account SET status = 'inativo' WHERE email = 'a@a.com'`,
+      );
+      expect(blind.rowCount).toBe(0);
 
       await client2.query('COMMIT');
+    } catch (err) {
+      await rollbackSafely(client2);
+      throw err;
     } finally {
       client2.release();
     }
@@ -79,14 +189,30 @@ describe('RLS — isolamento de dois tenants em user_account', () => {
   });
 
   it('sem SET LOCAL, nenhuma linha é visível (falha fechada)', async () => {
+    // Precondição explícita: confirma, via o pool admin (que enxerga tudo,
+    // sem RLS), que já existem linhas na tabela antes de afirmar que a
+    // sessão sem tenant_id vê zero. Sem isso, "0 linhas" seria uma
+    // asserção vazia — passaria tanto por falha-fechada real quanto por
+    // uma tabela vazia por acidente (ex.: afterAll de um teste anterior
+    // rodou fora de ordem).
+    const precondition = await adminPool.query<{ total: string }>(
+      'SELECT count(*)::int AS total FROM user_account',
+    );
+    expect(Number(precondition.rows[0].total)).toBeGreaterThan(0);
+
     const pool = appRuntimePool();
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
       // Nenhum set_config('app.tenant_id', ...) executado de propósito.
+      // current_setting('app.tenant_id', true) retorna NULL nesse caso, e
+      // `tenant_id = NULL` nunca é verdadeiro — a RESTRICTIVE barra tudo.
       const rows = await client.query('SELECT * FROM user_account');
       expect(rows.rows).toHaveLength(0);
       await client.query('COMMIT');
+    } catch (err) {
+      await rollbackSafely(client);
+      throw err;
     } finally {
       client.release();
     }
