@@ -25,6 +25,8 @@
     "hiring_0007__job_custom_field.sql",
     "hiring_0008__job_natureza_cargo.sql",
     "hiring_0009__application_custom_field_response.sql",
-    "hiring_0010__acfr_tenant_leading_unique.sql"
+    "hiring_0010__acfr_tenant_leading_unique.sql",
+    "hiring_0011__tenant_quota_config.sql",
+    "hiring_0012__requisition_vaga_afirmativa.sql"
   ]
 }
