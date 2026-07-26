@@ -31,6 +31,36 @@ interface RequestWithAuthContext extends Request {
   userRoles: string[];
 }
 
+// CerbosGuard (Task 6, apps/api/src/authz/cerbos.guard.ts) monta o
+// resource.attr.tenant_id enviado ao Cerbos a partir do próprio req.tenantId
+// do requisitante -- nunca de um lookup real do tenant dono do `:id` da
+// rota. Isso faz a regra "bloqueio-tenant-diferente" (deny-overrides) do
+// Cerbos nunca disparar aqui, pois principal.attr.tenant_id e
+// resource.attr.tenant_id são sempre o mesmo valor por construção (achado de
+// revisão adversarial do Task 12; a correção arquitetural do guard em si --
+// buscar o tenant_id real do recurso no banco antes de chamar o Cerbos -- é
+// um ticket à parte, pois afeta todo guard-mediated action do sistema, não
+// só esta rota).
+//
+// Quem de fato impede a escrita cross-tenant nesta rota é a FK composta
+// `fk_decision_tenant_application` (tenant_id, application_id) ->
+// application (tenant_id, id): uma tentativa de reject numa candidatura de
+// outro tenant estoura essa constraint com um 23503 (foreign_key_violation)
+// do Postgres. Sem tratar isso explicitamente, esse erro vazaria como 500
+// não tratado para o cliente da API -- uma garantia de segurança (bloquear
+// acesso cross-tenant) degradaria para um bug de robustez de API. A função
+// abaixo detecta especificamente essa violação para traduzi-la num 404
+// limpo (mesma semântica de `findOne`: da perspectiva de quem chama, a
+// candidatura simplesmente não existe neste tenant).
+function isForeignKeyViolation(err: unknown, constraintName: string): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    (err as { code?: unknown }).code === '23503' &&
+    (err as { constraint?: unknown }).constraint === constraintName
+  );
+}
+
 @Controller('v1/applications')
 @UseGuards(CerbosGuard)
 export class ApplicationController {
@@ -84,14 +114,22 @@ export class ApplicationController {
   @Post(':id/actions/reject')
   @CerbosCheck('application', 'reject')
   async reject(@Req() req: RequestWithAuthContext, @Param('id') id: string, @Body() dto: RejectApplicationDto) {
-    return this.tenantContext.run(req.tenantId, (client) =>
-      this.decisionService.record(client, {
-        tenantId: req.tenantId,
-        applicationId: id,
-        tipo: 'reprovacao',
-        motivoCodigo: dto.motivoCodigo,
-        decidoPor: req.userId,
-      }),
-    );
+    try {
+      return await this.tenantContext.run(req.tenantId, (client) =>
+        this.decisionService.record(client, {
+          tenantId: req.tenantId,
+          applicationId: id,
+          tipo: 'reprovacao',
+          motivoCodigo: dto.motivoCodigo,
+          decidoPor: req.userId,
+        }),
+      );
+    } catch (err) {
+      // Ver comentário de isForeignKeyViolation no topo do arquivo.
+      if (isForeignKeyViolation(err, 'fk_decision_tenant_application')) {
+        throw new NotFoundException(`Candidatura ${id} não encontrada`);
+      }
+      throw err;
+    }
   }
 }
