@@ -222,8 +222,28 @@ describe('RLS — isolamento de dois tenants em user_account', () => {
     try {
       await client.query('BEGIN');
       // Nenhum set_config('app.tenant_id', ...) executado de propósito.
-      // current_setting('app.tenant_id', true) retorna NULL nesse caso, e
-      // `tenant_id = NULL` nunca é verdadeiro — a RESTRICTIVE barra tudo.
+      //
+      // Achado Important #2 da verificação adversarial dos fixes finais da
+      // Fase 0: o comportamento de current_setting('app.tenant_id', true)
+      // aqui sem set_config prévio depende de a conexão ser NOVA ou
+      // RECICLADA de um pool de longa duração:
+      //   - Conexão NOVA (como esta -- appRuntimePool() acima cria um Pool
+      //     novo por teste e este é o primeiro connect() dele): o GUC
+      //     customizado nunca foi tocado nesta conexão física, então
+      //     current_setting(..., true) retorna NULL. `tenant_id = NULL`
+      //     nunca é verdadeiro -- a RESTRICTIVE barra tudo, 0 linhas.
+      //   - Conexão RECICLADA de um pool de longa duração -- o caso real
+      //     de DatabaseService em produção -- depois que QUALQUER
+      //     transação anterior já setou app.tenant_id localmente (via
+      //     set_config(..., true), o padrão de TenantContext.run()) e
+      //     liberou a conexão de volta ao pool: o GUC customizado reverte
+      //     para STRING VAZIA, não NULL. `''::uuid` estoura erro 22P02
+      //     (invalid input syntax for type uuid) antes mesmo da RLS
+      //     comparar a linha.
+      // Os dois comportamentos são aceitáveis: ambos falham FECHADO (nenhum
+      // vaza dado) -- só o formato da falha muda (0 linhas vs. erro
+      // 22P02). Ver teste dedicado ao caminho de conexão reciclada em
+      // database.service.spec.ts.
       const rows = await client.query('SELECT * FROM user_account');
       expect(rows.rows).toHaveLength(0);
       await client.query('COMMIT');

@@ -50,6 +50,14 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: root
           key: ${{ secrets.VPS_SSH_KEY }}
+          # script_stop (achado Important da verificação adversarial dos
+          # fixes finais da Fase 0): appleboy/ssh-action usa `false` por
+          # padrão -- comandos do script NÃO abortam em erro. Sem isso, se
+          # `cd /docker/tinocerto` ou `git pull origin main` falhar (ex.:
+          # working tree suja por outro processo), o script continua
+          # adiante mesmo assim e pode terminar "verde" sem ter de fato
+          # atualizado/reiniciado nada corretamente.
+          script_stop: true
           script: |
             cd /docker/tinocerto
             git pull origin main

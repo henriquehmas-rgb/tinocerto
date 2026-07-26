@@ -19,6 +19,21 @@ export class DatabaseService implements OnModuleDestroy {
     // migrate.ts continua usando DATABASE_URL de propósito — migrations
     // precisam de privilégio de owner e constrói seu próprio Pool,
     // independente deste service.
+    //
+    // Achado Important da verificação adversarial dos fixes finais da
+    // Fase 0 (Task 18 bis): sem esta validação, se APP_DATABASE_URL
+    // estiver ausente do ambiente, `new Pool({ connectionString:
+    // undefined })` cai SILENCIOSAMENTE no fallback de variáveis libpq
+    // (PGUSER/PGPASSWORD/PGHOST/etc.), que podem resolver de volta para
+    // um role superuser (confirmado ao vivo nesta VPS, onde resolve para
+    // `tinocerto`) — reintroduzindo o vazamento de RLS inteiro sem
+    // nenhum erro visível. Falhar aqui, no boot, é intencional: melhor a
+    // aplicação nunca subir do que subir com privilégio de superuser.
+    if (!process.env.APP_DATABASE_URL) {
+      throw new Error(
+        'APP_DATABASE_URL ausente — DatabaseService nunca deve conectar sem essa variável, ver Task 18/fix final da Fase 0',
+      );
+    }
     this.pool = new Pool({ connectionString: process.env.APP_DATABASE_URL });
   }
 
