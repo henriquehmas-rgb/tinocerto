@@ -1,6 +1,6 @@
 import { Pool } from 'pg';
 import { TenantContext } from '../../database/tenant-context';
-import { AuditLogService } from '../audit-log.service';
+import { AuditLogService, AuditLogEntryInput, computeEntryHash } from '../audit-log.service';
 
 describe('AuditLogService.append — hash chain', () => {
   const url = new URL(process.env.DATABASE_URL!);
@@ -59,8 +59,12 @@ describe('AuditLogService.append — hash chain', () => {
       }),
     );
 
+    // Verificado por chain_seq, não mais por occurred_at (achado
+    // [Important] #4 — occurred_at é dado de negócio fornecido pelo
+    // chamador, não a posição real da entrada na cadeia; ver teste
+    // dedicado abaixo para o cenário em que os dois divergem).
     const rows = await adminPool.query(
-      `SELECT prev_hash, hash FROM audit_log_entry WHERE tenant_id = $1 ORDER BY occurred_at`,
+      `SELECT prev_hash, hash FROM audit_log_entry WHERE tenant_id = $1 ORDER BY chain_seq`,
       [tenantId],
     );
 
@@ -68,6 +72,211 @@ describe('AuditLogService.append — hash chain', () => {
     expect(rows.rows[0].prev_hash).toBeNull();
     expect(rows.rows[1].prev_hash).toBe(rows.rows[0].hash);
     expect(rows.rows[0].hash).not.toBe(rows.rows[1].hash);
+  });
+
+  it('[Critical] serializa appends concorrentes: cadeia permanece linear e sem prev_hash duplicado', async () => {
+    const ctx = new TenantContext(pool);
+    const audit = new AuditLogService();
+    const N = 10;
+
+    // Reproduz a race relatada na revisão: N chamadas de append() disparadas
+    // ao mesmo tempo (Promise.all) contra o MESMO tenant. Sem o advisory
+    // lock por tenant em append(), transações concorrentes em READ
+    // COMMITTED liam o mesmo "último hash" antes de qualquer commit e
+    // várias gravavam o mesmo prev_hash (reproduzido antes da correção: 7
+    // de 10 escritas colidindo no mesmo predecessor, 8 pontas de cadeia
+    // onde deveria haver 1).
+    await Promise.all(
+      Array.from({ length: N }, (_, i) =>
+        ctx.run(tenantId, (client) =>
+          audit.append(client, {
+            tenantId,
+            actorId,
+            actorType: 'user',
+            action: `concurrent_${i}`,
+            resourceType: 'laudo_psicologico',
+            resourceId,
+            occurredAt: new Date(),
+          }),
+        ),
+      ),
+    );
+
+    const rows = await adminPool.query<{ prev_hash: string | null; hash: string }>(
+      `SELECT prev_hash, hash FROM audit_log_entry
+       WHERE tenant_id = $1 AND action LIKE 'concurrent_%'
+       ORDER BY chain_seq`,
+      [tenantId],
+    );
+
+    expect(rows.rows).toHaveLength(N);
+
+    // count(DISTINCT prev_hash) = count(*): nenhuma bifurcação, nenhum par
+    // de escritas concorrentes leu o mesmo predecessor.
+    const prevHashes = rows.rows.map((r) => r.prev_hash);
+    expect(new Set(prevHashes).size).toBe(N);
+
+    // A cadeia é estritamente linear: cada elo aponta para o hash do
+    // elemento imediatamente anterior por chain_seq — exatamente uma
+    // "ponta" (o último elemento não é prev_hash de ninguém).
+    for (let i = 1; i < rows.rows.length; i++) {
+      expect(rows.rows[i].prev_hash).toBe(rows.rows[i - 1].hash);
+    }
+  });
+
+  it('[Important] cadeia permanece verificável mesmo com occurred_at fora de ordem (evento atrasado)', async () => {
+    const ctx = new TenantContext(pool);
+    const audit = new AuditLogService();
+
+    const t2 = await adminPool.query<{ id: string }>(
+      `INSERT INTO tenant (razao_social, cnpj) VALUES ('Empresa Audit OOO', '00000000000010') RETURNING id`,
+    );
+    const tenant2 = t2.rows[0].id;
+
+    try {
+      // Mesmo cenário reproduzido na revisão: 10h, depois 12h, depois um
+      // evento de 11h que chega e é GRAVADO por último (ex.: outbox
+      // reprocessando um evento atrasado — cenário da Task 14).
+      await ctx.run(tenant2, (client) =>
+        audit.append(client, {
+          tenantId: tenant2,
+          actorId,
+          actorType: 'user',
+          action: 'evento_10h',
+          resourceType: 'laudo_psicologico',
+          resourceId,
+          occurredAt: new Date('2026-07-25T10:00:00.000Z'),
+        }),
+      );
+      await ctx.run(tenant2, (client) =>
+        audit.append(client, {
+          tenantId: tenant2,
+          actorId,
+          actorType: 'user',
+          action: 'evento_12h',
+          resourceType: 'laudo_psicologico',
+          resourceId,
+          occurredAt: new Date('2026-07-25T12:00:00.000Z'),
+        }),
+      );
+      await ctx.run(tenant2, (client) =>
+        audit.append(client, {
+          tenantId: tenant2,
+          actorId,
+          actorType: 'user',
+          action: 'evento_11h_atrasado',
+          resourceType: 'laudo_psicologico',
+          resourceId,
+          occurredAt: new Date('2026-07-25T11:00:00.000Z'),
+        }),
+      );
+
+      const byChainSeq = await adminPool.query<{
+        action: string;
+        prev_hash: string | null;
+        hash: string;
+      }>(
+        `SELECT action, prev_hash, hash FROM audit_log_entry WHERE tenant_id = $1 ORDER BY chain_seq`,
+        [tenant2],
+      );
+
+      // Ordem real da cadeia é a ordem de inserção (chain_seq), não a
+      // ordem de occurred_at.
+      expect(byChainSeq.rows.map((r) => r.action)).toEqual([
+        'evento_10h',
+        'evento_12h',
+        'evento_11h_atrasado',
+      ]);
+      expect(byChainSeq.rows[0].prev_hash).toBeNull();
+      expect(byChainSeq.rows[1].prev_hash).toBe(byChainSeq.rows[0].hash);
+      expect(byChainSeq.rows[2].prev_hash).toBe(byChainSeq.rows[1].hash);
+
+      // Prova de que o cenário realmente exercita a divergência: ordenar
+      // as mesmas linhas por occurred_at dá uma ordem DIFERENTE da ordem
+      // real da cadeia — é exatamente essa divergência que antes fazia um
+      // verificador que lesse ORDER BY occurred_at (como o teste original
+      // desta task) declarar cadeia quebrada em dados honestos.
+      const byOccurredAt = await adminPool.query<{ action: string }>(
+        `SELECT action FROM audit_log_entry WHERE tenant_id = $1 ORDER BY occurred_at`,
+        [tenant2],
+      );
+      expect(byOccurredAt.rows.map((r) => r.action)).toEqual([
+        'evento_10h',
+        'evento_11h_atrasado',
+        'evento_12h',
+      ]);
+    } finally {
+      await adminPool.query('DELETE FROM audit_log_entry WHERE tenant_id = $1', [tenant2]);
+      await adminPool.query('DELETE FROM tenant WHERE id = $1', [tenant2]);
+    }
+  });
+
+  it('[Important] detecta adulteração de fields_read/on_behalf_of/ip/user_agent/request_id feita direto no banco', async () => {
+    const ctx = new TenantContext(pool);
+    const audit = new AuditLogService();
+
+    const original: AuditLogEntryInput = {
+      tenantId,
+      actorId,
+      actorType: 'user',
+      action: 'export_lgpd',
+      resourceType: 'laudo_psicologico',
+      resourceId,
+      onBehalfOf: actorId,
+      fieldsRead: ['cpf', 'diagnostico', 'conclusao'],
+      ip: '203.0.113.5',
+      userAgent: 'jest-test',
+      requestId: 'req-original',
+      occurredAt: new Date(),
+    };
+
+    await ctx.run(tenantId, (client) => audit.append(client, original));
+
+    const before = await adminPool.query<{
+      id: string;
+      prev_hash: string | null;
+      hash: string;
+      chain_seq: string;
+      occurred_at: Date;
+    }>(
+      `SELECT id, prev_hash, hash, chain_seq, occurred_at FROM audit_log_entry
+       WHERE tenant_id = $1 AND action = 'export_lgpd'`,
+      [tenantId],
+    );
+    const row = before.rows[0];
+
+    // O hash gravado bate com o payload original recomputado com a mesma
+    // fórmula usada por append() — prova de que computeEntryHash cobre de
+    // fato os campos de conteúdo LGPD-sensíveis (fields_read, on_behalf_of).
+    const recomputedOriginal = computeEntryHash(row.prev_hash, row.id, BigInt(row.chain_seq), {
+      ...original,
+      occurredAt: row.occurred_at,
+    });
+    expect(recomputedOriginal).toBe(row.hash);
+
+    // Reescreve os campos de conteúdo direto no banco, como dono da tabela
+    // (bypassa o REVOKE UPDATE do app_runtime — exatamente o ator do
+    // modelo de ameaça descrito no achado: quem tem acesso privilegiado ao
+    // Postgres).
+    await adminPool.query(
+      `UPDATE audit_log_entry
+         SET fields_read = $1, on_behalf_of = NULL, ip = $2, user_agent = $3, request_id = $4
+       WHERE id = $5`,
+      [['nome'], '127.0.0.1', 'forjado-agent', 'req-forjado', row.id],
+    );
+
+    // O hash gravado (imutável — UPDATE não recalcula hash) não bate mais
+    // com o payload adulterado: a cadeia agora detecta a adulteração.
+    const recomputedTampered = computeEntryHash(row.prev_hash, row.id, BigInt(row.chain_seq), {
+      ...original,
+      onBehalfOf: undefined,
+      fieldsRead: ['nome'],
+      ip: '127.0.0.1',
+      userAgent: 'forjado-agent',
+      requestId: 'req-forjado',
+      occurredAt: row.occurred_at,
+    });
+    expect(recomputedTampered).not.toBe(row.hash);
   });
 
   it('não permite UPDATE nem DELETE (append-only de verdade)', async () => {
@@ -99,5 +308,57 @@ describe('AuditLogService.append — hash chain', () => {
     } finally {
       client.release();
     }
+  });
+});
+
+describe('computeEntryHash — canonicalização', () => {
+  const base: Omit<AuditLogEntryInput, 'action' | 'resourceType' | 'actorId'> = {
+    tenantId: 'aaaaaaaa-0000-0000-0000-000000000000',
+    actorType: 'user',
+    resourceId: '22222222-2222-2222-2222-222222222222',
+    occurredAt: new Date('2026-07-25T12:00:00.000Z'),
+  };
+  const prevHash = 'abc123';
+  const id = '33333333-3333-3333-3333-333333333333';
+  const chainSeq = 1n;
+
+  it('[Important] action/resourceType contendo o delimitador antigo pipe nao colidem mais', () => {
+    // Mesma demonstração da revisão: X.action="read|export" +
+    // X.resourceType="laudo_psicologico" vs Y.action="read" +
+    // Y.resourceType="export|laudo_psicologico" — com o join('|') antigo,
+    // as duas produziam a mesma string canônica e o mesmo hash.
+    const hashX = computeEntryHash(prevHash, id, chainSeq, {
+      ...base,
+      actorId: undefined,
+      action: 'read|export',
+      resourceType: 'laudo_psicologico',
+    });
+    const hashY = computeEntryHash(prevHash, id, chainSeq, {
+      ...base,
+      actorId: undefined,
+      action: 'read',
+      resourceType: 'export|laudo_psicologico',
+    });
+
+    expect(hashX).not.toBe(hashY);
+  });
+
+  it('[Important] actorId ausente (undefined) e string vazia nao colidem mais', () => {
+    const common = { ...base, action: 'read', resourceType: 'laudo_psicologico' };
+    const hashUndefined = computeEntryHash(prevHash, id, chainSeq, {
+      ...common,
+      actorId: undefined,
+    });
+    const hashEmpty = computeEntryHash(prevHash, id, chainSeq, { ...common, actorId: '' });
+
+    expect(hashUndefined).not.toBe(hashEmpty);
+  });
+
+  it('[Important] prevHash nulo (primeira entrada da cadeia) e string vazia literal nao colidem', () => {
+    const common = { ...base, actorId: undefined, action: 'read', resourceType: 'laudo_psicologico' };
+    const hashNullPrev = computeEntryHash(null, id, chainSeq, common);
+    const hashEmptyPrev = computeEntryHash('', id, chainSeq, common);
+
+    expect(hashNullPrev).not.toBe(hashEmptyPrev);
   });
 });
