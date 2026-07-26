@@ -6,7 +6,7 @@ resourcePolicy:
   importDerivedRoles: [psicologo_roles]
   rules:
     - name: "bloqueio-sem-crp-ativo"
-      actions: ["read", "export", "print", "download"]
+      actions: ["*"]
       effect: EFFECT_DENY
       roles: ["*"]
       condition:
@@ -28,9 +28,14 @@ resourcePolicy:
     # nao estrutural. Um suporte_nivel3 do tenant 1 com ticket de
     # breakglass valido conseguia ler laudo do tenant 2.
     #
-    # Esta regra DENY, com roles: ["*"], vale para TODAS as regras ALLOW
-    # deste resource -- presentes e futuras -- sem exigir que cada autor
-    # de regra lembre de repetir a checagem de tenant manualmente.
+    # Esta regra DENY, com roles: ["*"] e actions: ["*"], vale para TODAS
+    # as regras ALLOW deste resource -- presentes e futuras, em qualquer
+    # action -- sem exigir que cada autor de regra lembre de repetir a
+    # checagem de tenant manualmente. (4a rodada: actions restrito a
+    # read/export/print/download foi trocado para "*" depois que um
+    # revisor provou, com uma regra ALLOW de sondagem numa action nova
+    # ("assinar"), que uma action fora da lista enumerada escapava desta
+    # protecao -- ver task-10-fix3-report.md / revisao da rodada 4.)
     #
     # Semantica do Cerbos (resource policies): TODAS as regras que casam
     # com a requisicao sao avaliadas (nao para na primeira que bate), e os
@@ -50,7 +55,7 @@ resourcePolicy:
     # (has() guard, fail closed), tipo errado, string vazia, ou valores
     # diferentes -- bloqueia.
     - name: "bloqueio-tenant-diferente"
-      actions: ["read", "export", "print", "download"]
+      actions: ["*"]
       effect: EFFECT_DENY
       roles: ["*"]
       condition:
@@ -69,15 +74,16 @@ resourcePolicy:
     # Decisao desta rodada: a checagem de tenant que estava duplicada aqui
     # (adicionada na rodada anterior, commit ea71180) foi REMOVIDA. Motivo:
     # agora que "bloqueio-tenant-diferente" (acima) e uma regra DENY
-    # universal (roles: ["*"]) que cobre TODAS as regras ALLOW deste
-    # resource, manter a checagem duplicada aqui so criaria a falsa
-    # impressao de que cada regra ALLOW precisa repetir essa logica -- que
-    # e exatamente o problema estrutural que motivou este fix (a regra
-    # breakglass-suporte abaixo nao tinha a checagem e ficou vulneravel).
-    # Uma unica fonte de verdade (a regra DENY universal) e mais facil de
-    # auditar do que N copias da mesma condicao espalhadas pelas regras
-    # ALLOW. O comportamento observavel nao muda: a regra DENY universal
-    # cobre exatamente os mesmos casos que a condicao removida cobria.
+    # universal (roles: ["*"], actions: ["*"]) que cobre TODAS as regras
+    # ALLOW deste resource, manter a checagem duplicada aqui so criaria a
+    # falsa impressao de que cada regra ALLOW precisa repetir essa logica
+    # -- que e exatamente o problema estrutural que motivou este fix (a
+    # regra breakglass-suporte abaixo nao tinha a checagem e ficou
+    # vulneravel). Uma unica fonte de verdade (a regra DENY universal) e
+    # mais facil de auditar do que N copias da mesma condicao espalhadas
+    # pelas regras ALLOW. O comportamento observavel nao muda: a regra
+    # DENY universal cobre exatamente os mesmos casos que a condicao
+    # removida cobria.
     #
     # A derived role psicologo_supervisor_mesmo_crp foi removida desta
     # regra (achado N4): "mesma UF" nao comprova relacao de supervisao
