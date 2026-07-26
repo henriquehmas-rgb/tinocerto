@@ -5,6 +5,7 @@ import { OutboxService } from '../outbox/outbox.service';
 import { nextOutboxSequence } from '../outbox/next-outbox-sequence';
 import { generateSeoSlug } from './seo-slug';
 import { RequisitionService } from './requisition.service';
+import { classifySensitiveCategories } from './compliance/sensitive-category-linter';
 
 export interface CreateJobInput {
   tenantId: string;
@@ -56,6 +57,19 @@ export class JobService {
     }
     if (current.rows[0].publicado_em !== null) {
       throw new Error(`Vaga ${id} já está publicada`);
+    }
+
+    const fields = await client.query<{ label: string; base_legal: string | null }>(
+      `SELECT label, base_legal FROM job_custom_field WHERE job_id = $1`,
+      [id],
+    );
+    for (const field of fields.rows) {
+      const categories = classifySensitiveCategories(field.label);
+      if (categories.length > 0 && !field.base_legal) {
+        throw new Error(
+          `Vaga ${id} não pode ser publicada: o campo "${field.label}" foi classificado como dado sensível (${categories.join(', ')}) e não tem base legal declarada`,
+        );
+      }
     }
 
     await client.query(`UPDATE job SET publicado_em = now(), canais = $1 WHERE id = $2`, [canais, id]);

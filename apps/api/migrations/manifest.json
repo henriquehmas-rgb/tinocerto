@@ -21,6 +21,7 @@
     "hiring_0003__candidate_touchpoint.sql",
     "hiring_0004__application.sql",
     "hiring_0005__pipeline_stage_transition.sql",
-    "hiring_0006__decision.sql"
+    "hiring_0006__decision.sql",
+    "hiring_0007__job_custom_field.sql"
   ]
 }
