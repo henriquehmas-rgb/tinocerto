@@ -7,6 +7,15 @@ derivedRoles:
       condition:
         match:
           expr: "request.resource.attr.psicologo_responsavel_id == request.principal.id"
+    # RESERVADA para uma futura modelagem de supervisão real (relação
+    # supervisor <-> supervisionado explícita, e não apenas UF em comum).
+    #
+    # Decisão do dono do produto (achado N4, revisão adversarial da policy
+    # de laudo_psicologico): "mesma UF" não comprova que existe supervisão
+    # de fato, então esta derived role NÃO é referenciada em nenhuma regra
+    # ALLOW de resource_laudo_psicologico.yaml — postura interina fail
+    # closed até que a relação de supervisão seja modelada de verdade.
+    # Isso é decisão registrada, não dead code acidental. Não remover.
     - name: psicologo_supervisor_mesmo_crp
       parentRoles: ["psicologo_responsavel"]
       condition:

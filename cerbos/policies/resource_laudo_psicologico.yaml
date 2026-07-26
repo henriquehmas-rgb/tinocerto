@@ -15,16 +15,33 @@ resourcePolicy:
             !(has(request.principal.attr.crp_ativo) &&
               request.principal.attr.crp_ativo == true &&
               has(request.principal.attr.crp_numero) &&
-              size(string(request.principal.attr.crp_numero)) > 0 &&
+              type(request.principal.attr.crp_numero) == string &&
+              size(request.principal.attr.crp_numero) > 0 &&
               has(request.principal.attr.crp_uf) &&
+              type(request.principal.attr.crp_uf) == string &&
               request.principal.attr.crp_uf != "")
 
+    # ALLOW apenas para o autor do laudo (psicologo_autor), na condição de
+    # que o tenant do principal seja o mesmo do resource. O guard has()
+    # em ambos os lados garante fail-closed: se tenant_id estiver ausente
+    # de qualquer lado, a condição vira false (sem erro de CEL) e a regra
+    # simplesmente não concede ALLOW — não há caminho de erro que resulte
+    # em acesso liberado.
+    #
+    # A derived role psicologo_supervisor_mesmo_crp foi removida desta
+    # regra (achado N4): "mesma UF" não comprova relação de supervisão
+    # real. Ver comentário em derived_roles_psicologo.yaml.
     - name: "acesso-laudo-integra"
       actions: ["read"]
       effect: EFFECT_ALLOW
       derivedRoles:
         - psicologo_autor
-        - psicologo_supervisor_mesmo_crp
+      condition:
+        match:
+          expr: >
+            has(request.principal.attr.tenant_id) &&
+            has(request.resource.attr.tenant_id) &&
+            request.principal.attr.tenant_id == request.resource.attr.tenant_id
 
     - name: "breakglass-suporte"
       actions: ["read"]
