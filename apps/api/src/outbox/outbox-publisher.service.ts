@@ -30,6 +30,16 @@ interface PendingOutboxRow {
  * já que a query busca sempre os mais antigos primeiro (ORDER BY
  * recorded_at) — sem isolamento, um evento problemático ficaria preso na
  * frente da fila para sempre, bloqueando todos os outros tenants.
+ *
+ * Distinção outage total vs. degradação parcial: se TODOS os eventos do
+ * lote falharem (published === 0 && failed > 0), é sinal forte de que o
+ * Redis está inteiro fora do ar — nesse caso lançamos um Error, porque
+ * silenciar isso faria publishPending() retornar 0, indistinguível do caso
+ * legítimo de "fila vazia" (quem chama este método não teria como saber que
+ * nada foi publicado por causa de uma falha de infra, não por falta de
+ * trabalho). Se só PARTE do lote falhar (published > 0 && failed > 0), é
+ * degradação parcial tolerável dentro do modelo at-least-once já aprovado:
+ * logamos o erro por evento e seguimos, sem lançar.
  */
 export class OutboxPublisher {
   constructor(
@@ -43,6 +53,7 @@ export class OutboxPublisher {
     );
 
     let published = 0;
+    let failed = 0;
     for (const event of pending.rows) {
       try {
         await this.redis.xadd(
@@ -63,10 +74,20 @@ export class OutboxPublisher {
         );
         published += 1;
       } catch (err) {
-        // Não relança: deixa o evento pendente para a próxima rodada de
+        // Não relança aqui: deixa o evento pendente para a próxima rodada de
         // polling tentar de novo, e segue para os demais eventos do lote.
+        // A decisão de lançar (ou não) para o chamador é tomada depois do
+        // loop, com base no agregado published/failed — ver comentário da
+        // classe.
         console.error(`outbox publish failed for event ${event.id}`, err);
+        failed += 1;
       }
+    }
+
+    if (failed > 0 && published === 0) {
+      throw new Error(
+        `Falha ao publicar ${failed} evento(s) pendente(s) no Redis — nenhum publicado com sucesso`,
+      );
     }
 
     return published;
