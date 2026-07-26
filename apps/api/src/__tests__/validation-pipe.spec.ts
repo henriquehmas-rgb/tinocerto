@@ -1,5 +1,5 @@
 import 'reflect-metadata';
-import { IsString, IsNotEmpty, IsInt, Min, Max, IsUUID, ValidateNested } from 'class-validator';
+import { IsString, IsNotEmpty, IsInt, Min, Max, IsUUID } from 'class-validator';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 
