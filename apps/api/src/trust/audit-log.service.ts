@@ -74,6 +74,15 @@ export function computeEntryHash(
     ip: entry.ip ?? null,
     userAgent: entry.userAgent ?? null,
     requestId: entry.requestId ?? null,
+    // occurredAt e canonico por HIPOTESE, nao por construcao como os
+    // campos uuid/inet acima (que passam pela query de cast do Postgres em
+    // append() antes de chegar aqui): dependemos do round-trip Date -> ISO
+    // string -> timestamptz -> Date bater de volta sem perda. Hoje bate
+    // (Date e Number em ms, timestamptz do Postgres tem precisao de
+    // microssegundo, nao ha perda). Se um dia entrarem timestamps fora da
+    // faixa seguro de Date ou uma origem que forneca precisao sub-ms, esta
+    // premissa precisa ser revisitada (ou canonizada pelo Postgres como os
+    // demais campos tipados).
     occurredAt: entry.occurredAt.toISOString(),
   });
 
