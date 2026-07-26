@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import { PoolClient } from 'pg';
 import { OutboxService } from '../outbox/outbox.service';
 import { nextOutboxSequence } from '../outbox/next-outbox-sequence';
@@ -26,13 +27,21 @@ export class JobService {
       throw new Error(`Requisição ${input.requisitionId} precisa estar aprovada antes de criar uma vaga`);
     }
 
-    const result = await client.query<{ id: string }>(
-      `INSERT INTO job (tenant_id, requisition_id, titulo, seo_slug) VALUES ($1, $2, $3, '') RETURNING id`,
-      [input.tenantId, input.requisitionId, input.titulo],
-    );
-    const id = result.rows[0].id;
+    // O id é gerado na aplicação (não via DEFAULT gen_random_uuid() da coluna)
+    // para que o seo_slug definitivo já esteja disponível ANTES do INSERT.
+    // Isso evita o padrão "INSERT com placeholder '' + UPDATE" que fazia toda
+    // criação de vaga do mesmo tenant serializar num único ponto de contenção
+    // do índice único idx_job_tenant_slug (tenant_id, seo_slug): duas
+    // criações concorrentes disputariam a MESMA chave (tenant_id, '') até a
+    // primeira transação commitar. Com o slug final calculado antes do
+    // INSERT, cada criação concorrente já insere sua própria chave distinta.
+    const id = randomUUID();
     const seoSlug = generateSeoSlug(input.titulo, id);
-    await client.query(`UPDATE job SET seo_slug = $1 WHERE id = $2`, [seoSlug, id]);
+
+    await client.query(
+      `INSERT INTO job (id, tenant_id, requisition_id, titulo, seo_slug) VALUES ($1, $2, $3, $4, $5)`,
+      [id, input.tenantId, input.requisitionId, input.titulo, seoSlug],
+    );
 
     return { id };
   }

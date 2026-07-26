@@ -75,7 +75,7 @@ describe('JobService', () => {
     expect(events.rows[0].payload.canais).toEqual(['site_carreiras', 'google_for_jobs']);
   });
 
-  it('rejeita criar vaga para requisição de outro tenant (FK composta barra a referência)', async () => {
+  it('rejeita criar vaga para requisição de outro tenant (checagem de tenant em JobService.create via RequisitionService.findById)', async () => {
     const outroTenant = await adminPool.query<{ id: string }>(
       `INSERT INTO tenant (razao_social, cnpj) VALUES ('Empresa Job Outro', '00000000000019') RETURNING id`,
     );
@@ -93,5 +93,31 @@ describe('JobService', () => {
     ).rejects.toThrow();
 
     await adminPool.query('DELETE FROM tenant WHERE id = $1', [outroTenant.rows[0].id]);
+  });
+
+  it('a FK composta fk_job_tenant_requisition barra, no nível do banco, um INSERT direto em job com requisition_id de outro tenant — independente de qualquer checagem em nível de aplicação', async () => {
+    // Este teste ignora deliberadamente o JobService/RequisitionService e insere
+    // direto via adminPool (role "tinocerto", Superuser + Bypass RLS — ver
+    // "\du" no Postgres), para provar que a própria FK composta
+    // (tenant_id, requisition_id) REFERENCES requisition (tenant_id, id)
+    // protege contra vazamento cross-tenant mesmo que o pré-check de
+    // JobService.create (RequisitionService.findById + comparação de
+    // tenantId) algum dia seja removido ou enfraquecido num refactor futuro.
+    // Sem este teste, a suíte inteira poderia "passar" mesmo que a FK fosse
+    // derrubada da migration, pois o teste acima já barra a criação antes do
+    // INSERT (achado de revisão da Task 8, fix round 1).
+    const outroTenant = await adminPool.query<{ id: string }>(
+      `INSERT INTO tenant (razao_social, cnpj) VALUES ('Empresa Job FK Direta', '00000000000020') RETURNING id`,
+    );
+    const outroTenantId = outroTenant.rows[0].id;
+
+    await expect(
+      adminPool.query(
+        `INSERT INTO job (tenant_id, requisition_id, titulo, seo_slug) VALUES ($1, $2, 'Vaga Cross-Tenant Direta', 'vaga-cross-tenant-direta-xxxx')`,
+        [outroTenantId, requisitionId], // requisitionId pertence ao tenant original, não a outroTenantId
+      ),
+    ).rejects.toThrow(/fk_job_tenant_requisition/);
+
+    await adminPool.query('DELETE FROM tenant WHERE id = $1', [outroTenantId]);
   });
 });
