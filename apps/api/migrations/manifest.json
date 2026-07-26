@@ -10,6 +10,7 @@
     "platform_0001__outbox_event.sql",
     "trust_0001__audit_log_entry.sql",
     "trust_0002__audit_log_chain_seq.sql",
-    "trust_0003__consent_incident_retention_dsr.sql"
+    "trust_0003__consent_incident_retention_dsr.sql",
+    "identity_0007__role_rls.sql"
   ]
 }
