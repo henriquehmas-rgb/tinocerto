@@ -109,11 +109,17 @@ describe('CerbosService — policy do laudo psicológico', () => {
     expect(result.read).toBe(false);
   });
 
-  // Novo teste (achado N3 — isolamento de tenant): mesmo sendo o autor de
-  // fato, com CRP ativo e válido, um tenant_id de principal diferente do
-  // tenant_id do resource deve negar o acesso. Prova que a condição de
-  // igualdade de tenant adicionada em resource_laudo_psicologico.yaml
-  // efetivamente bloqueia leitura cross-tenant.
+  // Achado N3 (isolamento de tenant): mesmo sendo o autor de fato, com CRP
+  // ativo e válido, um tenant_id de principal diferente do tenant_id do
+  // resource deve negar o acesso.
+  //
+  // Atualizado na 3a rodada de fix: a checagem de tenant não vive mais
+  // como condição duplicada dentro da regra "acesso-laudo-integra" — ela
+  // foi centralizada na regra DENY universal "bloqueio-tenant-diferente"
+  // (roles: ["*"]) em resource_laudo_psicologico.yaml, que cobre TODA
+  // regra ALLOW do resource. Este teste prova que o comportamento
+  // observável continua o mesmo (DENY cross-tenant) mesmo após essa
+  // reestruturação.
   it('nega leitura para o autor do laudo se o tenant_id do principal for diferente do tenant_id do resource', async () => {
     const result = await cerbos.check(
       {
@@ -125,6 +131,74 @@ describe('CerbosService — policy do laudo psicológico', () => {
         kind: 'laudo_psicologico',
         id: 'laudo-1',
         attr: { psicologo_responsavel_id: 'psi-1', tenant_id: 'tenant-2' },
+      },
+      ['read'],
+    );
+    expect(result.read).toBe(false);
+  });
+
+  // Novo teste (3a rodada - achado do revisor sobre breakglass cross-tenant):
+  // antes deste fix, a regra "breakglass-suporte" concedia ALLOW para role
+  // suporte_nivel3 SEM nenhuma checagem de tenant — um suporte do tenant 1
+  // com ticket de breakglass válido conseguia ler laudo do tenant 2. A
+  // regra DENY universal "bloqueio-tenant-diferente" agora cobre esse role
+  // também, sem precisar de lógica extra na regra breakglass-suporte.
+  //
+  // Limitação deste teste: CerbosService.check() (importado acima) não
+  // expõe aux_data, e nenhum teste deste arquivo simula aux_data — então
+  // não dá pra disparar de fato a condição
+  // "request.aux_data.jwt.breakglass_ticket_id != vazio" da regra
+  // breakglass-suporte por aqui (infra/cerbos.yaml também não tem
+  // auxData.jwt configurado no servidor real). Por isso simulamos a
+  // "credencial de breakglass" via attr solto (breakglass_ticket_id), não
+  // via aux_data.jwt de verdade. O objetivo deste teste é mais restrito:
+  // provar que o role suporte_nivel3, mesmo com CRP válido, é barrado pela
+  // regra DENY universal de tenant quando o tenant do principal diverge do
+  // tenant do resource — independente de qual regra ALLOW exista para esse
+  // role. A prova de que a regra DENY também vence quando
+  // breakglass-suporte de fato dispara (via aux_data.jwt real, contra o
+  // servidor Cerbos rodando, com uma policy de verificação descartável)
+  // foi feita manualmente — ver task-10-fix3-report.md.
+  it('nega leitura para suporte_nivel3 (cenário breakglass) com tenant do principal diferente do tenant do resource', async () => {
+    const result = await cerbos.check(
+      {
+        id: 'suporte-1',
+        roles: ['suporte_nivel3'],
+        attr: {
+          crp_ativo: true,
+          crp_numero: '000000',
+          crp_uf: 'SP',
+          tenant_id: 'tenant-1',
+          breakglass_ticket_id: 'TICKET-SIMULADO-123',
+        },
+      },
+      {
+        kind: 'laudo_psicologico',
+        id: 'laudo-1',
+        attr: { psicologo_responsavel_id: 'outro-user', tenant_id: 'tenant-2' },
+      },
+      ['read'],
+    );
+    expect(result.read).toBe(false);
+  });
+
+  // Novo teste (3a rodada - mitigação do achado sobre valor degenerado):
+  // tenant_id presente nos dois lados, mas como string vazia. O guard
+  // has() sozinho não pega esse caso (a chave existe), então a regra DENY
+  // universal também precisa checar size(...) > 0 nos dois lados. Prova
+  // que string vazia não é tratada como "igual" por acidente — mesmo
+  // sendo o autor de fato, com CRP válido.
+  it('nega leitura quando tenant_id é string vazia dos dois lados, mesmo sendo o autor de fato', async () => {
+    const result = await cerbos.check(
+      {
+        id: 'psi-1',
+        roles: ['psicologo_responsavel'],
+        attr: { crp_ativo: true, crp_numero: '123456', crp_uf: 'SP', tenant_id: '' },
+      },
+      {
+        kind: 'laudo_psicologico',
+        id: 'laudo-1',
+        attr: { psicologo_responsavel_id: 'psi-1', tenant_id: '' },
       },
       ['read'],
     );

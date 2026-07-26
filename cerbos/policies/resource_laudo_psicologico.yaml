@@ -21,27 +21,72 @@ resourcePolicy:
               type(request.principal.attr.crp_uf) == string &&
               request.principal.attr.crp_uf != "")
 
-    # ALLOW apenas para o autor do laudo (psicologo_autor), na condição de
-    # que o tenant do principal seja o mesmo do resource. O guard has()
-    # em ambos os lados garante fail-closed: se tenant_id estiver ausente
-    # de qualquer lado, a condição vira false (sem erro de CEL) e a regra
-    # simplesmente não concede ALLOW — não há caminho de erro que resulte
-    # em acesso liberado.
+    # Fix estrutural (3a rodada, achado do revisor): a regra
+    # "breakglass-suporte" concedia ALLOW sem NENHUMA checagem de tenant,
+    # porque a rodada anterior (commit ea71180) so tinha adicionado a
+    # comparacao de tenant_id na regra "acesso-laudo-integra" -- por-regra,
+    # nao estrutural. Um suporte_nivel3 do tenant 1 com ticket de
+    # breakglass valido conseguia ler laudo do tenant 2.
+    #
+    # Esta regra DENY, com roles: ["*"], vale para TODAS as regras ALLOW
+    # deste resource -- presentes e futuras -- sem exigir que cada autor
+    # de regra lembre de repetir a checagem de tenant manualmente.
+    #
+    # Semantica do Cerbos (resource policies): TODAS as regras que casam
+    # com a requisicao sao avaliadas (nao para na primeira que bate), e os
+    # efeitos sao combinados com deny-overrides -- se qualquer regra que
+    # casar for EFFECT_DENY, o resultado final e DENY, mesmo que outra
+    # regra que tambem tenha casado seja EFFECT_ALLOW. E exatamente esse
+    # comportamento que ja sustenta a coexistencia de
+    # "bloqueio-sem-crp-ativo" (acima) com as regras ALLOW abaixo -- aqui
+    # aplicamos o mesmo padrao para tenant. Confirmado manualmente contra
+    # o servidor Cerbos rodando (nao so nos testes unitarios) com uma
+    # policy de verificacao descartavel -- ver relatorio da rodada 3 de
+    # fix (task-10-fix3-report.md) para o passo a passo.
+    #
+    # A condicao abaixo so deixa passar (match == false, nao bloqueia)
+    # quando tenant_id existe dos dois lados, e string nao-vazia dos dois
+    # lados, E os valores sao iguais. Qualquer outro caso -- ausencia
+    # (has() guard, fail closed), tipo errado, string vazia, ou valores
+    # diferentes -- bloqueia.
+    - name: "bloqueio-tenant-diferente"
+      actions: ["read", "export", "print", "download"]
+      effect: EFFECT_DENY
+      roles: ["*"]
+      condition:
+        match:
+          expr: >
+            !(has(request.principal.attr.tenant_id) &&
+              has(request.resource.attr.tenant_id) &&
+              type(request.principal.attr.tenant_id) == string &&
+              type(request.resource.attr.tenant_id) == string &&
+              size(request.principal.attr.tenant_id) > 0 &&
+              size(request.resource.attr.tenant_id) > 0 &&
+              request.principal.attr.tenant_id == request.resource.attr.tenant_id)
+
+    # ALLOW apenas para o autor do laudo (psicologo_autor).
+    #
+    # Decisao desta rodada: a checagem de tenant que estava duplicada aqui
+    # (adicionada na rodada anterior, commit ea71180) foi REMOVIDA. Motivo:
+    # agora que "bloqueio-tenant-diferente" (acima) e uma regra DENY
+    # universal (roles: ["*"]) que cobre TODAS as regras ALLOW deste
+    # resource, manter a checagem duplicada aqui so criaria a falsa
+    # impressao de que cada regra ALLOW precisa repetir essa logica -- que
+    # e exatamente o problema estrutural que motivou este fix (a regra
+    # breakglass-suporte abaixo nao tinha a checagem e ficou vulneravel).
+    # Uma unica fonte de verdade (a regra DENY universal) e mais facil de
+    # auditar do que N copias da mesma condicao espalhadas pelas regras
+    # ALLOW. O comportamento observavel nao muda: a regra DENY universal
+    # cobre exatamente os mesmos casos que a condicao removida cobria.
     #
     # A derived role psicologo_supervisor_mesmo_crp foi removida desta
-    # regra (achado N4): "mesma UF" não comprova relação de supervisão
-    # real. Ver comentário em derived_roles_psicologo.yaml.
+    # regra (achado N4): "mesma UF" nao comprova relacao de supervisao
+    # real. Ver comentario em derived_roles_psicologo.yaml.
     - name: "acesso-laudo-integra"
       actions: ["read"]
       effect: EFFECT_ALLOW
       derivedRoles:
         - psicologo_autor
-      condition:
-        match:
-          expr: >
-            has(request.principal.attr.tenant_id) &&
-            has(request.resource.attr.tenant_id) &&
-            request.principal.attr.tenant_id == request.resource.attr.tenant_id
 
     - name: "breakglass-suporte"
       actions: ["read"]
