@@ -18,6 +18,7 @@
     "hiring_0001__requisition.sql",
     "org_graph_0002__org_unit_parent_composite_fk.sql",
     "hiring_0002__job.sql",
-    "hiring_0003__candidate_touchpoint.sql"
+    "hiring_0003__candidate_touchpoint.sql",
+    "hiring_0004__application.sql"
   ]
 }
