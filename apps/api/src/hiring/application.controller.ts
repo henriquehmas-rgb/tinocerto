@@ -7,6 +7,7 @@ import { CerbosGuard } from '../authz/cerbos.guard';
 import { CerbosCheck } from '../authz/cerbos-check.decorator';
 import { ApplicationService } from './application.service';
 import { PipelineStageTransitionService } from './pipeline-stage-transition.service';
+import { DecisionService } from './decision.service';
 
 class MoveStageDto {
   @IsString()
@@ -16,6 +17,12 @@ class MoveStageDto {
   @IsOptional()
   @IsString()
   reasonCode?: string;
+}
+
+class RejectApplicationDto {
+  @IsOptional()
+  @IsString()
+  motivoCodigo?: string;
 }
 
 interface RequestWithAuthContext extends Request {
@@ -32,6 +39,7 @@ export class ApplicationController {
   constructor(
     private readonly applicationService: ApplicationService,
     private readonly pipelineStageTransitionService: PipelineStageTransitionService,
+    private readonly decisionService: DecisionService,
     databaseService: DatabaseService,
   ) {
     this.tenantContext = new TenantContext(databaseService.pool);
@@ -69,6 +77,20 @@ export class ApplicationController {
         reasonCode: dto.reasonCode,
         actorId: req.userId,
         actorType: 'user',
+      }),
+    );
+  }
+
+  @Post(':id/actions/reject')
+  @CerbosCheck('application', 'reject')
+  async reject(@Req() req: RequestWithAuthContext, @Param('id') id: string, @Body() dto: RejectApplicationDto) {
+    return this.tenantContext.run(req.tenantId, (client) =>
+      this.decisionService.record(client, {
+        tenantId: req.tenantId,
+        applicationId: id,
+        tipo: 'reprovacao',
+        motivoCodigo: dto.motivoCodigo,
+        decidoPor: req.userId,
       }),
     );
   }

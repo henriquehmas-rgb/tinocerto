@@ -3,6 +3,7 @@ import { BadRequestException } from '@nestjs/common';
 import { ApplicationController } from '../application.controller';
 import { ApplicationService } from '../application.service';
 import { PipelineStageTransitionService } from '../pipeline-stage-transition.service';
+import { DecisionService } from '../decision.service';
 import { DatabaseService } from '../../database/database.service';
 import { CerbosGuard } from '../../authz/cerbos.guard';
 
@@ -15,6 +16,10 @@ describe('ApplicationController', () => {
       providers: [
         { provide: ApplicationService, useValue: { findByIdWithPersonView: jest.fn() } },
         { provide: PipelineStageTransitionService, useValue: { moveStage: moveStageMock } },
+        // DecisionService (Task 12) não é exercitado por estes testes de
+        // move-stage -- mock vazio só para satisfazer o construtor do
+        // controller, que agora exige a dependência.
+        { provide: DecisionService, useValue: { record: jest.fn() } },
         { provide: DatabaseService, useValue: { pool: fakePool } },
       ],
     })

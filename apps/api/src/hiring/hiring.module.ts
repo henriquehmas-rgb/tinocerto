@@ -7,6 +7,7 @@ import { ApplicationController } from './application.controller';
 import { ApplicationService } from './application.service';
 import { PipelineStageTransitionService } from './pipeline-stage-transition.service';
 import { CandidateTouchpointService } from './candidate-touchpoint.service';
+import { DecisionService } from './decision.service';
 import { OutboxService } from '../outbox/outbox.service';
 
 @Module({
@@ -17,6 +18,7 @@ import { OutboxService } from '../outbox/outbox.service';
     ApplicationService,
     PipelineStageTransitionService,
     CandidateTouchpointService,
+    DecisionService,
     OutboxService,
   ],
 })
