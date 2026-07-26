@@ -23,6 +23,7 @@
     "hiring_0005__pipeline_stage_transition.sql",
     "hiring_0006__decision.sql",
     "hiring_0007__job_custom_field.sql",
-    "hiring_0008__job_natureza_cargo.sql"
+    "hiring_0008__job_natureza_cargo.sql",
+    "hiring_0009__application_custom_field_response.sql"
   ]
 }

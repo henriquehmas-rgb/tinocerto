@@ -9,6 +9,7 @@ import { ApplicationService } from './application.service';
 import { PipelineStageTransitionService } from './pipeline-stage-transition.service';
 import { CandidateTouchpointService } from './candidate-touchpoint.service';
 import { DecisionService } from './decision.service';
+import { ApplicationCustomFieldResponseService } from './application-custom-field-response.service';
 import { OutboxService } from '../outbox/outbox.service';
 
 @Module({
@@ -21,6 +22,7 @@ import { OutboxService } from '../outbox/outbox.service';
     PipelineStageTransitionService,
     CandidateTouchpointService,
     DecisionService,
+    ApplicationCustomFieldResponseService,
     OutboxService,
   ],
 })
