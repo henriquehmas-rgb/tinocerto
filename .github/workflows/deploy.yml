@@ -18,19 +18,34 @@ name: Deploy
 # cadastre (ação de acesso a segredo, feita por ele na interface do
 # GitHub), o job `deploy` abaixo vai falhar no step de SSH — comportamento
 # esperado nesta fase, não um bug.
+#
+# GATE NO CI (revisão adversarial da Task 17): este workflow é disparado
+# por `workflow_run` do workflow `CI`, não por `push` direto. Isso garante
+# que o deploy só roda depois que o job `test` do ci.yml terminou — e o
+# `if` abaixo garante que só roda se o CI tiver passado (`conclusion ==
+# 'success'`), na branch main. Antes disso, `deploy.yml` disparava em
+# paralelo com `ci.yml` no mesmo evento `push`, então o deploy podia
+# terminar (e, uma vez os secrets cadastrados, executar SSH root na VPS)
+# antes mesmo do CI terminar de rodar lint/test — inclusive em pushes com
+# suíte vermelha. `needs: []` não corrigia isso: workflows separados não
+# podem referenciar jobs de outros arquivos de workflow via `needs`.
 
 on:
-  push:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
     branches: [main]
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    needs: []
+    if: github.event.workflow_run.conclusion == 'success'
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
       - name: Deploy via SSH
-        uses: appleboy/ssh-action@v1.1.0
+        uses: appleboy/ssh-action@25ce8cbbcb08177468c7ff7ec5cbfa236f9341e1 # v1.1.0
         with:
           host: ${{ secrets.VPS_HOST }}
           username: root
