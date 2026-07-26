@@ -1,6 +1,9 @@
 import { readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { Pool } from 'pg';
+import { Test } from '@nestjs/testing';
+import { DatabaseModule } from '../database/database.module';
+import { DatabaseService } from '../database/database.service';
 
 // Diretório de migrations resolvido via __dirname, não via cwd do processo
 // Jest. `pnpm test` roda com cwd = apps/api (rootDir do jest.config.js é
@@ -36,6 +39,19 @@ const MIGRATIONS_DIR = join(__dirname, '../../migrations');
 // pularem silenciosamente uma tabela que DEVE ter isolamento — um buraco
 // de cobertura, não um detalhe de configuração.
 const RLS_EXCEPTION_TABLES = new Set(['consent', 'retention_policy']);
+
+// Reforço do portão pedido pela revisão final consolidada (achado
+// CRITICAL 2): toda tabela com uma FK para user_account ou para tenant
+// deveria ter sua PRÓPRIA coluna tenant_id — psicologo_credencial
+// (identity_0006, Task 6) tinha FK para user_account (que é estritamente
+// por-tenant) sem ter tenant_id nenhuma, e nem a checagem estática nem a
+// autoritativa acima pegavam isso: as duas só olham tabelas que JÁ têm
+// tenant_id, nunca tabelas que deveriam ter e não têm. Hoje, com
+// identity_0008__psicologo_credencial_tenant_rls.sql aplicada, nenhuma
+// tabela do schema está nesta situação — este Set existe para exceções
+// FUTURAS legítimas e documentadas (nenhuma até o momento), não porque
+// alguma tabela precise dele agora.
+const STRUCTURAL_TENANT_ID_EXCEPTION_TABLES = new Set<string>([]);
 
 // --- Helpers da checagem estática (por tabela, não por arquivo) ---------
 //
@@ -279,6 +295,90 @@ describe('Portão da Fase 0 — critérios de "pronto" consolidados', () => {
     expect(rows.rows[0].rolsuper).toBe(false);
     expect(rows.rows[0].rolbypassrls).toBe(false);
   });
+
+  // CRITICAL 1 da revisão final consolidada: o teste acima confirma que a
+  // ROLE app_runtime, em si, não é superuser nem bypassa RLS — mas nunca
+  // confirma que a APLICAÇÃO de fato conecta como ela. Antes desta
+  // correção, DatabaseService (o provider @Global que todo código de
+  // produção futuro injeta) conectava com DATABASE_URL — o role DONO do
+  // schema, superuser/BYPASSRLS nesta fase de dev — e só os arquivos de
+  // TESTE construíam manualmente um pool com credenciais app_runtime.
+  // Ou seja: toda a proteção de RLS da Fase 0 estava provada correta nos
+  // testes, mas não protegeria nada se código de produção real fosse
+  // escrito hoje contra DatabaseService. Este teste instancia
+  // DatabaseService exatamente como o DI real instanciaria (via
+  // DatabaseModule, sem reescrever a connection string à mão) — é a
+  // mesma checagem de apps/api/src/database/database.service.spec.ts,
+  // duplicada aqui de propósito para que o PORTÃO da Fase 0 não dependa
+  // de outro arquivo de spec continuar existindo/passando para cobrir
+  // este achado.
+  it('o pool de PRODUÇÃO (DatabaseService via DI real) conecta como app_runtime — não como o role dono/superuser', async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [DatabaseModule],
+    }).compile();
+
+    const db = moduleRef.get(DatabaseService);
+    const rows = await db.query<{ user: string; rolsuper: boolean; rolbypassrls: boolean }>(
+      `SELECT current_user AS user, rolsuper, rolbypassrls
+         FROM pg_roles WHERE rolname = current_user`,
+    );
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0].user).toBe('app_runtime');
+    expect(rows[0].rolsuper).toBe(false);
+    expect(rows[0].rolbypassrls).toBe(false);
+
+    await moduleRef.close();
+  });
+
+  // CRITICAL 2 da revisão final consolidada: as duas checagens de RLS
+  // acima (estática e autoritativa) só examinam tabelas que JÁ têm
+  // tenant_id — nenhuma delas pergunta "existe uma tabela que DEVERIA ter
+  // tenant_id e não tem?". psicologo_credencial (identity_0006, Task 6)
+  // tinha FK para user_account (estritamente por-tenant) sem nenhuma
+  // coluna tenant_id própria, e passou pelas duas checagens acima sem
+  // acusar nada — porque nenhuma delas nem chegava a olhar para ela. Esta
+  // checagem estrutural varre pg_constraint por toda FK que aponte para
+  // user_account ou tenant e confirma que a tabela que declara a FK tem
+  // sua própria coluna tenant_id — é o teste que, se existisse antes,
+  // teria pego psicologo_credencial no estado original.
+  it(
+    'toda tabela com FK para user_account ou tenant tem sua própria coluna ' +
+      'tenant_id (checagem estrutural que teria pego psicologo_credencial no estado original)',
+    async () => {
+      const { rows } = await adminPool.query<{ referencing_table: string }>(`
+        SELECT DISTINCT rel.relname AS referencing_table
+        FROM pg_constraint c
+        JOIN pg_class rel ON rel.oid = c.conrelid
+        JOIN pg_class frel ON frel.oid = c.confrelid
+        JOIN pg_namespace n ON n.oid = rel.relnamespace
+        WHERE c.contype = 'f'
+          AND n.nspname = 'public'
+          AND frel.relname IN ('user_account', 'tenant')
+        ORDER BY rel.relname
+      `);
+
+      // Mesma guarda de "asserção que não pode falhar" de sempre: se a
+      // query acima devolvesse 0 linhas por um erro de nome de
+      // tabela/schema, o laço abaixo passaria vazio por acidente — não
+      // porque toda tabela com FK relevante tem tenant_id.
+      expect(rows.length).toBeGreaterThan(0);
+
+      const missing: string[] = [];
+      for (const { referencing_table } of rows) {
+        if (STRUCTURAL_TENANT_ID_EXCEPTION_TABLES.has(referencing_table)) continue;
+
+        const col = await adminPool.query<{ column_name: string }>(
+          `SELECT column_name FROM information_schema.columns
+             WHERE table_schema = 'public' AND table_name = $1 AND column_name = 'tenant_id'`,
+          [referencing_table],
+        );
+        if (col.rows.length === 0) missing.push(referencing_table);
+      }
+
+      expect(missing).toEqual([]);
+    },
+  );
 
   it('todas as migrations do manifest foram aplicadas', async () => {
     const manifest = JSON.parse(readFileSync(join(MIGRATIONS_DIR, 'manifest.json'), 'utf-8')) as {
