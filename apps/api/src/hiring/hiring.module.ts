@@ -5,11 +5,19 @@ import { JobController } from './job.controller';
 import { JobService } from './job.service';
 import { ApplicationController } from './application.controller';
 import { ApplicationService } from './application.service';
+import { PipelineStageTransitionService } from './pipeline-stage-transition.service';
 import { CandidateTouchpointService } from './candidate-touchpoint.service';
 import { OutboxService } from '../outbox/outbox.service';
 
 @Module({
   controllers: [RequisitionController, JobController, ApplicationController],
-  providers: [RequisitionService, JobService, ApplicationService, CandidateTouchpointService, OutboxService],
+  providers: [
+    RequisitionService,
+    JobService,
+    ApplicationService,
+    PipelineStageTransitionService,
+    CandidateTouchpointService,
+    OutboxService,
+  ],
 })
 export class HiringModule {}

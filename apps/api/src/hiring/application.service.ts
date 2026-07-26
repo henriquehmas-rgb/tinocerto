@@ -83,4 +83,16 @@ export class ApplicationService {
       },
     };
   }
+
+  async updateStage(client: PoolClient, id: string, newStage: string): Promise<{ tenantId: string; previousStage: string }> {
+    const current = await client.query<{ tenant_id: string; etapa_funil: string }>(
+      `SELECT tenant_id, etapa_funil FROM application WHERE id = $1`,
+      [id],
+    );
+    if (current.rows.length === 0) {
+      throw new Error(`Candidatura ${id} não encontrada`);
+    }
+    await client.query(`UPDATE application SET etapa_funil = $1 WHERE id = $2`, [newStage, id]);
+    return { tenantId: current.rows[0].tenant_id, previousStage: current.rows[0].etapa_funil };
+  }
 }
