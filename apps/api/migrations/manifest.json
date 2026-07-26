@@ -27,6 +27,7 @@
     "hiring_0009__application_custom_field_response.sql",
     "hiring_0010__acfr_tenant_leading_unique.sql",
     "hiring_0011__tenant_quota_config.sql",
-    "hiring_0012__requisition_vaga_afirmativa.sql"
+    "hiring_0012__requisition_vaga_afirmativa.sql",
+    "hiring_0013__lia_document.sql"
   ]
 }

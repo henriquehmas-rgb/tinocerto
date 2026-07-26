@@ -59,8 +59,8 @@ export class JobService {
       throw new Error(`Vaga ${id} já está publicada`);
     }
 
-    const fields = await client.query<{ label: string; base_legal: string | null }>(
-      `SELECT label, base_legal FROM job_custom_field WHERE job_id = $1`,
+    const fields = await client.query<{ id: string; label: string; base_legal: string | null }>(
+      `SELECT id, label, base_legal FROM job_custom_field WHERE job_id = $1`,
       [id],
     );
     for (const field of fields.rows) {
@@ -69,6 +69,14 @@ export class JobService {
         throw new Error(
           `Vaga ${id} não pode ser publicada: o campo "${field.label}" foi classificado como dado sensível (${categories.join(', ')}) e não tem base legal declarada`,
         );
+      }
+      if (field.base_legal === 'legitimo_interesse') {
+        const lia = await client.query(`SELECT 1 FROM lia_document WHERE job_custom_field_id = $1`, [field.id]);
+        if (lia.rows.length === 0) {
+          throw new Error(
+            `Vaga ${id} não pode ser publicada: o campo "${field.label}" declara base legal de legítimo interesse mas não tem LIA (Legitimate Interest Assessment) gerado`,
+          );
+        }
       }
     }
 

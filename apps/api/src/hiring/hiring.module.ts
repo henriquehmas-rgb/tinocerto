@@ -11,6 +11,7 @@ import { CandidateTouchpointService } from './candidate-touchpoint.service';
 import { DecisionService } from './decision.service';
 import { ApplicationCustomFieldResponseService } from './application-custom-field-response.service';
 import { QuotaService } from './quota.service';
+import { LiaDocumentService } from './lia-document.service';
 import { OutboxService } from '../outbox/outbox.service';
 
 @Module({
@@ -25,6 +26,7 @@ import { OutboxService } from '../outbox/outbox.service';
     DecisionService,
     ApplicationCustomFieldResponseService,
     QuotaService,
+    LiaDocumentService,
     OutboxService,
   ],
 })
