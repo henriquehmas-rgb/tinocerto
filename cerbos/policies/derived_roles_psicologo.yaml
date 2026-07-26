@@ -1,0 +1,14 @@
+apiVersion: api.cerbos.dev/v1
+derivedRoles:
+  name: psicologo_roles
+  definitions:
+    - name: psicologo_autor
+      parentRoles: ["psicologo_responsavel"]
+      condition:
+        match:
+          expr: "request.resource.attr.psicologo_responsavel_id == request.principal.id"
+    - name: psicologo_supervisor_mesmo_crp
+      parentRoles: ["psicologo_responsavel"]
+      condition:
+        match:
+          expr: "request.resource.attr.crp_uf == request.principal.attr.crp_uf"

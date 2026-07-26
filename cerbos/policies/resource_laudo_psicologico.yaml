@@ -1,0 +1,32 @@
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  resource: "laudo_psicologico"
+  version: "default"
+  scope: ""
+  importDerivedRoles: [psicologo_roles]
+  rules:
+    - name: "bloqueio-sem-crp-ativo"
+      actions: ["read", "export", "print", "download"]
+      effect: EFFECT_DENY
+      roles: ["*"]
+      condition:
+        match:
+          expr: >
+            !(request.principal.attr.crp_ativo == true &&
+              size(request.principal.attr.crp_numero) > 0 &&
+              request.principal.attr.crp_uf != "")
+
+    - name: "acesso-laudo-integra"
+      actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles:
+        - psicologo_autor
+        - psicologo_supervisor_mesmo_crp
+
+    - name: "breakglass-suporte"
+      actions: ["read"]
+      effect: EFFECT_ALLOW
+      roles: ["suporte_nivel3"]
+      condition:
+        match:
+          expr: "request.aux_data.jwt.breakglass_ticket_id != ''"
