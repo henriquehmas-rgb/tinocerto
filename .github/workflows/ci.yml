@@ -27,6 +27,14 @@ jobs:
 
     env:
       DATABASE_URL: postgresql://tinocerto:dev_local_only@localhost:5432/tinocerto
+      # APP_DATABASE_URL (achado CRITICAL 1 da revisão final consolidada da
+      # Fase 0): DatabaseService agora conecta como app_runtime, não como o
+      # role dono do schema. A migration identity_0001 cria a role
+      # app_runtime com esta senha fixa de dev (mesma usada em
+      # apps/api/.env e nos specs de RLS) — roda via `pnpm ... migrate`
+      # abaixo antes de qualquer teste, então a role já existe quando os
+      # testes conectam.
+      APP_DATABASE_URL: postgresql://app_runtime:app_runtime_dev_only@localhost:5432/tinocerto
       REDIS_URL: redis://localhost:6379
       CERBOS_HTTP_URL: http://localhost:3592
 
