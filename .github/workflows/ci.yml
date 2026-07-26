@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: tinocerto
+          POSTGRES_PASSWORD: dev_local_only
+          POSTGRES_DB: tinocerto
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U tinocerto"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+
+    env:
+      DATABASE_URL: postgresql://tinocerto:dev_local_only@localhost:5432/tinocerto
+      REDIS_URL: redis://localhost:6379
+      CERBOS_HTTP_URL: http://localhost:3592
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Cerbos NÃO é declarado em `services:` de propósito: containers de
+      # `services:` sobem ANTES do `actions/checkout`, então um bind mount
+      # apontando pro workspace (cerbos/policies, infra/cerbos.yaml) estaria
+      # vazio nesse momento — o checkout ainda não existe no disco do
+      # runner. Por isso subimos o Cerbos manualmente via `docker run`
+      # aqui, depois do checkout, com bind mount explícito das policies
+      # reais do repo (mesma imagem/versão usada em infra/docker-compose.yml).
+      - name: Start Cerbos (policy engine)
+        run: |
+          docker run -d --name cerbos \
+            -p 3592:3592 -p 3593:3593 \
+            -v "${{ github.workspace }}/infra/cerbos.yaml:/etc/cerbos/cerbos.yaml:ro" \
+            -v "${{ github.workspace }}/cerbos/policies:/policies:ro" \
+            ghcr.io/cerbos/cerbos:0.44.0 server --config=/etc/cerbos/cerbos.yaml
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20.11"
+          cache: "pnpm"
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @tinocerto/api migrate
+      - run: pnpm lint
+
+      - name: Wait for Cerbos to be healthy
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3592/_cerbos/health > /dev/null; then
+              echo "Cerbos respondendo em http://localhost:3592"
+              exit 0
+            fi
+            echo "Aguardando Cerbos subir... (tentativa $i/30)"
+            sleep 2
+          done
+          echo "Cerbos não ficou saudável a tempo. Logs do container:"
+          docker logs cerbos || true
+          exit 1
+
+      - run: pnpm test
