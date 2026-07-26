@@ -12,8 +12,18 @@ describe('nextOutboxSequence', () => {
   let tenantId: string;
 
   beforeAll(async () => {
+    // CNPJ '00000000000016' do brief original colide com o mesmo valor em
+    // outbox-to-audit.consumer.spec.ts ("Empresa Gate Outage Total") --
+    // tenant.cnpj e UNIQUE. Hoje maxWorkers:1 serializa os arquivos e o
+    // afterAll de cada um limpa antes do beforeAll do outro rodar, entao a
+    // colisao fica latente; mas se um afterAll falhar antes de limpar
+    // (crash, timeout, thrown error), o tenant orfao quebra o beforeAll do
+    // OUTRO arquivo por um motivo sem relacao com o proprio arquivo.
+    // Trocado para '00000000000025', o proximo valor livre (mesmo tipo de
+    // correcao de fixture ja aplicado em audit-log.service.spec.ts,
+    // outbox-to-audit.consumer.spec.ts e assessment-result-stub-rls.spec.ts).
     const t = await adminPool.query<{ id: string }>(
-      `INSERT INTO tenant (razao_social, cnpj) VALUES ('Empresa Sequence', '00000000000016') RETURNING id`,
+      `INSERT INTO tenant (razao_social, cnpj) VALUES ('Empresa Sequence', '00000000000025') RETURNING id`,
     );
     tenantId = t.rows[0].id;
   });
