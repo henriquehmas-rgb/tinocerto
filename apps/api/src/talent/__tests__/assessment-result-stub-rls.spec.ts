@@ -14,12 +14,23 @@ describe('result_grant — RLS de dois tenants (schema stub da Task 4)', () => {
   let consentId: string;
 
   beforeAll(async () => {
+    // CNPJs '00000000000014'/'00000000000015' do brief original colidem com
+    // os mesmos valores em outbox-to-audit.consumer.spec.ts ("Empresa Gate
+    // Recuperacao PEL" / "Empresa Gate Isolamento Lote") -- tenant.cnpj e
+    // UNIQUE. Hoje maxWorkers:1 serializa os arquivos e o afterAll de cada
+    // um limpa antes do beforeAll do outro rodar, entao a colisao fica
+    // latente; mas se um afterAll falhar antes de limpar (crash, timeout),
+    // o tenant orfao quebra o beforeAll do OUTRO arquivo por um motivo sem
+    // relacao com o proprio arquivo. Trocado para '00000000000023'/
+    // '00000000000024', os proximos valores livres (mesmo tipo de correcao
+    // de fixture ja aplicado em audit-log.service.spec.ts e
+    // outbox-to-audit.consumer.spec.ts).
     const tA = await adminPool.query<{ id: string }>(
-      `INSERT INTO tenant (razao_social, cnpj) VALUES ('Empresa Grant A', '00000000000014') RETURNING id`,
+      `INSERT INTO tenant (razao_social, cnpj) VALUES ('Empresa Grant A', '00000000000023') RETURNING id`,
     );
     tenantAId = tA.rows[0].id;
     const tB = await adminPool.query<{ id: string }>(
-      `INSERT INTO tenant (razao_social, cnpj) VALUES ('Empresa Grant B', '00000000000015') RETURNING id`,
+      `INSERT INTO tenant (razao_social, cnpj) VALUES ('Empresa Grant B', '00000000000024') RETURNING id`,
     );
     tenantBId = tB.rows[0].id;
 
