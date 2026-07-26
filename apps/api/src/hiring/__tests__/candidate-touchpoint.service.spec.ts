@@ -13,7 +13,7 @@ describe('CandidateTouchpointService', () => {
 
   beforeAll(async () => {
     const t = await adminPool.query<{ id: string }>(
-      `INSERT INTO tenant (razao_social, cnpj) VALUES ('Empresa Touchpoint', '00000000000020') RETURNING id`,
+      `INSERT INTO tenant (razao_social, cnpj) VALUES ('Empresa Touchpoint', '00000000000034') RETURNING id`,
     );
     tenantId = t.rows[0].id;
     const person = await adminPool.query<{ id: string }>(
