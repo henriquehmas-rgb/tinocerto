@@ -1,5 +1,5 @@
-import { Body, Controller, Get, Param, Post, Req, UseGuards, NotFoundException } from '@nestjs/common';
-import { IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { Body, Controller, Get, Param, Post, Req, UseGuards, NotFoundException, BadRequestException } from '@nestjs/common';
+import { IsNotEmpty, IsOptional, IsString, isUUID } from 'class-validator';
 import { Request } from 'express';
 import { TenantContext } from '../database/tenant-context';
 import { DatabaseService } from '../database/database.service';
@@ -52,6 +52,16 @@ export class ApplicationController {
   @Post(':id/actions/move-stage')
   @CerbosCheck('application', 'move-stage')
   async moveStage(@Req() req: RequestWithAuthContext, @Param('id') id: string, @Body() dto: MoveStageDto) {
+    // req.userId vem do header x-user-id (TenantResolutionMiddleware), que só
+    // valida presença, não formato -- dívida técnica aceita na Task 6 até a
+    // autenticação real entrar. pipeline_stage_transition.actor_id, porém, é
+    // uuid NOT NULL: sem esta checagem, um x-user-id não-UUID (ex.: os
+    // próprios literais 'recrutador-1'/'user-1' usados nos fixtures de teste
+    // desta fase) causaria um 22P02 não tratado do Postgres, virando 500 para
+    // uma ação de mover-etapa que deveria ser rotineira e permitida.
+    if (!isUUID(req.userId)) {
+      throw new BadRequestException('x-user-id deve ser um UUID válido para registrar a transição de etapa');
+    }
     return this.tenantContext.run(req.tenantId, (client) =>
       this.pipelineStageTransitionService.moveStage(client, {
         applicationId: id,
