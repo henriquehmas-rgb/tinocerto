@@ -53,6 +53,15 @@ jobs:
           script: |
             cd /docker/tinocerto
             git pull origin main
-            docker compose pull
-            docker compose up -d --build
-            docker compose ps
+            # docker-compose.yml mora em infra/, não na raiz do repo (a
+            # raiz é onde o `git pull` acima precisa rodar) — achado
+            # IMPORTANT da revisão final consolidada: sem
+            # `-f infra/docker-compose.yml`, `docker compose` na raiz falha
+            # com "no configuration file provided: not found" (confirmado
+            # ao vivo). Cada chamada de `docker compose` abaixo aponta
+            # explicitamente para o compose file em infra/ em vez de mudar
+            # de diretório no meio do script (o que exigiria mover o
+            # `git pull` para depois do cd, misturando os dois contextos).
+            docker compose -f infra/docker-compose.yml pull
+            docker compose -f infra/docker-compose.yml up -d --build
+            docker compose -f infra/docker-compose.yml ps
