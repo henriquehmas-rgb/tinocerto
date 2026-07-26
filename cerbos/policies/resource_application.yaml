@@ -1,0 +1,32 @@
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  resource: "application"
+  version: "default"
+  scope: ""
+  rules:
+    - name: "bloqueio-tenant-diferente"
+      actions: ["*"]
+      effect: EFFECT_DENY
+      roles: ["*"]
+      condition:
+        match:
+          expr: >
+            !(has(request.principal.attr.tenant_id) &&
+              has(request.resource.attr.tenant_id) &&
+              type(request.principal.attr.tenant_id) == string &&
+              type(request.resource.attr.tenant_id) == string &&
+              size(request.principal.attr.tenant_id) > 0 &&
+              size(request.resource.attr.tenant_id) > 0 &&
+              request.principal.attr.tenant_id == request.resource.attr.tenant_id)
+
+    - name: "gestao-candidatura"
+      actions: ["read", "move-stage", "reject"]
+      effect: EFFECT_ALLOW
+      roles: ["admin_tenant", "recrutador", "gestor_vaga"]
+
+    # create fica de fora do ALLOW acima de propósito: a criação de
+    # application desta fase é só uso interno/teste (Fase 1a não expõe
+    # candidatura pública -- ver nota de escopo no topo do documento). A
+    # Fase 1b, que constrói o fluxo público de candidatura, adiciona a
+    # regra ALLOW de "create" com o principal correto para aquele fluxo
+    # (candidato anônimo/token de convite, não um usuário de tenant).
