@@ -9,6 +9,7 @@
     "identity_0006__session_service_account_psicologo.sql",
     "platform_0001__outbox_event.sql",
     "trust_0001__audit_log_entry.sql",
-    "trust_0002__audit_log_chain_seq.sql"
+    "trust_0002__audit_log_chain_seq.sql",
+    "trust_0003__consent_incident_retention_dsr.sql"
   ]
 }
