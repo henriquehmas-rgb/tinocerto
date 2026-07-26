@@ -1,6 +1,6 @@
 import { Injectable, NestMiddleware, UnauthorizedException } from '@nestjs/common';
 import { NextFunction, Request, Response } from 'express';
-import { setTenantSpanAttribute } from '../observability/tracing';
+import { setTenantSpanAttribute } from '../observability/span-attributes';
 
 // Placeholder de decodificação de JWT — a Fase 0 só precisa do contrato de
 // onde o tenant_id vem; a validação real de assinatura de token entra
