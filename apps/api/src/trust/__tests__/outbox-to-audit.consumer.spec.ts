@@ -3,7 +3,7 @@ import { Pool } from 'pg';
 import { TenantContext } from '../../database/tenant-context';
 import { OutboxService } from '../../outbox/outbox.service';
 import { OutboxPublisher } from '../../outbox/outbox-publisher.service';
-import { AuditLogService } from '../audit-log.service';
+import { AuditLogService, computeEntryHash } from '../audit-log.service';
 import { OutboxToAuditConsumer } from '../outbox-to-audit.consumer';
 
 // Precisa bater com o CONSUMER_GROUP privado de outbox-to-audit.consumer.ts
@@ -75,8 +75,41 @@ describe('Portão de integração Fase 0 — outbox → Trust → audit_log_entr
     );
 
     expect(rows.rows).toHaveLength(1);
-    expect(rows.rows[0].action).toBe('application.stage_changed');
-    expect(rows.rows[0].hash).toBeDefined();
+    const row = rows.rows[0];
+    expect(row.action).toBe('application.stage_changed');
+    expect(row.hash).toBeDefined();
+
+    // [Minor, revisão adversarial Task 14 fix2] a asserção acima
+    // (`hash` definido) é vacuamente verdadeira — `hash` é `text NOT
+    // NULL`, nunca poderia ser `undefined`. O portão de integração só
+    // prova o que promete (evento chega hash-chained, não só "chega")
+    // se a cadeia for de fato verificada: hash recomputado a partir dos
+    // valores LIDOS DO BANCO (não dos valores originais em memória —
+    // mesma disciplina de "verificador externo" de
+    // audit-log.service.spec.ts) bate com o hash gravado, é a primeira
+    // entrada da cadeia deste tenant (prev_hash nulo, chain_seq = 1), e
+    // o evento foi de fato confirmado no stream (XPENDING zerado).
+    expect(row.prev_hash).toBeNull();
+    expect(row.chain_seq).toBe('1');
+
+    const recomputedHash = computeEntryHash(row.prev_hash, row.id, BigInt(row.chain_seq), {
+      tenantId: row.tenant_id,
+      actorId: row.actor_id ?? undefined,
+      actorType: row.actor_type,
+      onBehalfOf: row.on_behalf_of ?? undefined,
+      action: row.action,
+      resourceType: row.resource_type,
+      resourceId: row.resource_id ?? undefined,
+      fieldsRead: row.fields_read ?? undefined,
+      ip: row.ip ?? undefined,
+      userAgent: row.user_agent ?? undefined,
+      requestId: row.request_id ?? undefined,
+      occurredAt: row.occurred_at,
+    });
+    expect(recomputedHash).toBe(row.hash);
+
+    const pendingAfterAck = await redis.xpending(`outbox:${tenantId}`, CONSUMER_GROUP);
+    expect(Number(pendingAfterAck[0])).toBe(0);
   }, 10_000);
 
   describe('recuperação de falhas via PEL (revisão adversarial Task 14, achado Critical)', () => {

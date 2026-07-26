@@ -66,6 +66,20 @@ const CONSUMER_NAME = 'trust-audit-consumer-1';
  * do ar (Postgres ou Redis) e consumeOnce() lança; se só parte falhar, é
  * degradação tolerável dentro do modelo at-least-once — loga por evento e
  * segue.
+ *
+ * [Minor, revisão adversarial Task 14 fix2] `record.id` — o id da
+ * mensagem original de outbox_event, propagado pelo OutboxPublisher como
+ * o campo `id` do XADD (ver outbox-publisher.service.ts, que grava
+ * `'id', event.id`) — é gravado em audit_log_entry.request_id via
+ * append(). Isso dá a cada linha de auditoria um elo rastreável até o
+ * evento de negócio que a originou: sem ele, uma linha duplicada (evento
+ * reprocessado, ver at-least-once acima) era indistinguível de dois
+ * fatos de negócio genuinamente diferentes gravados em sequência. O
+ * `payload` completo e o `sequence` do evento continuam sendo
+ * descartados de propósito — não fazem parte do rastro de auditoria (que
+ * registra QUE algo aconteceu, não o conteúdo do evento) e permanecem
+ * consultáveis em outbox_event.payload / outbox_event.sequence pelo
+ * mesmo id agora gravado em request_id.
  */
 export class OutboxToAuditConsumer {
   private readonly ctx: TenantContext;
@@ -124,6 +138,7 @@ export class OutboxToAuditConsumer {
                 action: record.event_type,
                 resourceType: record.aggregate_type,
                 resourceId: record.aggregate_id,
+                requestId: record.id,
                 occurredAt: new Date(record.occurred_at),
               }),
             );
