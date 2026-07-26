@@ -40,6 +40,12 @@ interface PendingOutboxRow {
  * trabalho). Se só PARTE do lote falhar (published > 0 && failed > 0), é
  * degradação parcial tolerável dentro do modelo at-least-once já aprovado:
  * logamos o erro por evento e seguimos, sem lançar.
+ *
+ * A mensagem de erro final é deliberadamente neutra quanto ao componente
+ * (não diz "no Redis"): o try/catch por evento envolve tanto o XADD quanto
+ * o UPDATE subsequente de published_at, então uma falha total pode ter
+ * origem no Postgres (o UPDATE), não no Redis — cravar "Redis" levaria quem
+ * for investigar (dashboard, alerta, log) a olhar o sistema errado.
  */
 export class OutboxPublisher {
   constructor(
@@ -86,7 +92,7 @@ export class OutboxPublisher {
 
     if (failed > 0 && published === 0) {
       throw new Error(
-        `Falha ao publicar ${failed} evento(s) pendente(s) no Redis — nenhum publicado com sucesso`,
+        `Falha ao publicar ${failed} evento(s) pendente(s) — nenhum publicado com sucesso`,
       );
     }
 

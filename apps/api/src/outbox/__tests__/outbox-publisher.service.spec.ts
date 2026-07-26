@@ -124,4 +124,33 @@ describe('OutboxPublisher.publishPending', () => {
       expect(row.rows[0].published_at).toBeNull();
     });
   });
+
+  describe('fila vazia', () => {
+    // Tenant próprio, sem nenhum evento de outbox inserido. Não reaproveita
+    // fixtures dos blocos acima para não pegar carona em eventos pendentes
+    // de outro teste por acidente — a query de publishPending() é global
+    // (não filtra por tenant_id), então isolamento aqui depende da ordem de
+    // execução (este bloco roda depois que os blocos anteriores já
+    // publicaram ou limparam os próprios eventos pendentes) e de cada bloco
+    // limpar o que criou em seu próprio afterAll.
+    let emptyQueueTenantId: string;
+
+    beforeAll(async () => {
+      const t = await adminPool.query<{ id: string }>(
+        `INSERT INTO tenant (razao_social, cnpj) VALUES ('Empresa Publisher Fila Vazia', '00000000000010') RETURNING id`,
+      );
+      emptyQueueTenantId = t.rows[0].id;
+    });
+
+    afterAll(async () => {
+      await adminPool.query('DELETE FROM outbox_event WHERE tenant_id = $1', [emptyQueueTenantId]);
+      await adminPool.query('DELETE FROM tenant WHERE id = $1', [emptyQueueTenantId]);
+    });
+
+    it('sem eventos pendentes (published_at IS NULL), resolve para 0 sem lançar erro', async () => {
+      const publisher = new OutboxPublisher(adminPool, redis);
+
+      await expect(publisher.publishPending()).resolves.toBe(0);
+    });
+  });
 });
