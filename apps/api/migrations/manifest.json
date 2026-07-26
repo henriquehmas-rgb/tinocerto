@@ -11,6 +11,7 @@
     "trust_0001__audit_log_entry.sql",
     "trust_0002__audit_log_chain_seq.sql",
     "trust_0003__consent_incident_retention_dsr.sql",
-    "identity_0007__role_rls.sql"
+    "identity_0007__role_rls.sql",
+    "identity_0008__psicologo_credencial_tenant_rls.sql"
   ]
 }
