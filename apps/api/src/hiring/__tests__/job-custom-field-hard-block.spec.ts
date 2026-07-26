@@ -107,5 +107,11 @@ describe('JobCustomFieldService — bloqueio duro Lei 9.029/95', () => {
       }),
     );
     expect(id).toBeDefined();
+
+    const row = await adminPool.query<{ categoria_bloqueada: string | null }>(
+      `SELECT categoria_bloqueada FROM job_custom_field WHERE id = $1`,
+      [id],
+    );
+    expect(row.rows[0].categoria_bloqueada).toBe('antecedentes_criminais');
   });
 });

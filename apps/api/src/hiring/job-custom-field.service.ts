@@ -55,15 +55,18 @@ export class JobCustomFieldService {
       }
     }
 
+    const categoriaBloqueada = isOnlyCriminalBackground ? 'antecedentes_criminais' : null;
+
     const result = await client.query<{ id: string }>(
-      `INSERT INTO job_custom_field (tenant_id, job_id, label, tipo_campo, fase_coleta, base_legal, justificativa)
-       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+      `INSERT INTO job_custom_field (tenant_id, job_id, label, tipo_campo, fase_coleta, categoria_bloqueada, base_legal, justificativa)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
       [
         input.tenantId,
         input.jobId,
         input.label,
         input.tipoCampo ?? 'texto_livre',
         input.faseColeta ?? 'inscricao',
+        categoriaBloqueada,
         input.baseLegal ?? null,
         input.justificativa ?? null,
       ],
