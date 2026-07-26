@@ -18,8 +18,13 @@ describe('AuditLogService.append — hash chain', () => {
   const resourceId = '22222222-2222-2222-2222-222222222222';
 
   beforeAll(async () => {
+    // CNPJ '00000000000009' (usado antes aqui) colidia com o mesmo valor em
+    // outbox-publisher.service.spec.ts (achado Minor recorrente da revisão
+    // — tenant.cnpj é UNIQUE, e os dois specs podem rodar em paralelo como
+    // workers distintos do Jest). Trocado para um valor não usado em
+    // nenhum outro spec do repositório.
     const t = await adminPool.query<{ id: string }>(
-      `INSERT INTO tenant (razao_social, cnpj) VALUES ('Empresa Audit', '00000000000009') RETURNING id`,
+      `INSERT INTO tenant (razao_social, cnpj) VALUES ('Empresa Audit', '00000000000011') RETURNING id`,
     );
     tenantId = t.rows[0].id;
   });
@@ -124,12 +129,73 @@ describe('AuditLogService.append — hash chain', () => {
     }
   });
 
+  it('[Important, 4a rodada] lock por tenant serializa mesmo com tenantId chegando em CASES diferentes entre chamadas concorrentes', async () => {
+    const ctx = new TenantContext(pool);
+    const audit = new AuditLogService();
+    const N = 10;
+    const tenantIdUpper = tenantId.toUpperCase();
+
+    // Metade das chamadas concorrentes envia entry.tenantId em minúscula
+    // (forma canônica devolvida pelo Postgres ao criar o tenant), metade em
+    // MAIÚSCULA — simulando dois requests do mesmo tenant chegando com case
+    // diferente no header x-tenant-id (tenant-transaction.middleware.ts lê
+    // req.header('x-tenant-id') sem normalizar, então isso é plausível na
+    // prática). ctx.run() continua usando o tenantId original só para
+    // configurar app.tenant_id da RLS nesta conexão — a variável que
+    // importa para o achado é entry.tenantId, usado por append() para
+    // derivar a chave do advisory lock.
+    //
+    // Antes da correção da 4a rodada, hashtext() sobre o texto cru gerava
+    // chaves de advisory lock DIFERENTES para os dois cases, então a
+    // serialização não acontecia entre os dois grupos de 5 — e quando as
+    // duas metades liam o "último chain_seq" quase ao mesmo tempo, uma das
+    // escritas colidia com a outra na mesma posição e falhava com
+    // "duplicate key value violates unique constraint" (a UNIQUE(tenant_id,
+    // chain_seq) da migration trust_0002 evitava corrupção silenciosa da
+    // cadeia, mas derrubava a escrita — e a transação de negócio junto, já
+    // que estão na mesma transação).
+    await Promise.all(
+      Array.from({ length: N }, (_, i) =>
+        ctx.run(tenantId, (client) =>
+          audit.append(client, {
+            tenantId: i % 2 === 0 ? tenantId : tenantIdUpper,
+            actorId,
+            actorType: 'user',
+            action: `case_mismatch_${i}`,
+            resourceType: 'laudo_psicologico',
+            resourceId,
+            occurredAt: new Date(),
+          }),
+        ),
+      ),
+    );
+
+    const rows = await adminPool.query<{ prev_hash: string | null; hash: string }>(
+      `SELECT prev_hash, hash FROM audit_log_entry
+       WHERE tenant_id = $1 AND action LIKE 'case_mismatch_%'
+       ORDER BY chain_seq`,
+      [tenantId],
+    );
+
+    // Todas as N escritas foram aceitas — nenhuma falhou por ter colidido
+    // com outra escrita concorrente do mesmo tenant na mesma posição da
+    // cadeia, mesmo com o tenantId chegando em cases diferentes.
+    expect(rows.rows).toHaveLength(N);
+
+    const prevHashes = rows.rows.map((r) => r.prev_hash);
+    expect(new Set(prevHashes).size).toBe(N);
+
+    for (let i = 1; i < rows.rows.length; i++) {
+      expect(rows.rows[i].prev_hash).toBe(rows.rows[i - 1].hash);
+    }
+  });
+
   it('[Important] cadeia permanece verificável mesmo com occurred_at fora de ordem (evento atrasado)', async () => {
     const ctx = new TenantContext(pool);
     const audit = new AuditLogService();
 
     const t2 = await adminPool.query<{ id: string }>(
-      `INSERT INTO tenant (razao_social, cnpj) VALUES ('Empresa Audit OOO', '00000000000010') RETURNING id`,
+      `INSERT INTO tenant (razao_social, cnpj) VALUES ('Empresa Audit OOO', '00000000000012') RETURNING id`,
     );
     const tenant2 = t2.rows[0].id;
 
@@ -277,6 +343,94 @@ describe('AuditLogService.append — hash chain', () => {
       occurredAt: row.occurred_at,
     });
     expect(recomputedTampered).not.toBe(row.hash);
+  });
+
+  it('[Important, 4a rodada] hash recomputado a partir da LINHA DO BANCO bate mesmo com uuid em caixa alta / ip não-comprimido enviados pelo chamador', async () => {
+    const ctx = new TenantContext(pool);
+    const audit = new AuditLogService();
+
+    // actor_id/ip são colunas tipadas (uuid/inet) que o Postgres NORMALIZA
+    // na gravação. Enviamos deliberadamente formas NÃO-canônicas — uuid em
+    // caixa alta e um IPv6 totalmente expandido — para forçar a
+    // normalização a acontecer de verdade.
+    const actorIdUpper = 'AAAAAAAA-1111-1111-1111-111111111111';
+    const ipExpanded = '2001:0db8:0000:0000:0000:0000:0000:0001';
+
+    await ctx.run(tenantId, (client) =>
+      audit.append(client, {
+        tenantId,
+        actorId: actorIdUpper,
+        actorType: 'user',
+        action: 'canonicalizacao_uuid_ip',
+        resourceType: 'laudo_psicologico',
+        resourceId,
+        ip: ipExpanded,
+        occurredAt: new Date(),
+      }),
+    );
+
+    // Simula um verificador EXTERNO: ele não tem acesso ao payload original
+    // em memória, só à linha gravada no banco (via adminPool, papel de
+    // dono da tabela/auditor externo).
+    const row = (
+      await adminPool.query<{
+        id: string;
+        tenant_id: string;
+        actor_id: string | null;
+        actor_type: string;
+        on_behalf_of: string | null;
+        action: string;
+        resource_type: string;
+        resource_id: string | null;
+        fields_read: string[] | null;
+        ip: string | null;
+        user_agent: string | null;
+        request_id: string | null;
+        occurred_at: Date;
+        prev_hash: string | null;
+        hash: string;
+        chain_seq: string;
+      }>(
+        `SELECT id, tenant_id, actor_id, actor_type, on_behalf_of, action, resource_type,
+                resource_id, fields_read, ip, user_agent, request_id, occurred_at,
+                prev_hash, hash, chain_seq
+           FROM audit_log_entry
+          WHERE tenant_id = $1 AND action = 'canonicalizacao_uuid_ip'`,
+        [tenantId],
+      )
+    ).rows[0];
+
+    // Prova de que o Postgres de fato normalizou os valores enviados pelo
+    // chamador: o actor_id gravado está em minúsculas (não o
+    // "AAAAAAAA-..." enviado) e o ip gravado está comprimido (não o
+    // "2001:0db8:0000:..." enviado).
+    expect(row.actor_id).toBe(actorIdUpper.toLowerCase());
+    expect(row.actor_id).not.toBe(actorIdUpper);
+    expect(row.ip).not.toBe(ipExpanded);
+
+    // O ponto central do teste: recomputa o hash a partir dos valores LIDOS
+    // DO BANCO (canônicos) — não do payload original em memória que o
+    // chamador enviou. Antes da correção da 4a rodada, append() hasheava a
+    // string CRUA recebida do chamador, então este recálculo (o único que
+    // um verificador externo consegue fazer, já que só tem a linha do
+    // banco) divergia do hash gravado mesmo sem nenhuma adulteração real —
+    // falso positivo de adulteração.
+    const recomputedFromRow = computeEntryHash(row.prev_hash, row.id, BigInt(row.chain_seq), {
+      tenantId: row.tenant_id,
+      actorId: row.actor_id ?? undefined,
+      actorType: row.actor_type,
+      onBehalfOf: row.on_behalf_of ?? undefined,
+      action: row.action,
+      resourceType: row.resource_type,
+      resourceId: row.resource_id ?? undefined,
+      fieldsRead: row.fields_read ?? undefined,
+      ip: row.ip ?? undefined,
+      userAgent: row.user_agent ?? undefined,
+      requestId: row.request_id ?? undefined,
+      occurredAt: row.occurred_at,
+    });
+
+    expect(recomputedFromRow).toBe(row.hash);
   });
 
   it('não permite UPDATE nem DELETE (append-only de verdade)', async () => {
