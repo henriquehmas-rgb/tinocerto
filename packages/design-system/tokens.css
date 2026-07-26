@@ -119,12 +119,15 @@
 
 /* --- 4. avaliação do candidato · escopo isolado ---------------------------
    Instrumento de medida: cinza puro (croma 0), sem acento, sem estado,
-   sem vidro, sem tema escuro. Não herda nada de :root nem de [data-theme] —
-   toda variável semântica usada em algum componente é redefinida aqui dentro,
-   inclusive as que hoje nenhum componente consome (accent-hover, accent-text,
-   accent-soft, accent-gradient, selected, text-disabled, glass-border,
-   shadow-accent, data-a/c/e/m/s), para que usar qualquer uma delas dentro
-   deste escopo não vaze violeta nem valores do tema escuro.
+   sem vidro, sem tema escuro. Redefine toda variável semântica de COR usada
+   por algum componente — mesmo que nenhum componente ainda a use hoje
+   (accent-hover, accent-text, accent-soft, accent-gradient, selected,
+   text-disabled, glass-border, shadow-accent, shadow-rest, shadow-float,
+   state-success/warning/danger/info e as variantes -bg/-border,
+   data-a/c/e/m/s) — para tons da escala --pr-neutral-* definida abaixo, com
+   hierarquia visual por peso/contraste, nunca por matiz. Não herda cor de
+   :root nem de [data-theme]. Primitivas não-semânticas (raios, tipografia,
+   durações, easing) continuam compartilhadas de propósito.
    -------------------------------------------------------------------------- */
 .pr-assessment {
   --pr-neutral-00: oklch(1.0000 0.0000 0);  /* #FFFFFF */
@@ -171,6 +174,26 @@
   --pr-data-e: var(--pr-neutral-50);
   --pr-data-m: var(--pr-neutral-60);
   --pr-data-s: var(--pr-neutral-40);
+
+  /* estados: mesma hierarquia semântica (info < success < warning < danger),
+     expressa só em peso/contraste dentro da escala neutra — croma 0 */
+  --pr-state-info:            var(--pr-neutral-60);
+  --pr-state-info-bg:         var(--pr-neutral-05);
+  --pr-state-info-border:     var(--pr-neutral-20);
+  --pr-state-success:         var(--pr-neutral-70);
+  --pr-state-success-bg:      var(--pr-neutral-05);
+  --pr-state-success-border:  var(--pr-neutral-20);
+  --pr-state-warning:         var(--pr-neutral-80);
+  --pr-state-warning-bg:      var(--pr-neutral-10);
+  --pr-state-warning-border:  var(--pr-neutral-30);
+  --pr-state-danger:          var(--pr-neutral-90);
+  --pr-state-danger-bg:       var(--pr-neutral-10);
+  --pr-state-danger-border:   var(--pr-neutral-30);
+
+  /* sombra: neutro do próprio escopo — nunca --pr-slate-* (viés violeta) */
+  --pr-shadow-rest:   0 1px 2px color-mix(in oklab, var(--pr-neutral-90) 5%, transparent);
+  --pr-shadow-float:  0 1px 2px color-mix(in oklab, var(--pr-neutral-90) 5%, transparent),
+                      0 18px 44px -28px color-mix(in oklab, var(--pr-neutral-90) 35%, transparent);
 
   color-scheme: light only;
 }
@@ -228,3 +251,17 @@
 @media (prefers-reduced-motion: reduce) {
   :root { --pr-dur-micro: 0ms; --pr-dur-move: 0ms; }
 }
+
+/* --- 8. white-label por tenant (carreiras públicas) — NÃO DEFINIDO --------
+   Fora do escopo da Fase 0 (Task 15). Página pública de carreiras com marca
+   do tenant é trabalho de fase posterior do roadmap (ver
+   07-roadmap-por-fases.md, Agências/RPO). Antes de implementar, decidir:
+   - o que o tenant pode sobrescrever (ex.: --pr-accent, logo, nome)
+   - o que fica travado por contraste/acessibilidade (WCAG 2.2 AA) e não
+     pode ser sobrescrito de forma alguma
+   - qual o fallback quando o tenant não configurou marca própria
+   Esta é uma decisão registrada e rastreável, não uma lacuna acidental — ver
+   também a nota em packages/design-system/src/stories/VisualContracts.stories.tsx
+   (renomeado nesta rodada de ThreeContracts.stories.tsx) que documenta a
+   mesma decisão do lado do Storybook.
+   -------------------------------------------------------------------------- */
