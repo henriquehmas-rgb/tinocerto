@@ -25,6 +25,49 @@ describe('CerbosService — policy do laudo psicológico', () => {
     expect(result.read).toBe(true);
   });
 
+  it('nega leitura para o AUTOR do laudo se o CRP dele estiver inativo (DENY vence ALLOW)', async () => {
+    const result = await cerbos.check(
+      {
+        id: 'psi-1',
+        roles: ['psicologo_responsavel'],
+        attr: { crp_ativo: false, crp_numero: '123456', crp_uf: 'SP' },
+      },
+      { kind: 'laudo_psicologico', id: 'laudo-1', attr: { psicologo_responsavel_id: 'psi-1' } },
+      ['read'],
+    );
+    expect(result.read).toBe(false);
+  });
+
+  it('nega leitura para o autor do laudo se crp_ativo estiver AUSENTE (não apenas false)', async () => {
+    const result = await cerbos.check(
+      {
+        id: 'psi-1',
+        roles: ['psicologo_responsavel'],
+        attr: { crp_numero: '123456', crp_uf: 'SP' },
+      },
+      { kind: 'laudo_psicologico', id: 'laudo-1', attr: { psicologo_responsavel_id: 'psi-1' } },
+      ['read'],
+    );
+    expect(result.read).toBe(false);
+  });
+
+  it('permite leitura para psicólogo supervisor da mesma UF (não é o autor)', async () => {
+    const result = await cerbos.check(
+      {
+        id: 'psi-supervisor',
+        roles: ['psicologo_responsavel'],
+        attr: { crp_ativo: true, crp_numero: '999999', crp_uf: 'SP' },
+      },
+      {
+        kind: 'laudo_psicologico',
+        id: 'laudo-1',
+        attr: { psicologo_responsavel_id: 'psi-1', crp_uf: 'SP' },
+      },
+      ['read'],
+    );
+    expect(result.read).toBe(true);
+  });
+
   it('nega leitura para psicólogo de UF diferente que não é o autor', async () => {
     const result = await cerbos.check(
       {
@@ -35,7 +78,7 @@ describe('CerbosService — policy do laudo psicológico', () => {
       {
         kind: 'laudo_psicologico',
         id: 'laudo-1',
-        attr: { psicologo_responsavel_id: 'psi-1' },
+        attr: { psicologo_responsavel_id: 'psi-1', crp_uf: 'SP' },
       },
       ['read'],
     );

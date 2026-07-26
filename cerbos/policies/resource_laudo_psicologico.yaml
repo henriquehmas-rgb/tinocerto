@@ -12,8 +12,11 @@ resourcePolicy:
       condition:
         match:
           expr: >
-            !(request.principal.attr.crp_ativo == true &&
-              size(request.principal.attr.crp_numero) > 0 &&
+            !(has(request.principal.attr.crp_ativo) &&
+              request.principal.attr.crp_ativo == true &&
+              has(request.principal.attr.crp_numero) &&
+              size(string(request.principal.attr.crp_numero)) > 0 &&
+              has(request.principal.attr.crp_uf) &&
               request.principal.attr.crp_uf != "")
 
     - name: "acesso-laudo-integra"
