@@ -7,6 +7,7 @@
     "identity_0004__role_and_assignment.sql",
     "identity_0005__seed_system_roles.sql",
     "identity_0006__session_service_account_psicologo.sql",
-    "platform_0001__outbox_event.sql"
+    "platform_0001__outbox_event.sql",
+    "trust_0001__audit_log_entry.sql"
   ]
 }
