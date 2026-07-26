@@ -16,6 +16,7 @@
     "talent_0001__person.sql",
     "talent_0002__assessment_result_stub.sql",
     "hiring_0001__requisition.sql",
-    "org_graph_0002__org_unit_parent_composite_fk.sql"
+    "org_graph_0002__org_unit_parent_composite_fk.sql",
+    "hiring_0002__job.sql"
   ]
 }
