@@ -2,7 +2,6 @@ import { ExecutionContext, ForbiddenException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { CerbosGuard } from '../cerbos.guard';
 import { CerbosService } from '../cerbos.service';
-import { CERBOS_CHECK_KEY } from '../cerbos-check.decorator';
 
 function buildContext(req: Record<string, unknown>, metadata: { resourceKind: string; action: string } | undefined) {
   const reflector = {
