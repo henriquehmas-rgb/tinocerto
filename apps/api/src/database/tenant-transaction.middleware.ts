@@ -1,5 +1,6 @@
 import { Injectable, NestMiddleware, UnauthorizedException } from '@nestjs/common';
 import { NextFunction, Request, Response } from 'express';
+import { setTenantSpanAttribute } from '../observability/tracing';
 
 // Placeholder de decodificação de JWT — a Fase 0 só precisa do contrato de
 // onde o tenant_id vem; a validação real de assinatura de token entra
@@ -15,7 +16,9 @@ function extractTenantIdFromRequest(req: Request): string {
 @Injectable()
 export class TenantResolutionMiddleware implements NestMiddleware {
   use(req: Request, _res: Response, next: NextFunction) {
-    (req as Request & { tenantId: string }).tenantId = extractTenantIdFromRequest(req);
+    const tenantId = extractTenantIdFromRequest(req);
+    (req as Request & { tenantId: string }).tenantId = tenantId;
+    setTenantSpanAttribute(tenantId);
     next();
   }
 }
