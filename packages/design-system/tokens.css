@@ -1,0 +1,210 @@
+/* ==========================================================================
+   TINOCERTO · tokens
+   Sistema de recrutamento & seleção — identidade visual v3 (violeta)
+   (nome anterior: Prumo — mudou por disponibilidade de domínio/marca;
+   cor, tipografia e tokens não mudaram. Prefixo --pr-* mantido como
+   namespace técnico interno, não precisa refletir o nome da marca.)
+   Todas as cores em OKLCH; o hex ao lado é a origem exata usada nos mocks.
+   Três escopos: :root (painel claro) · [data-theme="dark"] · .pr-assessment
+   ========================================================================== */
+
+/* --- 1. primitivas ------------------------------------------------------- */
+:root {
+  /* Ardósia — neutros com viés violeta (h≈285) */
+  --pr-slate-00: oklch(1.0000 0.0000 0);    /* #FFFFFF */
+  --pr-slate-05: oklch(0.9745 0.0134 295.33); /* #F7F5FF */
+  --pr-slate-10: oklch(0.9505 0.0135 295.32); /* #EFEDF7 */
+  --pr-slate-20: oklch(0.9063 0.0260 295.53); /* #E1DDF0 */
+  --pr-slate-30: oklch(0.8159 0.0324 295.64); /* #C4BFD6 */
+  --pr-slate-40: oklch(0.7081 0.0350 295.04); /* #A29DB5 */
+  --pr-slate-50: oklch(0.5283 0.0453 291.09); /* #6B6784 */
+  --pr-slate-60: oklch(0.4111 0.0416 289.94); /* #4A4760 */
+  --pr-slate-70: oklch(0.3508 0.0432 289.47); /* #3A3750 */
+  --pr-slate-80: oklch(0.2554 0.0484 293.27); /* #241E38 */
+  --pr-slate-90: oklch(0.1896 0.0202 293.55); /* #14121C */
+  --pr-slate-95: oklch(0.1581 0.0296 295.99); /* #0E0A18 */
+
+  /* Violeta — única cor de ação */
+  --pr-violet-100: oklch(0.9379 0.0343 298.53); /* #EDE6FF */
+  --pr-violet-300: oklch(0.7554 0.1412 295.37); /* #B79CFF */
+  --pr-violet-500: oklch(0.5276 0.2790 286.46); /* #6D28FF */
+  --pr-violet-600: oklch(0.4668 0.2591 285.24); /* #5A17E0 */
+  --pr-violet-700: oklch(0.3971 0.2196 285.30); /* #4711B4 */
+
+  /* Dados — 5 fatores Big Five. Cor NUNCA sozinha: letra + trama + posição. */
+  --pr-data-a: oklch(0.3971 0.2196 285.30); /* #4711B4 · Abertura · sólido */
+  --pr-data-c: oklch(0.5354 0.0895 210.12); /* #0F7B8A · Conscienciosidade · listra vertical */
+  --pr-data-e: oklch(0.5534 0.1739 38.40);  /* #C2410C · Extroversão · diagonal */
+  --pr-data-m: oklch(0.4930 0.1364 31.44);  /* #A03C2C · Amabilidade · horizontal */
+  --pr-data-s: oklch(0.4905 0.0298 270.74); /* #5A6072 · Estabilidade · diagonal inversa */
+
+  /* Estados — fora da família da marca, de propósito */
+  --pr-state-success: oklch(0.4646 0.0860 161.73); /* #21684A */
+  --pr-state-success-bg: oklch(0.9520 0.0132 159.91); /* #E8F2EC */
+  --pr-state-success-border: oklch(0.8874 0.0285 158.63); /* #CBE0D3 */
+  --pr-state-warning: oklch(0.5078 0.1080 73.30); /* #8A5A00 */
+  --pr-state-warning-bg: oklch(0.9661 0.0400 88.20); /* #FFF3D6 */
+  --pr-state-warning-border: oklch(0.9080 0.0672 88.43); /* #F3DFAE */
+  --pr-state-danger: oklch(0.4826 0.1606 28.08); /* #A62B24 */
+  --pr-state-danger-bg: oklch(0.9574 0.0165 26.65); /* #FCEDEB */
+  --pr-state-danger-border: oklch(0.8815 0.0375 24.04); /* #F0CFCC */
+  --pr-state-info: oklch(0.4496 0.1075 259.61); /* #2F5490 */
+  --pr-state-info-bg: oklch(0.9482 0.0145 264.50); /* #E9EEF8 */
+  --pr-state-info-border: oklch(0.8944 0.0262 259.05); /* #D2DDEE */
+}
+
+/* --- 2. semânticos · painel claro (padrão) -------------------------------- */
+:root {
+  --pr-bg:               var(--pr-slate-05);
+  --pr-surface:          var(--pr-slate-00);
+  --pr-surface-sunken:   var(--pr-slate-10);
+  --pr-border:           var(--pr-slate-20);   /* 1px divisor e contorno de card */
+  --pr-border-strong:    var(--pr-slate-30);   /* controle: ≥3:1 não-textual    */
+  --pr-text:             var(--pr-slate-90);   /* 15,8:1 no branco              */
+  --pr-text-secondary:   var(--pr-slate-60);   /* 8,0:1                          */
+  --pr-text-tertiary:    var(--pr-slate-50);   /* 5,5:1 — piso de texto no claro */
+  --pr-text-disabled:    var(--pr-slate-40);   /* nunca em texto informativo     */
+
+  --pr-accent:           var(--pr-violet-500); /* branco por cima = 6.18:1 */
+  --pr-accent-hover:     var(--pr-violet-600);
+  --pr-accent-text:      var(--pr-violet-700); /* link e número em foco = 10.46:1 */
+  --pr-accent-soft:      var(--pr-violet-100);
+  --pr-on-accent:        var(--pr-slate-00);
+  --pr-accent-gradient:  linear-gradient(180deg, oklch(0.5800 0.2700 292), var(--pr-violet-600));
+  --pr-selected:         color-mix(in oklab, var(--pr-violet-500) 8%, transparent);
+  --pr-focus-ring:       var(--pr-violet-500);
+
+  /* vidro — só em camada fixa: topo, abas, barra de lote, nav, bottom sheet */
+  --pr-glass:            color-mix(in oklab, var(--pr-slate-00) 74%, transparent);
+  --pr-glass-border:     color-mix(in oklab, var(--pr-slate-90) 9%, transparent);
+  --pr-blur-glass:       18px;
+
+  color-scheme: light;
+}
+
+/* --- 3. semânticos · painel escuro ---------------------------------------- */
+[data-theme="dark"] {
+  --pr-bg:               var(--pr-slate-95);
+  --pr-surface:          var(--pr-slate-90);
+  --pr-surface-sunken:   var(--pr-slate-80);
+  --pr-border:           var(--pr-slate-80);
+  --pr-border-strong:    var(--pr-slate-70);
+  --pr-text:             var(--pr-slate-05);
+  --pr-text-secondary:   var(--pr-slate-30);
+  --pr-text-tertiary:    var(--pr-slate-40);   /* 7.08:1 no surface — piso no escuro */
+  --pr-text-disabled:    var(--pr-slate-50);
+
+  --pr-accent:           var(--pr-violet-500);
+  --pr-accent-hover:     var(--pr-violet-600);
+  --pr-accent-text:      var(--pr-violet-300); /* 8.13:1 no surface */
+  --pr-accent-soft:      color-mix(in oklab, var(--pr-violet-500) 22%, var(--pr-slate-90));
+  --pr-selected:         color-mix(in oklab, var(--pr-violet-500) 14%, transparent);
+
+  --pr-glass:            color-mix(in oklab, var(--pr-slate-90) 74%, transparent);
+  --pr-glass-border:     color-mix(in oklab, var(--pr-slate-05) 9%, transparent);
+
+  /* dados clareiam no escuro; a trama e a letra continuam as mesmas */
+  --pr-data-a: oklch(0.7117 0.1657 292.81); /* #A78BFF */
+  --pr-data-c: oklch(0.6843 0.0869 206.08); /* #4FA9B4 */
+  --pr-data-e: oklch(0.7113 0.1319 51.50);  /* #E2884F */
+  --pr-data-m: oklch(0.6592 0.0965 30.48);  /* #C67B6E */
+  --pr-data-s: oklch(0.6662 0.0218 267.20); /* #8E94A2 */
+
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  [data-theme="auto"] { color-scheme: dark; }
+}
+
+/* --- 4. avaliação do candidato · escopo isolado ---------------------------
+   Instrumento de medida: cinza puro (croma 0), sem acento, sem estado,
+   sem vidro, sem tema escuro. Não herda nada de :root nem de [data-theme].
+   -------------------------------------------------------------------------- */
+.pr-assessment {
+  --pr-neutral-00: oklch(1.0000 0.0000 0);  /* #FFFFFF */
+  --pr-neutral-05: oklch(0.9913 0.0013 286.38); /* #FCFCFD */
+  --pr-neutral-10: oklch(0.9560 0.0040 286.32); /* #F0F0F3 */
+  --pr-neutral-20: oklch(0.9200 0.0054 286.29); /* #E4E4E8 */
+  --pr-neutral-30: oklch(0.8745 0.0068 286.26); /* #D5D5DA */
+  --pr-neutral-40: oklch(0.8193 0.0097 286.18); /* #C3C3CA */
+  --pr-neutral-50: oklch(0.6230 0.0134 286.00); /* #86868F */
+  --pr-neutral-60: oklch(0.4855 0.0159 285.79); /* #5E5E68 */
+  --pr-neutral-70: oklch(0.4199 0.0148 285.74); /* #4C4C55 */
+  --pr-neutral-80: oklch(0.3507 0.0103 285.86); /* #3A3A40 */
+  --pr-neutral-90: oklch(0.2587 0.0112 285.59); /* #232329 */
+  --pr-neutral-95: oklch(0.2059 0.0059 285.87); /* #17171A */
+
+  --pr-bg:               var(--pr-neutral-05);
+  --pr-surface:          var(--pr-neutral-00);
+  --pr-surface-sunken:   var(--pr-neutral-10);
+  --pr-border:           var(--pr-neutral-30);
+  --pr-border-strong:    var(--pr-neutral-50);  /* contorno do radio · 3.61:1 */
+  --pr-text:             var(--pr-neutral-95);
+  --pr-text-secondary:   var(--pr-neutral-70);
+  --pr-text-tertiary:    var(--pr-neutral-60);
+  --pr-selected-surface: var(--pr-neutral-10);
+  --pr-selected-border:  var(--pr-neutral-95);  /* 2px + ponto: três sinais, zero cor */
+
+  --pr-accent:           var(--pr-neutral-90);  /* o "primário" aqui é tinta, não marca */
+  --pr-on-accent:        var(--pr-neutral-00);
+  --pr-focus-ring:       var(--pr-neutral-95);
+  --pr-glass:            var(--pr-neutral-00);  /* opaco, de propósito */
+  --pr-blur-glass:       0px;
+
+  color-scheme: light only;
+}
+
+/* --- 5. forma, profundidade, movimento ------------------------------------ */
+:root {
+  --pr-r-control: 8px;    /* botão, campo, chip retangular */
+  --pr-r-card:    12px;   /* card interno, linha destacada */
+  --pr-r-panel:   18px;   /* painel, modal, folha */
+  --pr-r-sheet:   28px;   /* bottom sheet e moldura de celular */
+  --pr-r-pill:    999px;  /* chip, avatar, trilho de barra */
+
+  --pr-shadow-rest:   0 1px 2px color-mix(in oklab, var(--pr-slate-90) 5%, transparent);
+  --pr-shadow-float:  0 1px 2px color-mix(in oklab, var(--pr-slate-90) 5%, transparent),
+                      0 18px 44px -28px color-mix(in oklab, var(--pr-slate-90) 35%, transparent);
+  --pr-shadow-accent: 0 8px 18px -8px color-mix(in oklab, var(--pr-violet-600) 90%, transparent),
+                      inset 0 1px 0 color-mix(in oklab, white 35%, transparent);
+
+  --pr-dur-micro: 120ms;  /* hover, chip, toggle            */
+  --pr-dur-move:  150ms;  /* card mudando de coluna          */
+  --pr-ease: cubic-bezier(.2, 0, .3, 1);
+
+  --pr-tap-min: 44px;         /* piso WCAG 2.2 AA            */
+  --pr-tap-assessment: 56px;  /* opção da avaliação          */
+  --pr-row-compact: 34px;
+  --pr-row-comfortable: 48px;
+}
+
+/* --- 6. tipografia -------------------------------------------------------- */
+:root {
+  --pr-font-display: Archivo, "Helvetica Neue", Arial, sans-serif;
+  --pr-font-ui: "IBM Plex Sans", system-ui, sans-serif;
+  --pr-font-num: "IBM Plex Mono", ui-monospace, monospace;
+
+  --pr-text-page:    700 36px/1.05 var(--pr-font-display);
+  --pr-text-section: 700 22px/1.2  var(--pr-font-display);
+  --pr-text-prompt:  400 22px/1.45 var(--pr-font-ui);   /* enunciado da avaliação */
+  --pr-text-body:    400 14px/1.45 var(--pr-font-ui);
+  --pr-text-dense:   400 13px/1.4  var(--pr-font-ui);
+  --pr-text-label:   600 11px/1.45 var(--pr-font-num);  /* piso absoluto: 11px    */
+  --pr-tracking-display: -0.025em;
+}
+
+/* --- 7. utilitários mínimos ----------------------------------------------- */
+.pr-glass {
+  background: var(--pr-glass);
+  backdrop-filter: blur(var(--pr-blur-glass));
+  border-bottom: 1px solid var(--pr-glass-border);
+}
+.pr-num { font-family: var(--pr-font-num); font-variant-numeric: tabular-nums; }
+.pr-focusable:focus-visible {
+  outline: 2px solid var(--pr-focus-ring);
+  outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  :root { --pr-dur-micro: 0ms; --pr-dur-move: 0ms; }
+}
