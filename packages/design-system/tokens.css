@@ -119,7 +119,12 @@
 
 /* --- 4. avaliação do candidato · escopo isolado ---------------------------
    Instrumento de medida: cinza puro (croma 0), sem acento, sem estado,
-   sem vidro, sem tema escuro. Não herda nada de :root nem de [data-theme].
+   sem vidro, sem tema escuro. Não herda nada de :root nem de [data-theme] —
+   toda variável semântica usada em algum componente é redefinida aqui dentro,
+   inclusive as que hoje nenhum componente consome (accent-hover, accent-text,
+   accent-soft, accent-gradient, selected, text-disabled, glass-border,
+   shadow-accent, data-a/c/e/m/s), para que usar qualquer uma delas dentro
+   deste escopo não vaze violeta nem valores do tema escuro.
    -------------------------------------------------------------------------- */
 .pr-assessment {
   --pr-neutral-00: oklch(1.0000 0.0000 0);  /* #FFFFFF */
@@ -143,14 +148,29 @@
   --pr-text:             var(--pr-neutral-95);
   --pr-text-secondary:   var(--pr-neutral-70);
   --pr-text-tertiary:    var(--pr-neutral-60);
+  --pr-text-disabled:    var(--pr-neutral-40);
   --pr-selected-surface: var(--pr-neutral-10);
   --pr-selected-border:  var(--pr-neutral-95);  /* 2px + ponto: três sinais, zero cor */
+  --pr-selected:         var(--pr-neutral-10);
 
   --pr-accent:           var(--pr-neutral-90);  /* o "primário" aqui é tinta, não marca */
+  --pr-accent-hover:     var(--pr-neutral-95);
+  --pr-accent-text:      var(--pr-neutral-95);
+  --pr-accent-soft:      var(--pr-neutral-10);
+  --pr-accent-gradient:  none;
   --pr-on-accent:        var(--pr-neutral-00);
   --pr-focus-ring:       var(--pr-neutral-95);
   --pr-glass:            var(--pr-neutral-00);  /* opaco, de propósito */
+  --pr-glass-border:     var(--pr-neutral-30);
   --pr-blur-glass:       0px;
+  --pr-shadow-accent:    none;
+
+  /* dados: mesma paleta neutra do escopo — nunca a cor de marca dentro do instrumento */
+  --pr-data-a: var(--pr-neutral-90);
+  --pr-data-c: var(--pr-neutral-70);
+  --pr-data-e: var(--pr-neutral-50);
+  --pr-data-m: var(--pr-neutral-60);
+  --pr-data-s: var(--pr-neutral-40);
 
   color-scheme: light only;
 }

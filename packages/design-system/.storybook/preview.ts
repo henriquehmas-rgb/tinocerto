@@ -7,7 +7,7 @@ const preview: Preview = {
     backgrounds: {
       default: 'claro',
       values: [
-        { name: 'claro', value: 'var(--pr-bg)' },
+        { name: 'claro', value: '#F7F5FF' },
         { name: 'escuro', value: '#0E0A18' },
       ],
     },
