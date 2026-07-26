@@ -15,6 +15,7 @@
     "identity_0008__psicologo_credencial_tenant_rls.sql",
     "talent_0001__person.sql",
     "talent_0002__assessment_result_stub.sql",
-    "hiring_0001__requisition.sql"
+    "hiring_0001__requisition.sql",
+    "org_graph_0002__org_unit_parent_composite_fk.sql"
   ]
 }
