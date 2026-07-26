@@ -9,12 +9,18 @@ CREATE TABLE outbox_event (
   occurred_at     timestamptz NOT NULL,
   recorded_at     timestamptz NOT NULL DEFAULT now(),
   published_at    timestamptz,
-  UNIQUE (aggregate_id, sequence)
+  UNIQUE (tenant_id, aggregate_id, sequence)
 );
 
 CREATE INDEX idx_outbox_tenant_pending ON outbox_event (tenant_id, published_at) WHERE published_at IS NULL;
 
-GRANT SELECT, INSERT, UPDATE ON outbox_event TO app_runtime;
+-- outbox_event é um log de eventos append-only: só published_at pode ser
+-- atualizado (quando o publisher marca o evento como publicado). GRANT
+-- column-wide de UPDATE permitiria reescrever payload/event_type/etc. de
+-- eventos já gravados, o que contradiz a semântica de log (ver mesmo
+-- padrão em identity_0002__tenant.sql, Task 5).
+GRANT SELECT, INSERT ON outbox_event TO app_runtime;
+GRANT UPDATE (published_at) ON outbox_event TO app_runtime;
 
 ALTER TABLE outbox_event ENABLE ROW LEVEL SECURITY;
 ALTER TABLE outbox_event FORCE  ROW LEVEL SECURITY;
