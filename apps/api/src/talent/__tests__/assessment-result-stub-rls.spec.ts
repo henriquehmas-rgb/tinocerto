@@ -26,11 +26,11 @@ describe('result_grant — RLS de dois tenants (schema stub da Task 4)', () => {
     // de fixture ja aplicado em audit-log.service.spec.ts e
     // outbox-to-audit.consumer.spec.ts).
     const tA = await adminPool.query<{ id: string }>(
-      `INSERT INTO tenant (razao_social, cnpj) VALUES ('Empresa Grant A', '00000000000023') RETURNING id`,
+      `INSERT INTO tenant (razao_social, cnpj, slug) VALUES ('Empresa Grant A', '00000000000023', 'test-tenant-00000000000023') RETURNING id`,
     );
     tenantAId = tA.rows[0].id;
     const tB = await adminPool.query<{ id: string }>(
-      `INSERT INTO tenant (razao_social, cnpj) VALUES ('Empresa Grant B', '00000000000024') RETURNING id`,
+      `INSERT INTO tenant (razao_social, cnpj, slug) VALUES ('Empresa Grant B', '00000000000024', 'test-tenant-00000000000024') RETURNING id`,
     );
     tenantBId = tB.rows[0].id;
 

@@ -9,7 +9,7 @@ describe('OutboxPublisher.publishPending', () => {
 
   beforeAll(async () => {
     const t = await adminPool.query<{ id: string }>(
-      `INSERT INTO tenant (razao_social, cnpj) VALUES ('Empresa Publisher', '00000000000008') RETURNING id`,
+      `INSERT INTO tenant (razao_social, cnpj, slug) VALUES ('Empresa Publisher', '00000000000008', 'test-tenant-00000000000008') RETURNING id`,
     );
     tenantId = t.rows[0].id;
   });
@@ -50,7 +50,7 @@ describe('OutboxPublisher.publishPending', () => {
 
     beforeAll(async () => {
       const t = await adminPool.query<{ id: string }>(
-        `INSERT INTO tenant (razao_social, cnpj) VALUES ('Empresa Publisher Resiliencia', '00000000000009') RETURNING id`,
+        `INSERT INTO tenant (razao_social, cnpj, slug) VALUES ('Empresa Publisher Resiliencia', '00000000000009', 'test-tenant-00000000000009') RETURNING id`,
       );
       resilienceTenantId = t.rows[0].id;
     });
@@ -137,7 +137,7 @@ describe('OutboxPublisher.publishPending', () => {
 
     beforeAll(async () => {
       const t = await adminPool.query<{ id: string }>(
-        `INSERT INTO tenant (razao_social, cnpj) VALUES ('Empresa Publisher Fila Vazia', '00000000000010') RETURNING id`,
+        `INSERT INTO tenant (razao_social, cnpj, slug) VALUES ('Empresa Publisher Fila Vazia', '00000000000010', 'test-tenant-00000000000010') RETURNING id`,
       );
       emptyQueueTenantId = t.rows[0].id;
     });

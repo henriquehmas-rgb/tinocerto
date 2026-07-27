@@ -12,7 +12,7 @@ describe('OutboxService.write', () => {
 
   beforeAll(async () => {
     const t = await adminPool.query<{ id: string }>(
-      `INSERT INTO tenant (razao_social, cnpj) VALUES ('Empresa Outbox', '00000000000007') RETURNING id`,
+      `INSERT INTO tenant (razao_social, cnpj, slug) VALUES ('Empresa Outbox', '00000000000007', 'test-tenant-00000000000007') RETURNING id`,
     );
     tenantId = t.rows[0].id;
   });

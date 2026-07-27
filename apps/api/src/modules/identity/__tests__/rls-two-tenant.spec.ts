@@ -30,10 +30,10 @@ describe('RLS — isolamento de dois tenants em user_account', () => {
 
   beforeAll(async () => {
     const a = await adminPool.query<{ id: string }>(
-      `INSERT INTO tenant (razao_social, cnpj) VALUES ('Empresa A', '00000000000001') RETURNING id`,
+      `INSERT INTO tenant (razao_social, cnpj, slug) VALUES ('Empresa A', '00000000000001', 'test-tenant-00000000000001') RETURNING id`,
     );
     const b = await adminPool.query<{ id: string }>(
-      `INSERT INTO tenant (razao_social, cnpj) VALUES ('Empresa B', '00000000000002') RETURNING id`,
+      `INSERT INTO tenant (razao_social, cnpj, slug) VALUES ('Empresa B', '00000000000002', 'test-tenant-00000000000002') RETURNING id`,
     );
     tenantAId = a.rows[0].id;
     tenantBId = b.rows[0].id;

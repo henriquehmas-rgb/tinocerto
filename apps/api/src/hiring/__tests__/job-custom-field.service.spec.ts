@@ -13,7 +13,7 @@ describe('JobCustomFieldService', () => {
 
   beforeAll(async () => {
     const t = await adminPool.query<{ id: string }>(
-      `INSERT INTO tenant (razao_social, cnpj) VALUES ('Empresa CustomField', '00000000000024') RETURNING id`,
+      `INSERT INTO tenant (razao_social, cnpj, slug) VALUES ('Empresa CustomField', '00000000000024', 'test-tenant-00000000000024') RETURNING id`,
     );
     tenantId = t.rows[0].id;
     const org = await adminPool.query<{ id: string }>(

@@ -7,7 +7,7 @@ describe('service_account exige owner humano', () => {
 
   beforeAll(async () => {
     const t = await pool.query<{ id: string }>(
-      `INSERT INTO tenant (razao_social, cnpj) VALUES ('Empresa SA', '00000000000005') RETURNING id`,
+      `INSERT INTO tenant (razao_social, cnpj, slug) VALUES ('Empresa SA', '00000000000005', 'test-tenant-00000000000005') RETURNING id`,
     );
     tenantId = t.rows[0].id;
     const u = await pool.query<{ id: string }>(

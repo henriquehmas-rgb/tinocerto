@@ -14,7 +14,7 @@ describe('JobCustomFieldService — bloqueio duro Lei 9.029/95', () => {
 
   beforeAll(async () => {
     const t = await adminPool.query<{ id: string }>(
-      `INSERT INTO tenant (razao_social, cnpj) VALUES ('Empresa Hard Block', '00000000000026') RETURNING id`,
+      `INSERT INTO tenant (razao_social, cnpj, slug) VALUES ('Empresa Hard Block', '00000000000026', 'test-tenant-00000000000026') RETURNING id`,
     );
     tenantId = t.rows[0].id;
     const org = await adminPool.query<{ id: string }>(

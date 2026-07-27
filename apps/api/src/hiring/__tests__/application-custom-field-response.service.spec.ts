@@ -27,7 +27,7 @@ describe('ApplicationCustomFieldResponseService — coleta faseada', () => {
     process.env.CPF_HASH_PEPPER ??= 'pepper-de-teste';
 
     const t = await adminPool.query<{ id: string }>(
-      `INSERT INTO tenant (razao_social, cnpj) VALUES ('Empresa Coleta Faseada', '00000000000027') RETURNING id`,
+      `INSERT INTO tenant (razao_social, cnpj, slug) VALUES ('Empresa Coleta Faseada', '00000000000027', 'test-tenant-00000000000027') RETURNING id`,
     );
     tenantId = t.rows[0].id;
     const org = await adminPool.query<{ id: string }>(

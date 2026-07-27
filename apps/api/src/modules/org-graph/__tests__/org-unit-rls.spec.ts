@@ -6,7 +6,7 @@ describe('org_unit — ltree e isolamento de tenant', () => {
 
   beforeAll(async () => {
     const t = await adminPool.query<{ id: string }>(
-      `INSERT INTO tenant (razao_social, cnpj) VALUES ('Empresa Org', '00000000000003') RETURNING id`,
+      `INSERT INTO tenant (razao_social, cnpj, slug) VALUES ('Empresa Org', '00000000000003', 'test-tenant-00000000000003') RETURNING id`,
     );
     tenantId = t.rows[0].id;
   });
@@ -50,7 +50,7 @@ describe('org_unit — ltree e isolamento de tenant', () => {
   // Este teste reproduz o ataque exato e prova que o INSERT agora falha.
   it('FK composta rejeita org_unit.parent_id apontando para org_unit de outro tenant', async () => {
     const outroTenant = await adminPool.query<{ id: string }>(
-      `INSERT INTO tenant (razao_social, cnpj) VALUES ('Empresa Org Outro', '00000000000033') RETURNING id`,
+      `INSERT INTO tenant (razao_social, cnpj, slug) VALUES ('Empresa Org Outro', '00000000000033', 'test-tenant-00000000000033') RETURNING id`,
     );
     const paiOutroTenant = await adminPool.query<{ id: string }>(
       `INSERT INTO org_unit (tenant_id, tipo, nome, materialized_path)

@@ -13,7 +13,7 @@ describe('RequisitionService', () => {
 
   beforeAll(async () => {
     const t = await adminPool.query<{ id: string }>(
-      `INSERT INTO tenant (razao_social, cnpj) VALUES ('Empresa Requisition', '00000000000017') RETURNING id`,
+      `INSERT INTO tenant (razao_social, cnpj, slug) VALUES ('Empresa Requisition', '00000000000017', 'test-tenant-00000000000017') RETURNING id`,
     );
     tenantId = t.rows[0].id;
     const org = await adminPool.query<{ id: string }>(
@@ -91,7 +91,7 @@ describe('RequisitionService', () => {
 
   it('rejeita abrir requisição com org_unit de outro tenant (FK composta barra a referência cross-tenant)', async () => {
     const outroTenant = await adminPool.query<{ id: string }>(
-      `INSERT INTO tenant (razao_social, cnpj) VALUES ('Empresa Requisition Outro', '00000000000032') RETURNING id`,
+      `INSERT INTO tenant (razao_social, cnpj, slug) VALUES ('Empresa Requisition Outro', '00000000000032', 'test-tenant-00000000000032') RETURNING id`,
     );
     const ctx = new TenantContext(appPool);
     const service = new RequisitionService();

@@ -15,7 +15,7 @@ describe('JobService', () => {
 
   beforeAll(async () => {
     const t = await adminPool.query<{ id: string }>(
-      `INSERT INTO tenant (razao_social, cnpj) VALUES ('Empresa Job', '00000000000018') RETURNING id`,
+      `INSERT INTO tenant (razao_social, cnpj, slug) VALUES ('Empresa Job', '00000000000018', 'test-tenant-00000000000018') RETURNING id`,
     );
     tenantId = t.rows[0].id;
     const org = await adminPool.query<{ id: string }>(
@@ -77,7 +77,7 @@ describe('JobService', () => {
 
   it('rejeita criar vaga para requisição de outro tenant (checagem de tenant em JobService.create via RequisitionService.findById)', async () => {
     const outroTenant = await adminPool.query<{ id: string }>(
-      `INSERT INTO tenant (razao_social, cnpj) VALUES ('Empresa Job Outro', '00000000000019') RETURNING id`,
+      `INSERT INTO tenant (razao_social, cnpj, slug) VALUES ('Empresa Job Outro', '00000000000019', 'test-tenant-00000000000019') RETURNING id`,
     );
     const ctx = new TenantContext(appPool);
     const service = new JobService(new RequisitionService());
@@ -107,7 +107,7 @@ describe('JobService', () => {
     // derrubada da migration, pois o teste acima já barra a criação antes do
     // INSERT (achado de revisão da Task 8, fix round 1).
     const outroTenant = await adminPool.query<{ id: string }>(
-      `INSERT INTO tenant (razao_social, cnpj) VALUES ('Empresa Job FK Direta', '00000000000020') RETURNING id`,
+      `INSERT INTO tenant (razao_social, cnpj, slug) VALUES ('Empresa Job FK Direta', '00000000000020', 'test-tenant-00000000000020') RETURNING id`,
     );
     const outroTenantId = outroTenant.rows[0].id;
 

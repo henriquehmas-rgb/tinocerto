@@ -38,10 +38,10 @@ describe('RLS — psicologo_credencial não vaza entre tenants', () => {
 
   beforeAll(async () => {
     const a = await adminPool.query<{ id: string }>(
-      `INSERT INTO tenant (razao_social, cnpj) VALUES ('Clinica A', '00000000000020') RETURNING id`,
+      `INSERT INTO tenant (razao_social, cnpj, slug) VALUES ('Clinica A', '00000000000020', 'test-tenant-00000000000020') RETURNING id`,
     );
     const b = await adminPool.query<{ id: string }>(
-      `INSERT INTO tenant (razao_social, cnpj) VALUES ('Clinica B', '00000000000021') RETURNING id`,
+      `INSERT INTO tenant (razao_social, cnpj, slug) VALUES ('Clinica B', '00000000000021', 'test-tenant-00000000000021') RETURNING id`,
     );
     tenantAId = a.rows[0].id;
     tenantBId = b.rows[0].id;

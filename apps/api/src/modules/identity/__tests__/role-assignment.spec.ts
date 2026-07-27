@@ -26,7 +26,7 @@ describe('role e role_assignment', () => {
 
   it('atribui um papel a um usuário com escopo de org_unit', async () => {
     const tenant = await pool.query<{ id: string }>(
-      `INSERT INTO tenant (razao_social, cnpj) VALUES ('Empresa Role', '00000000000004') RETURNING id`,
+      `INSERT INTO tenant (razao_social, cnpj, slug) VALUES ('Empresa Role', '00000000000004', 'test-tenant-00000000000004') RETURNING id`,
     );
     const tenantId = tenant.rows[0].id;
 

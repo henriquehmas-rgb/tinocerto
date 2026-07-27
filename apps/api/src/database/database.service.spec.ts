@@ -95,7 +95,7 @@ describe('DatabaseService', () => {
 
     try {
       const t = await adminPool.query<{ id: string }>(
-        `INSERT INTO tenant (razao_social, cnpj) VALUES ('Empresa Reciclada', '00000000000022') RETURNING id`,
+        `INSERT INTO tenant (razao_social, cnpj, slug) VALUES ('Empresa Reciclada', '00000000000022', 'test-tenant-00000000000022') RETURNING id`,
       );
       const tenantId = t.rows[0].id;
       await adminPool.query(

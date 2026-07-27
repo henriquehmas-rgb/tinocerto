@@ -24,7 +24,7 @@ describe('AuditLogService.append — hash chain', () => {
     // workers distintos do Jest). Trocado para um valor não usado em
     // nenhum outro spec do repositório.
     const t = await adminPool.query<{ id: string }>(
-      `INSERT INTO tenant (razao_social, cnpj) VALUES ('Empresa Audit', '00000000000011') RETURNING id`,
+      `INSERT INTO tenant (razao_social, cnpj, slug) VALUES ('Empresa Audit', '00000000000011', 'test-tenant-00000000000011') RETURNING id`,
     );
     tenantId = t.rows[0].id;
   });
@@ -195,7 +195,7 @@ describe('AuditLogService.append — hash chain', () => {
     const audit = new AuditLogService();
 
     const t2 = await adminPool.query<{ id: string }>(
-      `INSERT INTO tenant (razao_social, cnpj) VALUES ('Empresa Audit OOO', '00000000000012') RETURNING id`,
+      `INSERT INTO tenant (razao_social, cnpj, slug) VALUES ('Empresa Audit OOO', '00000000000012', 'test-tenant-00000000000012') RETURNING id`,
     );
     const tenant2 = t2.rows[0].id;
 

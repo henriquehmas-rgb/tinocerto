@@ -30,7 +30,7 @@ describe('Portão de integração Fase 0 — outbox → Trust → audit_log_entr
     // specs existentes; mesmo tipo de correção de fixture já aplicado nas
     // Tasks 11 e 13).
     const t = await adminPool.query<{ id: string }>(
-      `INSERT INTO tenant (razao_social, cnpj) VALUES ('Empresa Gate', '00000000000013') RETURNING id`,
+      `INSERT INTO tenant (razao_social, cnpj, slug) VALUES ('Empresa Gate', '00000000000013', 'test-tenant-00000000000013') RETURNING id`,
     );
     tenantId = t.rows[0].id;
   });
@@ -117,7 +117,7 @@ describe('Portão de integração Fase 0 — outbox → Trust → audit_log_entr
 
     beforeAll(async () => {
       const t = await adminPool.query<{ id: string }>(
-        `INSERT INTO tenant (razao_social, cnpj) VALUES ('Empresa Gate Recuperacao PEL', '00000000000014') RETURNING id`,
+        `INSERT INTO tenant (razao_social, cnpj, slug) VALUES ('Empresa Gate Recuperacao PEL', '00000000000014', 'test-tenant-00000000000014') RETURNING id`,
       );
       pelTenantId = t.rows[0].id;
     });
@@ -199,7 +199,7 @@ describe('Portão de integração Fase 0 — outbox → Trust → audit_log_entr
 
     beforeAll(async () => {
       const t = await adminPool.query<{ id: string }>(
-        `INSERT INTO tenant (razao_social, cnpj) VALUES ('Empresa Gate Isolamento Lote', '00000000000015') RETURNING id`,
+        `INSERT INTO tenant (razao_social, cnpj, slug) VALUES ('Empresa Gate Isolamento Lote', '00000000000015', 'test-tenant-00000000000015') RETURNING id`,
       );
       batchTenantId = t.rows[0].id;
     });
@@ -296,7 +296,7 @@ describe('Portão de integração Fase 0 — outbox → Trust → audit_log_entr
 
     beforeAll(async () => {
       const t = await adminPool.query<{ id: string }>(
-        `INSERT INTO tenant (razao_social, cnpj) VALUES ('Empresa Gate Outage Total', '00000000000016') RETURNING id`,
+        `INSERT INTO tenant (razao_social, cnpj, slug) VALUES ('Empresa Gate Outage Total', '00000000000016', 'test-tenant-00000000000016') RETURNING id`,
       );
       outageTenantId = t.rows[0].id;
     });

@@ -16,7 +16,7 @@ describe('JobService.publish — exige LIA quando base legal é legítimo intere
 
   beforeAll(async () => {
     const t = await adminPool.query<{ id: string }>(
-      `INSERT INTO tenant (razao_social, cnpj) VALUES ('Empresa LIA Gate', '00000000000031') RETURNING id`,
+      `INSERT INTO tenant (razao_social, cnpj, slug) VALUES ('Empresa LIA Gate', '00000000000031', 'test-tenant-00000000000031') RETURNING id`,
     );
     tenantId = t.rows[0].id;
     const org = await adminPool.query<{ id: string }>(

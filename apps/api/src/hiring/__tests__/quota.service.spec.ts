@@ -12,7 +12,7 @@ describe('QuotaService', () => {
 
   beforeAll(async () => {
     const t = await adminPool.query<{ id: string }>(
-      `INSERT INTO tenant (razao_social, cnpj) VALUES ('Empresa Cotas', '00000000000028') RETURNING id`,
+      `INSERT INTO tenant (razao_social, cnpj, slug) VALUES ('Empresa Cotas', '00000000000028', 'test-tenant-00000000000028') RETURNING id`,
     );
     tenantId = t.rows[0].id;
     await adminPool.query(`INSERT INTO tenant_quota_config (tenant_id, total_empregados) VALUES ($1, 350)`, [
@@ -41,7 +41,7 @@ describe('QuotaService', () => {
 
   it('retorna zerado quando tenant não configurou o quadro', async () => {
     const t2 = await adminPool.query<{ id: string }>(
-      `INSERT INTO tenant (razao_social, cnpj) VALUES ('Empresa Sem Cota', '00000000000029') RETURNING id`,
+      `INSERT INTO tenant (razao_social, cnpj, slug) VALUES ('Empresa Sem Cota', '00000000000029', 'test-tenant-00000000000029') RETURNING id`,
     );
     const ctx = new TenantContext(appPool);
     const service = new QuotaService();
