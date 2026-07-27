@@ -29,6 +29,7 @@
     "hiring_0011__tenant_quota_config.sql",
     "hiring_0012__requisition_vaga_afirmativa.sql",
     "hiring_0013__lia_document.sql",
-    "public_0001__tenant_slug.sql"
+    "public_0001__tenant_slug.sql",
+    "candidate_0001__candidate_account.sql"
   ]
 }
