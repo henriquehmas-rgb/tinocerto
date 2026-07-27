@@ -20,15 +20,30 @@ export class CandidateTokenService {
     return { token };
   }
 
+  /**
+   * IMPORTANTE -- invariante de transação (revisão de segurança, round 1):
+   * quando reuso é detectado, este método executa um `COMMIT` explícito (ver
+   * comentário mais abaixo, no ramo de reuso) antes de lançar, para que a
+   * revogação de segurança sobreviva ao `ROLLBACK` automático que
+   * `TenantContext.run` faria ao ver a exceção subir. Isso só é seguro porque,
+   * hoje, `rotate` é sempre a ÚNICA operação dentro do `ctx.run(...)` que a
+   * envolve (ver `__tests__/candidate-token.service.spec.ts`). Se uma chamada
+   * futura (ex.: `CandidateAuthController.refresh`, Task 5) fizer outras
+   * escritas no MESMO `client`/transação antes de chamar `rotate`, esse
+   * `COMMIT` tornaria essas escritas duráveis mesmo que o `ctx.run` como um
+   * todo lance em seguida -- quebrando a garantia de tudo-ou-nada que toda
+   * outra chamada de `TenantContext.run` neste projeto pode assumir. Sempre
+   * chame `rotate` como a única operação de um `ctx.run(...)` isolado; nunca
+   * a combine com outras escritas na mesma transação.
+   */
   async rotate(client: PoolClient, presentedToken: string): Promise<{ token: string; candidateAccountId: string }> {
     const presentedHash = hashToken(presentedToken);
     const result = await client.query<{
       id: string;
       candidate_account_id: string;
       expira_em: Date;
-      revogado_em: Date | null;
     }>(
-      `SELECT id, candidate_account_id, expira_em, revogado_em FROM candidate_refresh_token WHERE token_hash = $1`,
+      `SELECT id, candidate_account_id, expira_em FROM candidate_refresh_token WHERE token_hash = $1`,
       [presentedHash],
     );
 
@@ -37,24 +52,40 @@ export class CandidateTokenService {
     }
     const row = result.rows[0];
 
-    if (row.revogado_em !== null) {
-      // Token já usado/revogado sendo reapresentado -- sinal de roubo.
-      // Revoga TODOS os tokens desta conta, não só este.
-      await this.revokeAll(client, row.candidate_account_id);
-      // `rotate` é sempre chamado dentro de `TenantContext.run`, que faz
-      // ROLLBACK automático quando `fn` lança -- o que desfaria a revogação
-      // de segurança que acabamos de gravar. Commit explícito aqui garante
-      // que a revogação sobrevive; o ROLLBACK que o `TenantContext.run` fizer
-      // em seguida vira um no-op inofensivo (não há mais transação aberta).
-      await client.query('COMMIT');
-      throw new Error('Refresh token já havia sido revogado -- possível reuso detectado, todos os tokens da conta foram revogados');
-    }
-
     if (row.expira_em.getTime() < Date.now()) {
       throw new Error('Refresh token expirado');
     }
 
-    await client.query(`UPDATE candidate_refresh_token SET revogado_em = now() WHERE id = $1`, [row.id]);
+    // Transição atômica revogado_em: NULL -> now(), condicionada ao estado
+    // anterior no próprio UPDATE (não num SELECT separado feito antes). Isto
+    // fecha uma corrida TOCTOU (revisão de segurança, round 1): duas
+    // requisições concorrentes apresentando o MESMO token (ex.: um token
+    // roubado sendo usado em paralelo com o refresh legítimo do dono, ou um
+    // retry de rede do próprio cliente) não podem mais ambas "vencer". A
+    // cláusula `WHERE ... AND revogado_em IS NULL` só afeta a linha se ela
+    // ainda não tiver sido revogada no momento em que o UPDATE a trava; sob
+    // READ COMMITTED, uma segunda transação concorrente bloqueia na mesma
+    // linha até a primeira commitar, e então reavalia essa cláusula contra o
+    // estado já commitado -- portanto no máximo UMA das chamadas concorrentes
+    // recebe `rowCount === 1`. A(s) outra(s) recebe(m) `rowCount === 0` e cai
+    // no ramo de reuso abaixo, que é exatamente o comportamento que este
+    // serviço existe para garantir.
+    const revokeResult = await client.query<{ id: string }>(
+      `UPDATE candidate_refresh_token SET revogado_em = now() WHERE id = $1 AND revogado_em IS NULL RETURNING id`,
+      [row.id],
+    );
+
+    if (revokeResult.rowCount === 0) {
+      // Token já estava revogado -- seja porque já tinha sido rotacionado
+      // antes (reuso "normal", não concorrente), seja porque uma requisição
+      // concorrente venceu a corrida do UPDATE acima agora mesmo (reuso
+      // "de corrida"). Nos dois casos é sinal de reuso/roubo: revoga TODOS
+      // os tokens desta conta, não só este.
+      await this.revokeAll(client, row.candidate_account_id);
+      // Ver o comentário no topo deste método sobre este COMMIT explícito.
+      await client.query('COMMIT');
+      throw new Error('Refresh token já havia sido revogado -- possível reuso detectado, todos os tokens da conta foram revogados');
+    }
 
     const { token: newToken } = await this.issue(client, row.candidate_account_id);
     return { token: newToken, candidateAccountId: row.candidate_account_id };
