@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { ConflictException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { PoolClient } from 'pg';
 import { PersonService } from '../talent/person.service';
 import { PasswordService } from './password.service';
@@ -27,7 +27,12 @@ export class CandidateAccountService {
       input.email,
     ]);
     if (existingEmail.rows.length > 0) {
-      throw new Error('Este e-mail já tem uma conta de candidato -- faça login em vez de se cadastrar novamente');
+      // ConflictException (não `Error` genérico) -- revisão de código round 1:
+      // sem isso, o handler padrão do Nest transforma qualquer `Error`
+      // não-HTTP num 500 "Internal server error" genérico, descartando esta
+      // mensagem em português e escondendo de quem chamou que a causa real é
+      // um conflito de e-mail já cadastrado (409), não uma falha do servidor.
+      throw new ConflictException('Este e-mail já tem uma conta de candidato -- faça login em vez de se cadastrar novamente');
     }
 
     let personId: string;
@@ -58,12 +63,16 @@ export class CandidateAccountService {
       [input.email],
     );
     if (result.rows.length === 0) {
-      throw new Error('Credenciais inválidas');
+      // UnauthorizedException -- ver comentário em `register` acima sobre por
+      // que `Error` genérico não serve aqui: login com credenciais inválidas
+      // é o caminho de falha mais comum de qualquer formulário de login
+      // público, precisa voltar 401 com esta mensagem, não 500 genérico.
+      throw new UnauthorizedException('Credenciais inválidas');
     }
     const row = result.rows[0];
     const valid = await this.passwordService.verify(row.senha_hash, input.senha);
     if (!valid) {
-      throw new Error('Credenciais inválidas');
+      throw new UnauthorizedException('Credenciais inválidas');
     }
     return { candidateAccountId: row.id, personId: row.person_id };
   }

@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { createHash, randomBytes } from 'crypto';
 import { PoolClient } from 'pg';
 
@@ -48,7 +48,12 @@ export class CandidateTokenService {
     );
 
     if (result.rows.length === 0) {
-      throw new Error('Refresh token não encontrado');
+      // UnauthorizedException (não `Error` genérico) -- revisão de código
+      // round 1: sem isso, o handler padrão do Nest transforma qualquer
+      // `Error` não-HTTP num 500 "Internal server error" genérico, escondendo
+      // de quem chamou que a causa real é um refresh token inválido (401),
+      // não uma falha do servidor.
+      throw new UnauthorizedException('Refresh token não encontrado');
     }
     const row = result.rows[0];
 
@@ -92,7 +97,9 @@ export class CandidateTokenService {
       await this.revokeAll(client, row.candidate_account_id);
       // Ver o comentário no topo deste método sobre este COMMIT explícito.
       await client.query('COMMIT');
-      throw new Error('Refresh token já havia sido revogado -- possível reuso detectado, todos os tokens da conta foram revogados');
+      // UnauthorizedException -- ver comentário acima sobre o SELECT vazio;
+      // mesmo raciocínio aqui.
+      throw new UnauthorizedException('Refresh token já havia sido revogado -- possível reuso detectado, todos os tokens da conta foram revogados');
     }
 
     // Só chegamos aqui se o token apresentado NÃO estava revogado (e acabamos
@@ -101,7 +108,7 @@ export class CandidateTokenService {
     // si um sinal de roubo, então não aciona `revokeAll` -- só rejeita esta
     // apresentação.
     if (row.expira_em.getTime() < Date.now()) {
-      throw new Error('Refresh token expirado');
+      throw new UnauthorizedException('Refresh token expirado');
     }
 
     const { token: newToken } = await this.issue(client, row.candidate_account_id);
