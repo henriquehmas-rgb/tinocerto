@@ -38,7 +38,24 @@ const MIGRATIONS_DIR = join(__dirname, '../../migrations');
 // aqui). Incluir qualquer uma das duas nesta lista faria os testes abaixo
 // pularem silenciosamente uma tabela que DEVE ter isolamento — um buraco
 // de cobertura, não um detalhe de configuração.
-const RLS_EXCEPTION_TABLES = new Set(['consent', 'retention_policy']);
+//
+// `candidate_application_summary` (resume_0003, Fase 1b Task 14) entra
+// aqui por um motivo correlato mas não idêntico ao de consent/
+// retention_policy acima: seu tenant_id é NOT NULL (cada linha registra
+// em qual tenant aquela candidatura específica existe, para exibição),
+// mas a tabela em si não é "dado de um tenant" -- é um índice GLOBAL, na
+// mesma classe de person/resume_upload (ver nota no topo de
+// resume_0003__candidate_application_summary.sql), que um candidato usa
+// para ver TODAS as suas candidaturas espalhadas por múltiplos tenants
+// numa única consulta. RLS por tenant_id seria não só desnecessário como
+// contraproducente aqui: uma policy de tenant limitaria cada leitura a UM
+// tenant por vez, exatamente o problema que este índice existe para
+// evitar (ver nota de design em resume/candidate-application-summary.consumer.ts
+// e candidate-auth/candidate-application.controller.ts). O isolamento que
+// importa -- "só o próprio candidato vê sua própria linha" -- é garantido
+// por WHERE person_id = <candidato autenticado> na camada de aplicação,
+// mesmo princípio de consent/retention_policy acima.
+const RLS_EXCEPTION_TABLES = new Set(['consent', 'retention_policy', 'candidate_application_summary']);
 
 // Reforço do portão pedido pela revisão final consolidada (achado
 // CRITICAL 2): toda tabela com uma FK para user_account ou para tenant

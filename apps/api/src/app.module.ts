@@ -5,9 +5,10 @@ import { AuthzModule } from './authz/authz.module';
 import { HiringModule } from './hiring/hiring.module';
 import { CandidateAuthModule } from './candidate-auth/candidate-auth.module';
 import { PublicModule } from './public/public.module';
+import { ResumeModule } from './resume/resume.module';
 
 @Module({
-  imports: [DatabaseModule, AuthzModule, HiringModule, CandidateAuthModule, PublicModule],
+  imports: [DatabaseModule, AuthzModule, HiringModule, CandidateAuthModule, PublicModule, ResumeModule],
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {

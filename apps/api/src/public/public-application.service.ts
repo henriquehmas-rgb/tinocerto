@@ -61,6 +61,13 @@ export class PublicApplicationService {
       touchpointId: touchpoint.id,
     });
 
+    await client.query(
+      `INSERT INTO candidate_application_summary (person_id, tenant_id, application_id, job_titulo, etapa_funil)
+       VALUES ($1, $2, $3, (SELECT titulo FROM job WHERE id = $4), 'triagem')
+       ON CONFLICT (application_id) DO NOTHING`,
+      [input.personId, input.tenantId, application.id, input.jobId],
+    );
+
     // Reaproveita ApplicationCustomFieldResponseService (Fase 1a Task 15)
     // em vez de gravar application_custom_field_response na unha -- assim
     // a checagem de coleta faseada (rejeita responder um campo de fase

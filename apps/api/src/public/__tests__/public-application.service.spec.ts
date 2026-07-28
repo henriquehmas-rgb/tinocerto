@@ -71,6 +71,12 @@ describe('PublicApplicationService', () => {
   afterAll(async () => {
     await adminPool.query('DELETE FROM outbox_event WHERE tenant_id = $1', [tenantId]);
     await adminPool.query('DELETE FROM application_custom_field_response WHERE tenant_id = $1', [tenantId]);
+    // [Desvio do plano, Fase 1b Task 14] PublicApplicationService.apply()
+    // passou a gravar em candidate_application_summary (Step 7 da Task
+    // 14) -- sem apagar essa linha antes de apagar person, o DELETE FROM
+    // person abaixo quebra a FK candidate_application_summary_person_id_fkey
+    // (reproduzido ao vivo rodando a suíte completa após a Task 14).
+    await adminPool.query('DELETE FROM candidate_application_summary WHERE person_id = $1', [personId]);
     await adminPool.query('DELETE FROM resume_upload WHERE person_id = $1', [personId]);
     await adminPool.query('DELETE FROM application WHERE tenant_id = $1', [tenantId]);
     await adminPool.query('DELETE FROM candidate_touchpoint WHERE tenant_id = $1', [tenantId]);
