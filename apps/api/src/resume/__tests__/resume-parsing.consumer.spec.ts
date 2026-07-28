@@ -10,6 +10,14 @@ describe('ResumeParsingConsumer.handleResumeUploaded', () => {
   const maybeIt = hasApiKey ? it : it.skip;
   let personId: string;
   let resumeUploadId: string;
+  // ResumeParsingConsumer abre sua própria conexão ioredis no construtor
+  // (não injetada) e este spec o instancia diretamente, sem passar pelo
+  // ciclo de vida do Nest (onModuleInit/onModuleDestroy nunca são chamados
+  // automaticamente aqui). Sem fechar essa conexão explicitamente, o
+  // processo do Jest fica pendurado indefinidamente após imprimir o
+  // resultado dos testes -- mesmo padrão de fechamento explícito usado em
+  // outbox-to-audit.consumer.spec.ts (Fase 0) para o cliente Redis de lá.
+  let consumer: ResumeParsingConsumer | undefined;
 
   beforeAll(async () => {
     process.env.MINIO_ENDPOINT ??= 'localhost';
@@ -60,8 +68,13 @@ describe('ResumeParsingConsumer.handleResumeUploaded', () => {
     await adminPool.end();
   });
 
+  afterEach(async () => {
+    await consumer?.onModuleDestroy();
+    consumer = undefined;
+  });
+
   maybeIt('extrai, estrutura e grava person_profile com offset rastreável, marcando resume_upload como processado', async () => {
-    const consumer = new ResumeParsingConsumer(adminPool, new StorageService(), new ResumeStructuringService());
+    consumer = new ResumeParsingConsumer(adminPool, new StorageService(), new ResumeStructuringService());
 
     await consumer.handleResumeUploaded({ resumeUploadId, storageKey: `${personId}/curriculo-teste.pdf` });
 
@@ -76,7 +89,7 @@ describe('ResumeParsingConsumer.handleResumeUploaded', () => {
   }, 30000);
 
   it('marca resume_upload como falhou se a extração/estruturação lançar, sem deixar a transação pela metade', async () => {
-    const consumer = new ResumeParsingConsumer(adminPool, new StorageService(), new ResumeStructuringService());
+    consumer = new ResumeParsingConsumer(adminPool, new StorageService(), new ResumeStructuringService());
 
     await expect(
       consumer.handleResumeUploaded({ resumeUploadId: 'id-que-nao-existe', storageKey: 'chave-que-nao-existe.pdf' }),

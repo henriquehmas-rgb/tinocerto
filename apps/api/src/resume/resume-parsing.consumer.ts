@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import Redis from 'ioredis';
 import { Pool } from 'pg';
 import { StorageService } from '../storage/storage.service';
@@ -21,7 +21,7 @@ function withOffset<T extends { citacaoVerbatim: string }>(texto: string, item: 
 }
 
 @Injectable()
-export class ResumeParsingConsumer implements OnModuleInit {
+export class ResumeParsingConsumer implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(ResumeParsingConsumer.name);
   private readonly redis: Redis;
 
@@ -35,6 +35,17 @@ export class ResumeParsingConsumer implements OnModuleInit {
 
   async onModuleInit(): Promise<void> {
     void this.consumeLoop();
+  }
+
+  // A conexão ioredis é aberta no construtor (acima) e precisa ser fechada
+  // explicitamente -- sem isso, qualquer processo que instancie esta classe
+  // (incluindo testes que chamam `new ResumeParsingConsumer(...)` direto,
+  // sem passar pelo ciclo de vida do Nest) fica com uma conexão TCP viva
+  // mantendo o event loop ativo indefinidamente após o trabalho terminar.
+  // Quando registrado como provider via Nest DI (Task 14), o Nest chama
+  // este hook automaticamente em app.close()/shutdown.
+  async onModuleDestroy(): Promise<void> {
+    await this.redis.quit();
   }
 
   // [Desvio do plano, verificado contra Fase 0] O plano original assumia
@@ -93,9 +104,17 @@ export class ResumeParsingConsumer implements OnModuleInit {
 
   private async processBatch(tenantId: string, id: '0' | '>'): Promise<void> {
     const streamKey = this.streamKeyFor(tenantId);
+    // BLOCK preservado do plano original (perdido na adaptação para stream
+    // por tenant): '0' (PEL) não bloqueia -- mensagens pendentes, se
+    // existirem, já estão lá, não há motivo para esperar. '>' (mensagens
+    // novas) bloqueia até 5s -- sem isso, o laço em consumeLoop() vira
+    // busy-poll assim que existir pelo menos um tenant, batendo
+    // continuamente em Postgres (listTenantIds) e Redis (XREADGROUP) sem
+    // nenhum intervalo.
     const result = await this.redis.xreadgroup(
       'GROUP', CONSUMER_GROUP, CONSUMER_NAME,
       'COUNT', 10,
+      'BLOCK', id === '>' ? 5000 : 0,
       'STREAMS', streamKey, id,
     );
     if (!result) return;
