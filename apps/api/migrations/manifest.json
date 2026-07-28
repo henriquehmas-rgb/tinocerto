@@ -30,6 +30,7 @@
     "hiring_0012__requisition_vaga_afirmativa.sql",
     "hiring_0013__lia_document.sql",
     "public_0001__tenant_slug.sql",
-    "candidate_0001__candidate_account.sql"
+    "candidate_0001__candidate_account.sql",
+    "candidate_0002__password_reset_token.sql"
   ]
 }

@@ -7,6 +7,7 @@ import { CandidateAccountService } from './candidate-account.service';
 import { CandidateTokenService } from './candidate-token.service';
 import { CandidateJwtService } from './candidate-jwt.service';
 import { CandidateAuthGuard } from './candidate-auth.guard';
+import { PasswordResetService } from './password-reset.service';
 
 const PLACEHOLDER_TENANT = '00000000-0000-0000-0000-000000000000';
 
@@ -42,6 +43,21 @@ class RefreshDto {
   refreshToken!: string;
 }
 
+class RequestResetDto {
+  @IsEmail()
+  email!: string;
+}
+
+class ResetPasswordDto {
+  @IsString()
+  @IsNotEmpty()
+  token!: string;
+
+  @IsString()
+  @MinLength(8)
+  novaSenha!: string;
+}
+
 interface RequestWithCandidate extends Request {
   candidateAccountId: string;
   personId: string;
@@ -55,6 +71,7 @@ export class CandidateAuthController {
     private readonly accountService: CandidateAccountService,
     private readonly tokenService: CandidateTokenService,
     private readonly jwtService: CandidateJwtService,
+    private readonly passwordResetService: PasswordResetService,
     databaseService: DatabaseService,
   ) {
     this.tenantContext = new TenantContext(databaseService.pool);
@@ -98,6 +115,21 @@ export class CandidateAuthController {
   async logout(@Req() req: RequestWithCandidate) {
     await this.tenantContext.run(PLACEHOLDER_TENANT, (client) =>
       this.tokenService.revokeAll(client, req.candidateAccountId),
+    );
+    return { ok: true };
+  }
+
+  @Post('request-password-reset')
+  async requestPasswordReset(@Body() dto: RequestResetDto) {
+    await this.tenantContext.run(PLACEHOLDER_TENANT, (client) => this.passwordResetService.requestReset(client, dto.email));
+    // Resposta idêntica exista ou não o e-mail -- ver nota de design da Task 6.
+    return { ok: true };
+  }
+
+  @Post('reset-password')
+  async resetPassword(@Body() dto: ResetPasswordDto) {
+    await this.tenantContext.run(PLACEHOLDER_TENANT, (client) =>
+      this.passwordResetService.resetPassword(client, dto.token, dto.novaSenha),
     );
     return { ok: true };
   }

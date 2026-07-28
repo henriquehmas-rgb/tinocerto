@@ -3,6 +3,7 @@ import { CandidateAuthController } from '../candidate-auth.controller';
 import { CandidateAccountService } from '../candidate-account.service';
 import { CandidateTokenService } from '../candidate-token.service';
 import { CandidateJwtService } from '../candidate-jwt.service';
+import { PasswordResetService } from '../password-reset.service';
 import { DatabaseService } from '../../database/database.service';
 
 describe('CandidateAuthController', () => {
@@ -20,6 +21,7 @@ describe('CandidateAuthController', () => {
         { provide: CandidateAccountService, useValue: { register: registerMock, login: jest.fn() } },
         { provide: CandidateTokenService, useValue: { issue: issueMock, rotate: jest.fn(), revokeAll: jest.fn() } },
         { provide: CandidateJwtService, useValue: new CandidateJwtService() },
+        { provide: PasswordResetService, useValue: { requestReset: jest.fn(), resetPassword: jest.fn() } },
         { provide: DatabaseService, useValue: { pool: { connect: jest.fn().mockResolvedValue({ query: jest.fn().mockResolvedValue({ rows: [] }), release: jest.fn() }) } } },
       ],
     }).compile();

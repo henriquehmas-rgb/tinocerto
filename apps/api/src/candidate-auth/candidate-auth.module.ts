@@ -5,6 +5,8 @@ import { CandidateTokenService } from './candidate-token.service';
 import { CandidateJwtService } from './candidate-jwt.service';
 import { CandidateAuthGuard } from './candidate-auth.guard';
 import { PasswordService } from './password.service';
+import { EmailService } from './email.service';
+import { PasswordResetService } from './password-reset.service';
 import { PersonService } from '../talent/person.service';
 import { EnvelopeEncryptionService } from '../talent/envelope-encryption.service';
 
@@ -16,6 +18,8 @@ import { EnvelopeEncryptionService } from '../talent/envelope-encryption.service
     CandidateJwtService,
     CandidateAuthGuard,
     PasswordService,
+    EmailService,
+    PasswordResetService,
     PersonService,
     EnvelopeEncryptionService,
   ],
