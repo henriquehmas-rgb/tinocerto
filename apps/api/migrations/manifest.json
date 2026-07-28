@@ -32,6 +32,7 @@
     "public_0001__tenant_slug.sql",
     "public_0002__tenant_slug_resolution_function.sql",
     "candidate_0001__candidate_account.sql",
-    "candidate_0002__password_reset_token.sql"
+    "candidate_0002__password_reset_token.sql",
+    "resume_0001__resume_upload.sql"
   ]
 }
