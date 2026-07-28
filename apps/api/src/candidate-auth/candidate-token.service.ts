@@ -52,10 +52,6 @@ export class CandidateTokenService {
     }
     const row = result.rows[0];
 
-    if (row.expira_em.getTime() < Date.now()) {
-      throw new Error('Refresh token expirado');
-    }
-
     // Transição atômica revogado_em: NULL -> now(), condicionada ao estado
     // anterior no próprio UPDATE (não num SELECT separado feito antes). Isto
     // fecha uma corrida TOCTOU (revisão de segurança, round 1): duas
@@ -70,6 +66,17 @@ export class CandidateTokenService {
     // recebe `rowCount === 1`. A(s) outra(s) recebe(m) `rowCount === 0` e cai
     // no ramo de reuso abaixo, que é exatamente o comportamento que este
     // serviço existe para garantir.
+    //
+    // Esta checagem de reuso roda ANTES da checagem de expiração de propósito
+    // (revisão de segurança, round 2): um token já revogado é sinal de
+    // reuso/roubo independentemente de ele também estar expirado -- por
+    // exemplo, um token roubado há muito tempo, já rotacionado pelo dono
+    // legítimo, sendo reapresentado pelo atacante depois que o TTL original
+    // também já passou. Se a checagem de expiração rodasse primeiro, esse
+    // replay cairia no ramo de "expirado" (que não aciona `revokeAll`) e o
+    // restante dos tokens vivos da conta -- inclusive o filho legítimo atual
+    // -- ficaria intocado, exatamente o cenário que este serviço existe para
+    // prevenir.
     const revokeResult = await client.query<{ id: string }>(
       `UPDATE candidate_refresh_token SET revogado_em = now() WHERE id = $1 AND revogado_em IS NULL RETURNING id`,
       [row.id],
@@ -80,11 +87,21 @@ export class CandidateTokenService {
       // antes (reuso "normal", não concorrente), seja porque uma requisição
       // concorrente venceu a corrida do UPDATE acima agora mesmo (reuso
       // "de corrida"). Nos dois casos é sinal de reuso/roubo: revoga TODOS
-      // os tokens desta conta, não só este.
+      // os tokens desta conta, não só este -- mesmo que este token também
+      // esteja expirado (ver comentário acima).
       await this.revokeAll(client, row.candidate_account_id);
       // Ver o comentário no topo deste método sobre este COMMIT explícito.
       await client.query('COMMIT');
       throw new Error('Refresh token já havia sido revogado -- possível reuso detectado, todos os tokens da conta foram revogados');
+    }
+
+    // Só chegamos aqui se o token apresentado NÃO estava revogado (e acabamos
+    // de revogá-lo nós mesmos, acima). Agora, e só agora, checamos expiração:
+    // um token simplesmente expirado (nunca revogado, nunca reusado) não é em
+    // si um sinal de roubo, então não aciona `revokeAll` -- só rejeita esta
+    // apresentação.
+    if (row.expira_em.getTime() < Date.now()) {
+      throw new Error('Refresh token expirado');
     }
 
     const { token: newToken } = await this.issue(client, row.candidate_account_id);

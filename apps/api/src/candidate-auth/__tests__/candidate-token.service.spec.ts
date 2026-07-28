@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import { Pool } from 'pg';
 import { TenantContext } from '../../database/tenant-context';
 import { CandidateTokenService } from '../candidate-token.service';
@@ -148,6 +149,41 @@ describe('CandidateTokenService', () => {
     // inclusive o novo token que a lane rápida acabou de emitir.
     await expect(
       ctx.run('00000000-0000-0000-0000-000000000000', (client) => service.rotate(client, fastLaneResult.token)),
+    ).rejects.toThrow();
+  });
+
+  it('detecta reuso e revoga toda a conta mesmo quando o token já revogado também está expirado (regressão de segurança, round 2)', async () => {
+    const ctx = new TenantContext(appPool);
+    const service = new CandidateTokenService();
+
+    const { token: original } = await ctx.run('00000000-0000-0000-0000-000000000000', (client) =>
+      service.issue(client, candidateAccountId),
+    );
+    // Rotaciona normalmente: `original` fica revogado, `child` fica vivo.
+    const { token: child } = await ctx.run('00000000-0000-0000-0000-000000000000', (client) =>
+      service.rotate(client, original),
+    );
+
+    // Simula um replay do token ORIGINAL muito tempo depois -- depois que o
+    // TTL original também já passou -- retrocedendo `expira_em` diretamente
+    // no banco (o próprio serviço nunca expõe uma forma de fazer isso; é
+    // exatamente a situação de um token roubado há muito tempo sendo
+    // reapresentado tarde pelo atacante).
+    const originalHash = createHash('sha256').update(original).digest('hex');
+    await adminPool.query(
+      `UPDATE candidate_refresh_token SET expira_em = now() - interval '1 day' WHERE token_hash = $1`,
+      [originalHash],
+    );
+
+    // A reapresentação deve continuar sendo tratada como reuso/roubo -- não
+    // como "só expirado" -- e por isso precisa acionar `revokeAll` na conta
+    // inteira, incluindo o filho `child`, que ainda está vivo e não expirado.
+    await expect(
+      ctx.run('00000000-0000-0000-0000-000000000000', (client) => service.rotate(client, original)),
+    ).rejects.toThrow();
+
+    await expect(
+      ctx.run('00000000-0000-0000-0000-000000000000', (client) => service.rotate(client, child)),
     ).rejects.toThrow();
   });
 });
