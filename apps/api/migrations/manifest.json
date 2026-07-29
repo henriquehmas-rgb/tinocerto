@@ -35,6 +35,7 @@
     "candidate_0002__password_reset_token.sql",
     "resume_0001__resume_upload.sql",
     "resume_0002__person_profile_offset.sql",
-    "resume_0003__candidate_application_summary.sql"
+    "resume_0003__candidate_application_summary.sql",
+    "resume_0004__list_all_tenant_ids_function.sql"
   ]
 }

@@ -73,24 +73,50 @@ export class ResumeParsingConsumer implements OnModuleInit, OnModuleDestroy {
 
   private async consumeLoop(): Promise<void> {
     for (;;) {
-      const tenantIds = await this.listTenantIds();
-      for (const tenantId of tenantIds) {
-        await this.ensureConsumerGroup(tenantId);
-        // PEL primeiro (mensagens pendentes de uma queda anterior deste
-        // consumer para este tenant), só depois mensagens novas -- mesmo
-        // padrão de OutboxToAuditConsumer (Fase 0), sem isso a garantia
-        // at-least-once é falsa (bug já corrigido uma vez neste projeto).
-        await this.processBatch(tenantId, '0');
-        await this.processBatch(tenantId, '>');
-      }
-      if (tenantIds.length === 0) {
+      // [Fix round 1, achado #2 do revisor independente da Task 17]
+      // Corpo inteiro envolto em try/catch: sem isso, QUALQUER exceção
+      // aqui dentro (Postgres, Redis, ou -- caso concreto reproduzido ao
+      // vivo em CandidateApplicationSummaryConsumer, o gêmeo desta
+      // classe -- listTenantIds() batendo numa conexão do pool com
+      // app.tenant_id residual, ver comentário da migration
+      // resume_0004__list_all_tenant_ids_function.sql) sobe sem ser
+      // capturada a partir de `void this.consumeLoop()` (onModuleInit,
+      // fire-and-forget), vira unhandled rejection e derruba o processo
+      // Node inteiro -- não só esta requisição, o servidor HTTP inteiro
+      // junto. Loga e segue para a próxima volta em vez de deixar isso
+      // acontecer; nenhum XACK foi dado nesta iteração então nada se
+      // perde -- a garantia at-least-once do outbox cobre a próxima
+      // tentativa.
+      try {
+        const tenantIds = await this.listTenantIds();
+        for (const tenantId of tenantIds) {
+          await this.ensureConsumerGroup(tenantId);
+          // PEL primeiro (mensagens pendentes de uma queda anterior deste
+          // consumer para este tenant), só depois mensagens novas -- mesmo
+          // padrão de OutboxToAuditConsumer (Fase 0), sem isso a garantia
+          // at-least-once é falsa (bug já corrigido uma vez neste projeto).
+          await this.processBatch(tenantId, '0');
+          await this.processBatch(tenantId, '>');
+        }
+        if (tenantIds.length === 0) {
+          await new Promise((resolve) => setTimeout(resolve, 5000));
+        }
+      } catch (err) {
+        this.logger.error('Falha numa volta do laço de consumo -- seguindo para a próxima em vez de derrubar o processo', err as Error);
         await new Promise((resolve) => setTimeout(resolve, 5000));
       }
     }
   }
 
   private async listTenantIds(): Promise<string[]> {
-    const result = await this.pool.query<{ id: string }>('SELECT id FROM tenant');
+    // [Fix round 1, achado #2 do revisor independente da Task 17] Não
+    // consulta `tenant` diretamente -- ver comentário completo em
+    // resume_0004__list_all_tenant_ids_function.sql sobre por que
+    // `SELECT id FROM tenant` direto, rodando como app_runtime, tanto
+    // podia devolver 0 linhas silenciosamente (conexão nova, GUC NULL)
+    // quanto estourar 22P02 e derrubar o processo (conexão reciclada,
+    // GUC revertido para '').
+    const result = await this.pool.query<{ id: string }>('SELECT id FROM list_all_tenant_ids()');
     return result.rows.map((row) => row.id);
   }
 
