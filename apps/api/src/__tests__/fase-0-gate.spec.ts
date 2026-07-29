@@ -41,20 +41,40 @@ const MIGRATIONS_DIR = join(__dirname, '../../migrations');
 //
 // `candidate_application_summary` (resume_0003, Fase 1b Task 14) entra
 // aqui por um motivo correlato mas não idêntico ao de consent/
-// retention_policy acima: seu tenant_id é NOT NULL (cada linha registra
-// em qual tenant aquela candidatura específica existe, para exibição),
-// mas a tabela em si não é "dado de um tenant" -- é um índice GLOBAL, na
-// mesma classe de person/resume_upload (ver nota no topo de
-// resume_0003__candidate_application_summary.sql), que um candidato usa
-// para ver TODAS as suas candidaturas espalhadas por múltiplos tenants
-// numa única consulta. RLS por tenant_id seria não só desnecessário como
-// contraproducente aqui: uma policy de tenant limitaria cada leitura a UM
-// tenant por vez, exatamente o problema que este índice existe para
-// evitar (ver nota de design em resume/candidate-application-summary.consumer.ts
-// e candidate-auth/candidate-application.controller.ts). O isolamento que
+// retention_policy acima: a tabela em si não é "dado de um tenant" -- é
+// um índice GLOBAL, na mesma classe de person/resume_upload (ver nota no
+// topo de resume_0003__candidate_application_summary.sql), que um
+// candidato usa para ver TODAS as suas candidaturas espalhadas por
+// múltiplos tenants numa única consulta. RLS por tenant_id seria não só
+// desnecessário como contraproducente aqui: uma policy de tenant
+// limitaria cada leitura a UM tenant por vez, exatamente o problema que
+// este índice existe para evitar (ver nota de design em
+// resume/candidate-application-summary.consumer.ts e
+// candidate-auth/candidate-application.controller.ts). O isolamento que
 // importa -- "só o próprio candidato vê sua própria linha" -- é garantido
 // por WHERE person_id = <candidato autenticado> na camada de aplicação,
 // mesmo princípio de consent/retention_policy acima.
+//
+// IMPORTANTE (achado [Low] da revisão do gate consolidado, Task 18, fix
+// round 1): a tabela VIVA no banco não tem mais coluna tenant_id nenhuma
+// -- resume_0005__candidate_application_summary_drop_tenant_id.sql
+// (também Task 18) removeu a coluna NOT NULL que resume_0003 tinha
+// criado por engano (mesma classe de "comentário mentiroso no schema"
+// que aquela própria migration corrige: o comentário de resume_0003 já
+// dizia "sem tenant_id", mas o DDL criava a coluna assim mesmo). Esta
+// entrada no Set, porém, continua necessária: migrations aplicadas são
+// imutáveis, então o texto de resume_0003__candidate_application_summary.sql
+// ainda contém `tenant_id uuid NOT NULL` para sempre, e a checagem
+// ESTÁTICA abaixo (`findCreateTableBlocks` + `tableHasTenantId`) lê o
+// texto-fonte concatenado de todas as migrations, não o estado do banco
+// -- sem a exceção aqui, ela continuaria exigindo FORCE ROW LEVEL
+// SECURITY + policy RESTRICTIVE para uma tabela que hoje nem tem
+// tenant_id para isolar. Já a checagem AUTORITATIVA (estado real do
+// banco, mais abaixo) nem chega a precisar da exceção para esta tabela
+// especificamente -- sua query filtra por `information_schema.columns
+// ... column_name = 'tenant_id'`, e como a coluna não existe mais essa
+// tabela simplesmente não aparece no resultado; a entrada no Set fica
+// inerte ali, não incorreta.
 const RLS_EXCEPTION_TABLES = new Set(['consent', 'retention_policy', 'candidate_application_summary']);
 
 // Reforço do portão pedido pela revisão final consolidada (achado
