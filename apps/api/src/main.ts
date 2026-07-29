@@ -27,6 +27,24 @@ process.on('SIGINT', () => {
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+
+  // CORS: apps/web (Next.js, Tasks 15-17) roda em origem diferente da API
+  // em todo ambiente de desenvolvimento (portas distintas sempre = origens
+  // distintas para o navegador) e, plausivelmente, em produção tambem
+  // (subdominio proprio para o front). Ate a Task 16 nada precisava disso
+  // -- as paginas de carreiras sao SSR (fetch roda no servidor Next.js,
+  // nunca no navegador, ver nota da Task 16). A Task 17 introduz os
+  // primeiros fetches client-side ('use client') do produto direto do
+  // navegador para a API, e sem isso todo POST de candidate-auth-client.ts
+  // falha com Failed to fetch (bloqueio de CORS do navegador, silencioso
+  // no lado do cliente) -- confirmado ao vivo durante a verificacao manual
+  // da Task 17. Nenhum cookie de sessao esta envolvido (token Bearer em
+  // header, ver Task 17), entao nao ha exposicao de CSRF classica em abrir
+  // a origem; mesmo assim, restringe a WEB_ORIGIN (configuravel via env,
+  // default o dev port documentado da Task 16/17) em vez de aceitar
+  // qualquer origem.
+  app.enableCors({ origin: process.env.WEB_ORIGIN ?? 'http://localhost:3001' });
+
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
