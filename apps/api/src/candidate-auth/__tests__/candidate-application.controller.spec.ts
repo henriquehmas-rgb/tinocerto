@@ -4,7 +4,6 @@ import { CandidateApplicationController } from '../candidate-application.control
 describe('CandidateApplicationController', () => {
   const adminPool = new Pool({ connectionString: process.env.DATABASE_URL });
   let personId: string;
-  let tenantId: string;
 
   beforeAll(async () => {
     const person = await adminPool.query<{ id: string }>(
@@ -13,20 +12,18 @@ describe('CandidateApplicationController', () => {
        RETURNING id`,
     );
     personId = person.rows[0].id;
-    const tenant = await adminPool.query<{ id: string }>(
-      `INSERT INTO tenant (razao_social, cnpj, slug) VALUES ('Empresa Ctrl', '00000000000044', 'empresa-ctrl-test') RETURNING id`,
-    );
-    tenantId = tenant.rows[0].id;
+    // [Achado do gate consolidado da Fase 1b, Task 18] candidate_application_summary
+    // não tem mais tenant_id (ver resume_0005__candidate_application_summary_drop_tenant_id.sql)
+    // -- não precisa mais de um tenant de fixture aqui.
     await adminPool.query(
-      `INSERT INTO candidate_application_summary (person_id, tenant_id, application_id, job_titulo, etapa_funil)
-       VALUES ($1, $2, '22222222-3333-4444-5555-666666666699', 'Vaga Ctrl Test', 'entrevista')`,
-      [personId, tenantId],
+      `INSERT INTO candidate_application_summary (person_id, application_id, job_titulo, etapa_funil)
+       VALUES ($1, '22222222-3333-4444-5555-666666666699', 'Vaga Ctrl Test', 'entrevista')`,
+      [personId],
     );
   });
 
   afterAll(async () => {
     await adminPool.query('DELETE FROM candidate_application_summary WHERE person_id = $1', [personId]);
-    await adminPool.query('DELETE FROM tenant WHERE id = $1', [tenantId]);
     await adminPool.query('DELETE FROM person WHERE id = $1', [personId]);
     await adminPool.end();
   });

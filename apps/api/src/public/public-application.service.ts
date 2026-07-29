@@ -61,11 +61,15 @@ export class PublicApplicationService {
       touchpointId: touchpoint.id,
     });
 
+    // [Achado do gate consolidado da Fase 1b, Task 18] candidate_application_summary
+    // é global de propósito (sem tenant_id, mesma classe de person/resume_upload,
+    // ver resume_0005__candidate_application_summary_drop_tenant_id.sql) -- não
+    // grava tenant_id aqui.
     await client.query(
-      `INSERT INTO candidate_application_summary (person_id, tenant_id, application_id, job_titulo, etapa_funil)
-       VALUES ($1, $2, $3, (SELECT titulo FROM job WHERE id = $4), 'triagem')
+      `INSERT INTO candidate_application_summary (person_id, application_id, job_titulo, etapa_funil)
+       VALUES ($1, $2, (SELECT titulo FROM job WHERE id = $3), 'triagem')
        ON CONFLICT (application_id) DO NOTHING`,
-      [input.personId, input.tenantId, application.id, input.jobId],
+      [input.personId, application.id, input.jobId],
     );
 
     // Reaproveita ApplicationCustomFieldResponseService (Fase 1a Task 15)

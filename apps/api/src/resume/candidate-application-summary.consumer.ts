@@ -164,11 +164,17 @@ export class CandidateApplicationSummaryConsumer implements OnModuleInit, OnModu
         // (public-application.service.ts, Step 7 desta task): resolver o
         // título via subquery a partir de job_id, em vez de confiar num
         // campo que o publisher de eventos nunca escreveu.
+        //
+        // [Achado do gate consolidado da Fase 1b, Task 18] candidate_application_summary
+        // é global de propósito (sem tenant_id, mesma classe de person/resume_upload,
+        // ver resume_0005__candidate_application_summary_drop_tenant_id.sql) -- não
+        // grava tenant_id aqui, mesmo que o DomainEvent carregue tenantId (usado só
+        // para resolver a stream do outbox, não para esta escrita).
         await this.pool.query(
-          `INSERT INTO candidate_application_summary (person_id, tenant_id, application_id, job_titulo, etapa_funil)
-           VALUES ($1, $2, $3, (SELECT titulo FROM job WHERE id = $4), 'triagem')
+          `INSERT INTO candidate_application_summary (person_id, application_id, job_titulo, etapa_funil)
+           VALUES ($1, $2, (SELECT titulo FROM job WHERE id = $3), 'triagem')
            ON CONFLICT (application_id) DO NOTHING`,
-          [event.payload.person_id, event.tenantId, event.payload.application_id, event.payload.job_id],
+          [event.payload.person_id, event.payload.application_id, event.payload.job_id],
         );
         break;
       case 'application.stage_changed':
