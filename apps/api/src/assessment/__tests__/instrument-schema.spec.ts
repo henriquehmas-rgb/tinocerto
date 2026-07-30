@@ -67,14 +67,28 @@ describe('schema de instrumento e blocos', () => {
   });
 
   it('rejeita tipo_instrumento fora dos dois trilhos', async () => {
+    // O INSERT é feito dentro de try/catch, com RETURNING id, em vez de
+    // `expect(...).rejects`: se o CHECK for removido ou relaxado no futuro, o
+    // INSERT passa a ter sucesso e a linha 'trilho_inventado' precisa ser
+    // registrada para limpeza. `instrument` é tabela GLOBAL -- compartilhada
+    // por todos os arquivos de spec e pelo seed do instrumento inicial --, e
+    // uma linha bogus vazada ali contamina o resto da suíte. O teste tem que
+    // ficar vermelho nesse cenário sem também sujar o banco.
+    let erroDoInsert: unknown;
+    try {
+      const bogus = await adminPool.query<{ id: string }>(
+        `INSERT INTO instrument (nome, tipo_instrumento)
+         VALUES ('x', 'trilho_inventado') RETURNING id`,
+      );
+      instrumentIdsToClean.push(bogus.rows[0].id);
+    } catch (erro) {
+      erroDoInsert = erro;
+    }
+
     // 23514 = check_violation. Asserção por SQLSTATE, não só `toThrow()`: um
     // `toThrow()` genérico ficaria verde para qualquer erro do banco, inclusive
     // um que não tem nada a ver com o CHECK que o teste diz cobrir.
-    await expect(
-      adminPool.query(
-        `INSERT INTO instrument (nome, tipo_instrumento) VALUES ('x', 'trilho_inventado')`,
-      ),
-    ).rejects.toMatchObject({ code: '23514' });
+    expect(erroDoInsert).toMatchObject({ code: '23514' });
   });
 
   it('rejeita modo_administracao fora de linear/cat', async () => {
