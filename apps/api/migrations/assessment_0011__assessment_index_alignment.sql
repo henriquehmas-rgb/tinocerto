@@ -1,0 +1,44 @@
+-- Alinha os índices criados pela assessment_0004 às duas convenções que esta
+-- mesma fase já pagou uma migration para estabelecer, uma e duas migrations
+-- antes. Nada aqui corrige um defeito de correção -- corrige uma regressão de
+-- convenção que passou despercebida porque não existia guarda sobre índices.
+--
+-- (a) DROP idx_item_response_aplicacao (assessment_application_id)
+--     É prefixo à esquerda de uq_item_response_bloco (assessment_application_id,
+--     block_id). Em btree, o índice composto atende toda busca, ordenação e
+--     checagem de FK que o simples atenderia; manter os dois só custa
+--     amplificação de escrita e espaço em disco a cada INSERT. É exatamente o
+--     caso que a assessment_0008 removeu, e cujo exemplo literal no cabeçalho
+--     dela é estruturalmente idêntico a este:
+--       idx_block_instrument_version (instrument_version_id)
+--         -> uq_block_ordem (instrument_version_id, ordem)
+--     O custo aqui é maior que o de lá: item_response é a tabela de maior
+--     volume da fase -- uma linha por bloco por respondente, 20 blocos no
+--     instrumento semeado pela Task 8.
+--
+-- (b) CREATE idx_item_response_block (block_id)
+--     block_id é a SEGUNDA coluna de uq_item_response_bloco, então esse índice
+--     não serve à FK item_response.block_id -> block(id). Sem apoio dedicado,
+--     todo DELETE/UPDATE em block força varredura sequencial de item_response
+--     para validar a constraint, e a consulta natural "quais respostas existem
+--     para o bloco X" -- necessária para a calibração -- fica sem apoio. É a
+--     mesma lacuna que a assessment_0007 corrigiu em block_item.item_id, com a
+--     mesma justificativa: "Nesse índice item_id NÃO é a coluna líder, então
+--     ele não serve à FK."
+--
+-- (c) CREATE idx_aa_tenant_person (tenant_id, person_id)
+--     A irmã tenant-scoped application já tem idx_application_tenant_person, e
+--     a consulta é a mesma: "quais assessments desta pessoa neste tenant". A
+--     coluna líder é tenant_id porque a regra da fase exige isso de toda tabela
+--     com tenant_id -- e é justamente por isso que este índice, de propósito,
+--     NÃO serve à FK assessment_application.person_id -> person(id), exatamente
+--     como o índice equivalente de application também não serve. person é
+--     tabela GLOBAL; a varredura só apareceria num DELETE de person, que o
+--     domínio Talent trata por expurgo auditado, nunca por DELETE solto.
+--
+-- Numeração: a ordem real de execução vem do manifest.json, não do número no
+-- nome do arquivo. Os sequenciais 0005 e 0006 seguem reservados pelas Tasks 8
+-- e 10 desta mesma fase.
+DROP INDEX IF EXISTS idx_item_response_aplicacao;
+CREATE INDEX idx_item_response_block ON item_response (block_id);
+CREATE INDEX idx_aa_tenant_person ON assessment_application (tenant_id, person_id);

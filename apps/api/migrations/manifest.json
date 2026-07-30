@@ -46,6 +46,7 @@
     "assessment_0003__structural_gates.sql",
     "assessment_0009__structural_gates_fix.sql",
     "assessment_0010__structural_gates_flanking_paths.sql",
-    "assessment_0004__application_and_response.sql"
+    "assessment_0004__application_and_response.sql",
+    "assessment_0011__assessment_index_alignment.sql"
   ]
 }
