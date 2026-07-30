@@ -38,6 +38,7 @@
     "resume_0003__candidate_application_summary.sql",
     "resume_0004__list_all_tenant_ids_function.sql",
     "resume_0005__candidate_application_summary_drop_tenant_id.sql",
-    "platform_0002__rls_guc_fail_closed.sql"
+    "platform_0002__rls_guc_fail_closed.sql",
+    "assessment_0001__item_bank.sql"
   ]
 }
