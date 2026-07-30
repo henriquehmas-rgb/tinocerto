@@ -118,21 +118,31 @@ describe('schema de instrumento e blocos', () => {
     const itemId = item.rows[0].id;
     itemIdsToClean.push(itemId);
 
-    let blockId: string | undefined;
+    // Transação explícita com ROLLBACK, em vez de autocommit. O gate 2 da Task
+    // 3 (trg_bloco_mfc_valido, CONSTRAINT TRIGGER DEFERRABLE INITIALLY
+    // DEFERRED) valida cardinalidade e chaveamento do bloco no COMMIT, e desde
+    // o fix round 1 da Task 3 (assessment_0009) o piso de 2 itens é cobrado --
+    // em autocommit o INSERT do PRIMEIRO block_item já viraria um COMMIT de
+    // bloco com 1 item e seria rejeitado, mascarando o UNIQUE que este caso
+    // existe para provar. Dentro de uma transação o gate nunca chega a rodar:
+    // o 23505 aborta a transação e o ROLLBACK descarta tudo -- o que também
+    // dispensa a limpeza manual de block_item/block.
+    const client = await adminPool.connect();
     try {
-      const blk = await adminPool.query<{ id: string }>(
+      await client.query('BEGIN');
+      const blk = await client.query<{ id: string }>(
         `INSERT INTO block (instrument_version_id, ordem) VALUES ($1, 1) RETURNING id`,
         [versionId],
       );
-      blockId = blk.rows[0].id;
+      const blockId = blk.rows[0].id;
 
-      await adminPool.query(
-        `INSERT INTO block_item (block_id, item_id, posicao) VALUES ($1, $2, 1)`,
-        [blockId, itemId],
-      );
+      await client.query(`INSERT INTO block_item (block_id, item_id, posicao) VALUES ($1, $2, 1)`, [
+        blockId,
+        itemId,
+      ]);
 
       await expect(
-        adminPool.query(`INSERT INTO block_item (block_id, item_id, posicao) VALUES ($1, $2, 2)`, [
+        client.query(`INSERT INTO block_item (block_id, item_id, posicao) VALUES ($1, $2, 2)`, [
           blockId,
           itemId,
         ]),
@@ -140,10 +150,12 @@ describe('schema de instrumento e blocos', () => {
     } finally {
       // Limpeza no finally: uma asserção falhando não pode vazar linha para a
       // tabela global `item`, que é compartilhada com os outros arquivos de spec.
-      if (blockId) {
-        await adminPool.query('DELETE FROM block_item WHERE block_id = $1', [blockId]);
-        await adminPool.query('DELETE FROM block WHERE id = $1', [blockId]);
+      try {
+        await client.query('ROLLBACK');
+      } catch {
+        // Transação já encerrada.
       }
+      client.release();
       await adminPool.query('DELETE FROM item WHERE id = $1', [itemId]);
     }
   });

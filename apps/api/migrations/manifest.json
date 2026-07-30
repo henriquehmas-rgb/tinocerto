@@ -43,6 +43,7 @@
     "assessment_0002__instrument_and_block.sql",
     "assessment_0007__block_item_item_index.sql",
     "assessment_0008__drop_redundant_prefix_indexes.sql",
-    "assessment_0003__structural_gates.sql"
+    "assessment_0003__structural_gates.sql",
+    "assessment_0009__structural_gates_fix.sql"
   ]
 }
