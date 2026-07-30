@@ -250,7 +250,7 @@ describe('recuperação de parâmetro — o estimador devolve o theta que gerou 
       // separação de dificuldade em 1,0 o deslocamento vira
       // 0,8 * 2,0 / 2,2 = 0,73 na escala θ -- viés puro, igual em todo bloco,
       // que não cancela na média. Verificado por mutação: o estimador correto
-      // erra de 0,006 a 0,076; com `b` trocado entre vencedor e perdedor o
+      // erra de 0,022 a 0,076; com `b` trocado entre vencedor e perdedor o
       // erro vai a 0,58-0,76 e os cinco casos falham.
       //
       // Bancos reais têm blocos assim: um polo com carga fatorial alta contra
