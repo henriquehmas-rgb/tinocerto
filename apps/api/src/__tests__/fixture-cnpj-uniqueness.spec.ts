@@ -23,6 +23,18 @@ import path from 'node:path';
  * livre"), porque renumerar à mão não tem como saber o que os outros arquivos
  * escolheram. Este teste é a correção durável: em vez de consertar a colisão
  * do dia, ele torna impossível uma nova entrar sem alguém ver.
+ *
+ * SEXTA ocorrência da classe -- e a primeira em que esta guarda foi CÚMPLICE.
+ * Um spec passou o CNPJ como ARGUMENTO de um helper, `criarTenant('...49')`,
+ * em vez de colar o literal dentro do INSERT. A varredura só enxergava o
+ * literal grudado no INSERT (a classe de caractere `[^;\`]` para no primeiro
+ * backtick, ou seja, no fim do template da query parametrizada), então as
+ * duas reservas daquele arquivo nunca entraram no mapa de colisão -- e a
+ * guarda seguiu verde, sustentada pelos outros 46 arquivos. Uma guarda cega é
+ * pior que guarda nenhuma: dá o carimbo sem fazer a checagem. Daí as duas
+ * mudanças abaixo -- a varredura por literal e, principalmente, o teste de
+ * NÃO-CEGUEIRA por arquivo, que falha para QUALQUER forma futura de esconder
+ * um CNPJ da varredura, inclusive as que ninguém previu aqui.
  */
 describe('unicidade de CNPJ de fixture entre arquivos de spec', () => {
   const SRC_ROOT = path.resolve(__dirname, '..');
@@ -39,19 +51,49 @@ describe('unicidade de CNPJ de fixture entre arquivos de spec', () => {
     return out;
   }
 
-  // Casa só INSERT real em `tenant` que carregue um CNPJ literal de 14
-  // dígitos -- ignora comentários que mencionem um CNPJ (vários arquivos
-  // documentam a correção antiga citando o valor velho, e isso não reserva
-  // nada no banco).
+  // Casa o literal colado dentro do INSERT -- a forma mais comum no repo.
   const INSERT_TENANT_CNPJ = /INSERT\s+INTO\s+tenant\b[^;`]*?'(\d{14})'/gis;
+
+  // O arquivo cria tenant? Só nesses arquivos um literal reserva alguma coisa.
+  const CRIA_TENANT = /INSERT\s+INTO\s+tenant\b/is;
+
+  // Qualquer literal de 14 dígitos dentro de um arquivo que cria tenant. Pega
+  // a forma que a versão anterior desta guarda não via: CNPJ passado como
+  // argumento de helper, guardado em constante, ou listado em array.
+  const CNPJ_LITERAL = /["'`](\d{14})["'`]/g;
+
+  // Ignora comentários que mencionem um CNPJ: vários arquivos documentam a
+  // correção antiga citando o valor velho, e citar não reserva nada no banco.
+  // Sem esta poda, 5 pares de arquivos apareceriam como colisão só por causa
+  // dos comentários. O `[^:]` antes do `//` preserva URLs (`postgresql://`).
+  function semComentarios(texto: string): string {
+    return texto
+      .split('\n')
+      .filter((linha) => !/^\s*(\/\/|\*|\/\*)/.test(linha))
+      .map((linha) => linha.replace(/(^|[^:])\/\/.*$/, '$1'))
+      .join('\n');
+  }
+
+  function cnpjsDoArquivo(texto: string): Set<string> {
+    const achados = new Set<string>();
+    for (const match of texto.matchAll(INSERT_TENANT_CNPJ)) achados.add(match[1]);
+    if (CRIA_TENANT.test(texto)) {
+      for (const match of semComentarios(texto).matchAll(CNPJ_LITERAL)) achados.add(match[1]);
+    }
+    return achados;
+  }
+
+  function arquivos(): { rel: string; texto: string }[] {
+    return walk(SRC_ROOT).map((full) => ({
+      rel: path.relative(SRC_ROOT, full).split(path.sep).join('/'),
+      texto: readFileSync(full, 'utf-8'),
+    }));
+  }
 
   function collectUses(): Map<string, Set<string>> {
     const uses = new Map<string, Set<string>>();
-    for (const file of walk(SRC_ROOT)) {
-      const text = readFileSync(file, 'utf-8');
-      for (const match of text.matchAll(INSERT_TENANT_CNPJ)) {
-        const cnpj = match[1];
-        const rel = path.relative(SRC_ROOT, file).split(path.sep).join('/');
+    for (const { rel, texto } of arquivos()) {
+      for (const cnpj of cnpjsDoArquivo(texto)) {
         if (!uses.has(cnpj)) uses.set(cnpj, new Set());
         uses.get(cnpj)!.add(rel);
       }
@@ -76,5 +118,28 @@ describe('unicidade de CNPJ de fixture entre arquivos de spec', () => {
     // fixtures estão únicos.
     const uses = collectUses();
     expect(uses.size).toBeGreaterThan(20);
+  });
+
+  it('todo arquivo que cria tenant tem pelo menos um CNPJ visível à varredura', () => {
+    // A guarda de vacuidade acima é AGREGADA, e por isso não protege nada:
+    // 46 arquivos visíveis escondem 1 invisível sem mover o número. Esta é
+    // POR ARQUIVO, e é a que fecha o buraco de verdade -- se um spec insere
+    // em `tenant` mas nenhum CNPJ dele entra no mapa, as reservas dele não
+    // estão sendo checadas contra ninguém e o próximo spec pode escolher o
+    // mesmo número sem a suíte reclamar.
+    //
+    // Falhou? Escreva o CNPJ como literal no arquivo de spec -- dentro do
+    // INSERT ou como argumento literal do helper, tanto faz, os dois são
+    // vistos. O que NÃO pode é montar o CNPJ em tempo de execução
+    // (concatenação, contador, random): um valor que só existe durante a
+    // rodada é, por construção, invisível a qualquer varredura estática e
+    // reabre exatamente este buraco.
+    const cegos = arquivos()
+      .filter(({ texto }) => CRIA_TENANT.test(texto))
+      .filter(({ texto }) => cnpjsDoArquivo(texto).size === 0)
+      .map(({ rel }) => rel)
+      .sort();
+
+    expect(cegos).toEqual([]);
   });
 });
