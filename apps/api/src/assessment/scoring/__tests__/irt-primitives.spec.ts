@@ -89,4 +89,30 @@ describe('primitivas TRI', () => {
       expect(obtido / valor).toBeCloseTo(1, 10);
     }
   });
+
+  it('a guarda numérica devolve 0 em vez de deixar NaN escapar para o estimador', () => {
+    // Sem a guarda, (Q/P) * razao^2 vira 0/0 e produz NaN. NaN não estoura:
+    // toda comparação com NaN é falsa, então ele atravessa em silêncio a
+    // quadratura EAP da escoragem e o argmax do CAT — que degenera para
+    // "primeiro item da lista" sem erro nenhum. Por isso aqui se afere o
+    // valor exato (0, que é o limite verdadeiro), não só a finitude.
+
+    // Caminho c >= 1: (P - c)/(1 - c) = 0/0. Esse patamar de c é gravável --
+    // assessment_0001__item_bank.sql declara `c numeric(8,5) NOT NULL
+    // DEFAULT 0` sem CHECK de faixa, então uma carga de banco de itens ou
+    // uma calibração ruim consegue escrever c >= 1 e chegar até aqui.
+    expect(informacaoFisher(0, { a: 1, b: 0, c: 1 })).toBe(0);
+    // Acima de 1 a razão sai de 0/0 e vira um número finito porém negativo,
+    // igualmente inválido como informação.
+    expect(informacaoFisher(0, { a: 1, b: 0, c: 1.5 })).toBe(0);
+
+    // Caminho P <= EPSILON: em theta bem abaixo de b a exponencial satura,
+    // P zera de vez e Q/P vira 1/0.
+    expect(Number.isFinite(informacaoFisher(-1000, item2PL))).toBe(true);
+    expect(informacaoFisher(-1000, item2PL)).toBe(0);
+
+    // Caminho Q <= EPSILON: o espelho na cauda alta, com P saturando em 1.
+    expect(Number.isFinite(informacaoFisher(1000, item2PL))).toBe(true);
+    expect(informacaoFisher(1000, item2PL)).toBe(0);
+  });
 });
