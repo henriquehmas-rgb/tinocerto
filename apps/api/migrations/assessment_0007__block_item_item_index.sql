@@ -1,0 +1,17 @@
+-- Índice de apoio para a FK block_item.item_id -> item(id).
+--
+-- A assessment_0002 criou block_item com uq_block_item (block_id, item_id).
+-- Nesse índice item_id NÃO é a coluna líder, então ele não serve à FK. Sem um
+-- índice dedicado, todo DELETE/UPDATE em item força varredura sequencial de
+-- block_item para validar a constraint, e a consulta natural "em quais blocos
+-- o item X aparece" -- necessária para a gestão do banco de itens e para o
+-- controle de exposição -- fica sem apoio.
+--
+-- As outras duas filhas de item (item_parameter_version e dif_flag, criadas na
+-- assessment_0001) já nasceram com o índice dedicado equivalente: idx_ipv_item
+-- e idx_dif_flag_item. Esta migration alinha block_item ao mesmo padrão.
+--
+-- Numeração: os sequenciais 0003 a 0006 estão reservados por migrations
+-- posteriores desta mesma fase. A ordem real de execução vem do manifest.json,
+-- não do número no nome do arquivo.
+CREATE INDEX idx_block_item_item ON block_item (item_id);
