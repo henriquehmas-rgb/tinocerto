@@ -354,9 +354,15 @@ describe('gates estruturais do assessment', () => {
     let tenantId: string | undefined;
     let userId: string | undefined;
     try {
+      // [Fix round 2, achado #3] Este fixture nasceu com o CNPJ 4-9 do fim da
+      // faixa reservada, que o plano da Fase 2a já aloca para o spec da Task 7.
+      // A colisão só não aparecia porque a Task 7 ainda não existe --
+      // fixture-cnpj-uniqueness.spec.ts quebraria no dia em que ela entrasse, e
+      // num arquivo sem relação com a mudança. Renumerado para o primeiro valor
+      // fora da faixa que o plano reserva.
       const t = await adminPool.query<{ id: string }>(
         `INSERT INTO tenant (razao_social, cnpj, slug)
-         VALUES ('Empresa Gate CRP', '00000000000049', 'test-tenant-00000000000049') RETURNING id`,
+         VALUES ('Empresa Gate CRP', '00000000000052', 'test-tenant-00000000000052') RETURNING id`,
       );
       tenantId = t.rows[0].id;
 
@@ -387,6 +393,258 @@ describe('gates estruturais do assessment', () => {
       }
       if (tenantId) await adminPool.query('DELETE FROM tenant WHERE id = $1', [tenantId]);
     }
+
+    const sobrou = await adminPool.query(
+      `SELECT 1 FROM psicologo_credencial WHERE crp_ativo IS TRUE`,
+    );
+    expect(sobrou.rows).toHaveLength(0);
+  });
+
+  it('gate 1 não é contornável reclassificando o instrumento para o trilho B', async () => {
+    // [Fix round 2, achado #1 -- ALTO] O trigger de gate 1 só existia em
+    // instrument_version, mas o TRILHO é lido de instrument.tipo_instrumento.
+    // Criar um instrumento trilho A, ativar a versão dele legitimamente (trilho
+    // A não pede CRP) e só então reclassificar o instrumento para
+    // teste_psicologico_satepsi produzia uma versão SATEPSI ATIVA com zero CRP
+    // ativo -- o exato estado que o gate existe para tornar impossível. E não
+    // por um caminho hipotético: assessment_0002 concede UPDATE em `instrument`
+    // ao app_runtime, o role que escreve em produção, então este caso roda pelo
+    // appPool de propósito.
+    const instId = await novoInstrumento('Instrumento Trilho A Reclassificado');
+    await adminPool.query(
+      `INSERT INTO instrument_version (instrument_id, versao, ativo) VALUES ($1, 1, true)`,
+      [instId],
+    );
+
+    await expect(
+      appPool.query(`UPDATE instrument SET tipo_instrumento = $2 WHERE id = $1`, [
+        instId,
+        'teste_psicologico_satepsi',
+      ]),
+    ).rejects.toThrow(/crp_ativo/i);
+
+    const depois = await adminPool.query<{ tipo_instrumento: string }>(
+      `SELECT tipo_instrumento FROM instrument WHERE id = $1`,
+      [instId],
+    );
+    expect(depois.rows[0].tipo_instrumento).toBe('nao_psicologico');
+  });
+
+  it('reclassificar para o trilho B SEM versão ativa é livre — o gate recai na ativação', async () => {
+    // A contrapartida do caso acima: o gate de instrument não é um veto a
+    // reclassificar, é o mesmo gate de sempre olhando do outro lado da relação.
+    // Sem versão ativa não há o que travar, e a exigência de CRP volta a ser
+    // cobrada na hora de ativar. Sem este caso, o fix acima passaria igual se
+    // tivesse sido implementado como "tipo_instrumento é imutável", que é uma
+    // regra diferente e mais forte do que a Res. CFP 31/2022 art. 8 pede.
+    const instId = await novoInstrumento('Instrumento Reclassificado Sem Versao Ativa');
+    const ver = await adminPool.query<{ id: string }>(
+      `INSERT INTO instrument_version (instrument_id, versao, ativo) VALUES ($1, 1, false) RETURNING id`,
+      [instId],
+    );
+
+    await appPool.query(`UPDATE instrument SET tipo_instrumento = $2 WHERE id = $1`, [
+      instId,
+      'teste_psicologico_satepsi',
+    ]);
+
+    await expect(
+      appPool.query(`UPDATE instrument_version SET ativo = true WHERE id = $1`, [ver.rows[0].id]),
+    ).rejects.toThrow(/crp_ativo/i);
+  });
+
+  it('gate 2 não é contornável virando a valência de um item já dentro do bloco', async () => {
+    // [Fix round 2, achado #2 -- ALTO] O round 1 fechou a COMPOSIÇÃO do bloco
+    // (INSERT, UPDATE de block_id, DELETE em block_item), mas a VALÊNCIA mora
+    // em `item`, e nada disparava quando ela era virada num item já commitado
+    // dentro de um bloco. Virar o único 'negativo' para 'positivo' deixa o
+    // bloco em 2 positivos / 0 negativos de forma permanente -- o mesmo ranking
+    // ipsativo do achado de UPDATE do round 1, por outra porta. assessment_0001
+    // concede UPDATE em `item` ao app_runtime, então uma correção editorial de
+    // item (caminho plausível) invalidava calado todo bloco que o contivesse.
+    const instId = await novoInstrumento('Instrumento Valencia Virada');
+    const ver = await adminPool.query<{ id: string }>(
+      `INSERT INTO instrument_version (instrument_id, versao) VALUES ($1, 1) RETURNING id`,
+      [instId],
+    );
+
+    const pos = await novoItem('positivo');
+    const neg = await novoItem('negativo');
+
+    const montar = await adminPool.connect();
+    let blocoId = '';
+    try {
+      await montar.query('BEGIN');
+      const blk = await montar.query<{ id: string }>(
+        `INSERT INTO block (instrument_version_id, ordem) VALUES ($1, 1) RETURNING id`,
+        [ver.rows[0].id],
+      );
+      blocoId = blk.rows[0].id;
+      await montar.query(`INSERT INTO block_item (block_id, item_id, posicao) VALUES ($1, $2, 1)`, [
+        blocoId,
+        pos,
+      ]);
+      await montar.query(`INSERT INTO block_item (block_id, item_id, posicao) VALUES ($1, $2, 2)`, [
+        blocoId,
+        neg,
+      ]);
+      await montar.query('COMMIT');
+    } finally {
+      montar.release();
+    }
+
+    const client = await appPool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query(`UPDATE item SET chave_valencia = 'positivo' WHERE id = $1`, [neg]);
+      // Trigger de constraint DIFERIDO: a validação só dispara aqui, no COMMIT.
+      await expect(client.query('COMMIT')).rejects.toThrow(/chaveamento oposto/i);
+    } finally {
+      try {
+        await client.query('ROLLBACK');
+      } catch {
+        // Transação já encerrada pelo erro do COMMIT.
+      }
+      client.release();
+    }
+
+    // O bloco continua íntegro: o COMMIT inteiro foi revertido.
+    const conferencia = await adminPool.query<{ n: string; pos: string; neg: string }>(
+      `SELECT count(*)::text AS n,
+              count(*) FILTER (WHERE i.chave_valencia = 'positivo')::text AS pos,
+              count(*) FILTER (WHERE i.chave_valencia = 'negativo')::text AS neg
+         FROM block_item bi JOIN item i ON i.id = bi.item_id
+        WHERE bi.block_id = $1`,
+      [blocoId],
+    );
+    expect(conferencia.rows[0]).toEqual({ n: '2', pos: '1', neg: '1' });
+  });
+
+  it('troca simétrica de valência dentro do bloco é aceita no commit', async () => {
+    // A contrapartida do caso acima. O gate 2 protege o CHAVEAMENTO OPOSTO do
+    // bloco, não a valência individual de cada item: inverter os dois itens de
+    // um bloco na mesma transação é remanejo editorial legítimo e o estado
+    // final continua 1 positivo / 1 negativo. Só passa porque o trigger é
+    // DEFERRABLE INITIALLY DEFERRED e enxerga o estado final no COMMIT -- uma
+    // implementação IMMEDIATE barraria no meio da troca. Sem este caso, essa
+    // diferença passaria despercebida.
+    const instId = await novoInstrumento('Instrumento Valencia Trocada');
+    const ver = await adminPool.query<{ id: string }>(
+      `INSERT INTO instrument_version (instrument_id, versao) VALUES ($1, 1) RETURNING id`,
+      [instId],
+    );
+
+    const pos = await novoItem('positivo');
+    const neg = await novoItem('negativo');
+
+    const montar = await adminPool.connect();
+    let blocoId = '';
+    try {
+      await montar.query('BEGIN');
+      const blk = await montar.query<{ id: string }>(
+        `INSERT INTO block (instrument_version_id, ordem) VALUES ($1, 1) RETURNING id`,
+        [ver.rows[0].id],
+      );
+      blocoId = blk.rows[0].id;
+      await montar.query(`INSERT INTO block_item (block_id, item_id, posicao) VALUES ($1, $2, 1)`, [
+        blocoId,
+        pos,
+      ]);
+      await montar.query(`INSERT INTO block_item (block_id, item_id, posicao) VALUES ($1, $2, 2)`, [
+        blocoId,
+        neg,
+      ]);
+      await montar.query('COMMIT');
+    } finally {
+      montar.release();
+    }
+
+    const client = await appPool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query(`UPDATE item SET chave_valencia = 'negativo' WHERE id = $1`, [pos]);
+      await client.query(`UPDATE item SET chave_valencia = 'positivo' WHERE id = $1`, [neg]);
+      await client.query('COMMIT');
+    } finally {
+      client.release();
+    }
+
+    const conferencia = await adminPool.query<{ n: string; pos: string; neg: string }>(
+      `SELECT count(*)::text AS n,
+              count(*) FILTER (WHERE i.chave_valencia = 'positivo')::text AS pos,
+              count(*) FILTER (WHERE i.chave_valencia = 'negativo')::text AS neg
+         FROM block_item bi JOIN item i ON i.id = bi.item_id
+        WHERE bi.block_id = $1`,
+      [blocoId],
+    );
+    expect(conferencia.rows[0]).toEqual({ n: '2', pos: '1', neg: '1' });
+  });
+
+  it('revogar o CRP desativa a versão do trilho B que dependia dele', async () => {
+    // [Fix round 2, achado #4] O gate 1 era uma checagem de INSTANTE DA
+    // ATIVAÇÃO: depois de ativada, revogar o CRP (ou apagar a credencial)
+    // deixava a versão SATEPSI ativa com zero CRP ativo no sistema -- o estado
+    // proibido, alcançado por um evento rotineiro (CRP que caduca ou é
+    // cassado). O banco não bloqueia a revogação, que é registro de fato do
+    // mundo; ele desliga o instrumento privativo, que é o que a Res. CFP
+    // 31/2022 art. 8 de fato exige.
+    const instId = await novoInstrumento('Instrumento Trilho B CRP Revogado', 'teste_psicologico_satepsi');
+
+    let tenantId: string | undefined;
+    let userId: string | undefined;
+    let versaoId = '';
+    try {
+      const t = await adminPool.query<{ id: string }>(
+        `INSERT INTO tenant (razao_social, cnpj, slug)
+         VALUES ('Empresa CRP Revogado', '00000000000053', 'test-tenant-00000000000053') RETURNING id`,
+      );
+      tenantId = t.rows[0].id;
+
+      const u = await adminPool.query<{ id: string }>(
+        `INSERT INTO user_account (tenant_id, email) VALUES ($1, 'psi.revogado@example.com') RETURNING id`,
+        [tenantId],
+      );
+      userId = u.rows[0].id;
+
+      await adminPool.query(
+        `INSERT INTO psicologo_credencial (user_id, tenant_id, crp_numero, crp_uf, crp_ativo)
+         VALUES ($1, $2, '06/654321', 'SP', true)`,
+        [userId, tenantId],
+      );
+
+      // Ativação legítima: há CRP ativo no sistema neste momento.
+      const ver = await adminPool.query<{ id: string }>(
+        `INSERT INTO instrument_version (instrument_id, versao, ativo) VALUES ($1, 1, true) RETURNING id`,
+        [instId],
+      );
+      versaoId = ver.rows[0].id;
+
+      const antes = await adminPool.query<{ ativo: boolean }>(
+        `SELECT ativo FROM instrument_version WHERE id = $1`,
+        [versaoId],
+      );
+      expect(antes.rows[0].ativo).toBe(true);
+
+      // O CRP caduca.
+      await adminPool.query(`UPDATE psicologo_credencial SET crp_ativo = false WHERE user_id = $1`, [
+        userId,
+      ]);
+    } finally {
+      // Limpeza no finally e ANTES das asserções finais, pelo mesmo motivo do
+      // caso anterior: CRP ativo residual deixaria o primeiro caso deste
+      // arquivo verde por acidente.
+      if (userId) {
+        await adminPool.query('DELETE FROM psicologo_credencial WHERE user_id = $1', [userId]);
+        await adminPool.query('DELETE FROM user_account WHERE id = $1', [userId]);
+      }
+      if (tenantId) await adminPool.query('DELETE FROM tenant WHERE id = $1', [tenantId]);
+    }
+
+    const depois = await adminPool.query<{ ativo: boolean }>(
+      `SELECT ativo FROM instrument_version WHERE id = $1`,
+      [versaoId],
+    );
+    expect(depois.rows[0].ativo).toBe(false);
 
     const sobrou = await adminPool.query(
       `SELECT 1 FROM psicologo_credencial WHERE crp_ativo IS TRUE`,
