@@ -625,10 +625,30 @@ describe('gates estruturais do assessment', () => {
       );
       expect(antes.rows[0].ativo).toBe(true);
 
-      // O CRP caduca.
-      await adminPool.query(`UPDATE psicologo_credencial SET crp_ativo = false WHERE user_id = $1`, [
-        userId,
-      ]);
+      // O CRP caduca -- pelo role de PRODUÇÃO (app_runtime), não pelo dono.
+      // psicologo_credencial tem FORCE ROW LEVEL SECURITY com as duas policies
+      // escopadas TO app_runtime, então revogar via adminPool (SUPERUSER,
+      // BYPASSRLS) exercitaria um caminho que não é o de produção: se algum
+      // dia a function do trigger perder o SECURITY DEFINER, o gate pararia de
+      // desativar o instrumento em produção e este teste continuaria verde.
+      // Precisa de app.tenant_id setado para a RLS deixar o próprio tenant
+      // enxergar a própria credencial.
+      const clientRevogacao = await appPool.connect();
+      try {
+        await clientRevogacao.query('BEGIN');
+        await clientRevogacao.query(`SELECT set_config('app.tenant_id', $1, true)`, [tenantId]);
+        const revogado = await clientRevogacao.query(
+          `UPDATE psicologo_credencial SET crp_ativo = false WHERE user_id = $1`,
+          [userId],
+        );
+        // Guarda de asserção-que-não-pode-falhar: se a RLS escondesse a linha,
+        // o UPDATE afetaria 0 linhas, o trigger nunca dispararia, e o teste
+        // passaria adiante medindo nada.
+        expect(revogado.rowCount).toBe(1);
+        await clientRevogacao.query('COMMIT');
+      } finally {
+        clientRevogacao.release();
+      }
     } finally {
       // Limpeza no finally e ANTES das asserções finais, pelo mesmo motivo do
       // caso anterior: CRP ativo residual deixaria o primeiro caso deste
