@@ -21,6 +21,17 @@ const itens: Record<string, ItemNoBloco> = {
   // (metade das comparações reais de qualquer bloco) passaria despercebido.
   p1d: { itemId: 'p1d', dominio: 'conscienciosidade', valencia: 'positivo', params: { a: 1.2, b: 1.0, c: 0 } },
 
+  // Par de chaveamento oposto com discriminações DESIGUAIS e dificuldades
+  // diferentes. É a única configuração capaz de expor um erro de ATRIBUIÇÃO de
+  // `b` -- cada lado da comparação usando o `b` do outro item. O deslocamento
+  // que esse erro causa na diferença de utilidades é
+  //     (aEf_vencedor + aEf_perdedor) (b_vencedor - b_perdedor),
+  // e nos pares p1/n1/p1d/n1d acima os dois polos têm |a| = 1,2 idêntico, então
+  // aEf_vencedor + aEf_perdedor = 1,2 + (-1,2) = 0 e a troca é numericamente
+  // INVISÍVEL. Com a = 1,5 contra 0,7 o fator vira 0,8 e o erro aparece.
+  pForte: { itemId: 'pForte', dominio: 'conscienciosidade', valencia: 'positivo', params: { a: 1.5, b: 1.0, c: 0 } },
+  nFraco: { itemId: 'nFraco', dominio: 'conscienciosidade', valencia: 'negativo', params: { a: 0.7, b: -1.0, c: 0 } },
+
   // Itens FORA da dimensão estimada, ambos com b = 0 e discriminações muito
   // diferentes entre si. Sob a aproximação 1-D (traço fora da dimensão fixo na
   // média do prior), a contribuição deles é a * (0 - 0) = 0 nos dois casos, e
@@ -46,16 +57,20 @@ const itens: Record<string, ItemNoBloco> = {
  *
  * `k` é a diferença de discriminação efetiva entre vencedor e perdedor
  * (ex.: i1 positivo a=1,2 contra i2 negativo a=1,1 dá k = 1,2 - (-1,1) = 2,3),
- * `m` é o número de comparações idênticas. Vale só para itens com b = 0.
+ * `m` é o número de comparações idênticas e `c` é o deslocamento que a
+ * dificuldade dos DOIS itens produz,
+ *     c = aEf_vencedor * b_vencedor - aEf_perdedor * b_perdedor,
+ * de modo que a diferença de utilidades do par é k*θ - c. Com b = 0 nos dois
+ * lados, c = 0 e a referência recai no caso simples.
  */
-function posteriorReferencia(k: number, m: number): { media: number; desvio: number; variancia: number } {
+function posteriorReferencia(k: number, m: number, c = 0): { media: number; desvio: number; variancia: number } {
   const passo = 0.0002;
   let soma = 0;
   let somaT = 0;
   let somaT2 = 0;
 
   for (let t = -10; t <= 10 + 1e-12; t += passo) {
-    const p = 1 / (1 + Math.exp(-k * t));
+    const p = 1 / (1 + Math.exp(-(k * t - c)));
     const peso = Math.pow(p, m) * Math.exp(-0.5 * t * t);
     soma += peso;
     somaT += t * peso;
@@ -277,6 +292,41 @@ describe('estimarThetaEAP', () => {
     // Valores corretos: 0,6468 e 0,8673 -- separação de ~0,22. Com `b` inerte
     // do lado do vencedor os dois colapsam no mesmo 0,6468.
     expect(thetaVencedorBAlto).toBeGreaterThan(thetaVencedorB0 + 0.1);
+  });
+
+  it('o `b` de cada item entra na utilidade DAQUELE item, não na do adversário', () => {
+    // Os dois testes acima provam que `b` está PRESENTE nas duas utilidades e
+    // que a magnitude e o sinal dele estão certos. Nenhum deles prova que cada
+    // `b` está atribuído ao item CERTO -- o erro de copiar-e-colar em que cada
+    // lado da comparação usa o `b` do adversário. Naqueles pares ele é
+    // literalmente indetectável: p1/p1d/n1/n1d têm todos |a| = 1,2, e o
+    // deslocamento causado pela troca é
+    //     (aEf_vencedor + aEf_perdedor) (b_vencedor - b_perdedor)
+    //         = (1,2 + (-1,2)) * Δb = 0.
+    // Com pForte (a = 1,5, b = 1,0) contra nFraco (a = 0,7, b = -1,0) o fator
+    // vira 1,5 + (-0,7) = 0,8 e a troca desloca o limiar do par em 0,73 na
+    // escala θ, para o lado ERRADO.
+    const pares = decomporBlocoEmPares({
+      blockId: 'batr',
+      itemIds: ['pForte', 'nFraco'],
+      maisId: 'pForte',
+      menosId: 'nFraco',
+    });
+
+    const { theta } = estimarThetaEAP(pares, 'conscienciosidade', itens);
+
+    // k = 1,5 - (-0,7) = 2,2.
+    // c = 1,5 * 1,0 - (-0,7) * (-1,0) = 0,8  (atribuição CORRETA)
+    // c = 1,5 * (-1,0) - (-0,7) * 1,0 = -0,8 (atribuição TROCADA)
+    const correta = posteriorReferencia(2.2, 1, 0.8);
+    const trocada = posteriorReferencia(2.2, 1, -0.8);
+
+    // Âncora absoluta: 0,7770 com a atribuição certa, 0,4913 com ela trocada.
+    expect(theta).toBeCloseTo(correta.media, 2);
+    // Dito às claras, para o dia em que alguém mexer nos parâmetros do par:
+    // as duas referências precisam continuar longe uma da outra, senão a
+    // asserção acima volta a ser cega.
+    expect(Math.abs(correta.media - trocada.media)).toBeGreaterThan(0.25);
   });
 
   it('sem nenhuma comparação naquela dimensão, devolve o prior (theta 0, SE ~1)', () => {

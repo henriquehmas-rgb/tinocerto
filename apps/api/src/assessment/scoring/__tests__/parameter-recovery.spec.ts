@@ -43,6 +43,12 @@ interface OpcoesBanco {
   centro?: number;
   /** Prefixo dos ids, para bancos de dimensões diferentes coexistirem. */
   prefixo?: string;
+  /** Discriminação do polo positivo do bloco. */
+  discriminacaoPositiva?: number;
+  /** Discriminação do polo negativo do bloco (entra na utilidade com sinal invertido). */
+  discriminacaoNegativa?: number;
+  /** Meia-distância entre as duas dificuldades do bloco (ver SEPARACAO_DIFICULDADE). */
+  separacao?: number;
 }
 
 /** Monta um banco sintético de blocos com chaveamento oposto. */
@@ -53,6 +59,9 @@ function montarBanco(
   const dominio = opcoes.dominio ?? 'conscienciosidade';
   const centro = opcoes.centro ?? 0;
   const prefixo = opcoes.prefixo ?? 'b';
+  const aPositivo = opcoes.discriminacaoPositiva ?? 1.2;
+  const aNegativo = opcoes.discriminacaoNegativa ?? 1.1;
+  const separacao = opcoes.separacao ?? SEPARACAO_DIFICULDADE;
 
   const itens: Record<string, ItemNoBloco> = {};
   const blocos: string[][] = [];
@@ -69,13 +78,13 @@ function montarBanco(
       itemId: idPos,
       dominio,
       valencia: 'positivo',
-      params: { a: 1.2, b: limiar + SEPARACAO_DIFICULDADE, c: 0 },
+      params: { a: aPositivo, b: limiar + separacao, c: 0 },
     };
     itens[idNeg] = {
       itemId: idNeg,
       dominio,
       valencia: 'negativo',
-      params: { a: 1.1, b: limiar - SEPARACAO_DIFICULDADE, c: 0 },
+      params: { a: aNegativo, b: limiar - separacao, c: 0 },
     };
     blocos.push([idPos, idNeg]);
   }
@@ -138,6 +147,45 @@ function mediaRecuperada(
   return estimativas.reduce((acc, t) => acc + t, 0) / estimativas.length;
 }
 
+/**
+ * EAP de referência para o padrão em que o polo positivo vence em TODOS os
+ * blocos do banco -- recalculado da definição do modelo, sem reaproveitar
+ * nada do estimador.
+ *
+ * Cada bloco de chaveamento oposto contribui com uma logística de ganho
+ * k = a+ + a- e deslocamento c = a+ b+ + a- b-. `desvioPrior` fica explícito
+ * para deixar claro qual prior está sendo afirmado.
+ */
+function eapReferencia(
+  banco: { itens: Record<string, ItemNoBloco>; blocos: string[][] },
+  desvioPrior: number,
+): number {
+  const termos = banco.blocos.map(([idPos, idNeg]) => {
+    const pos = banco.itens[idPos];
+    const neg = banco.itens[idNeg];
+    return {
+      k: pos.params.a + neg.params.a,
+      c: pos.params.a * pos.params.b + neg.params.a * neg.params.b,
+    };
+  });
+
+  const passo = 0.001;
+  let soma = 0;
+  let somaT = 0;
+
+  for (let t = -8; t <= 8 + 1e-12; t += passo) {
+    let logVerossimilhanca = 0;
+    for (const termo of termos) {
+      logVerossimilhanca += Math.log(1 / (1 + Math.exp(-(termo.k * t - termo.c))));
+    }
+    const peso = Math.exp(logVerossimilhanca - (0.5 * t * t) / (desvioPrior * desvioPrior));
+    soma += peso;
+    somaT += t * peso;
+  }
+
+  return somaT / soma;
+}
+
 describe('recuperação de parâmetro — o estimador devolve o theta que gerou os dados', () => {
   const banco = montarBanco(40);
 
@@ -180,23 +228,109 @@ describe('recuperação de parâmetro — o estimador devolve o theta que gerou 
     },
   );
 
+  it.each([-1.5, -0.75, 0, 0.75, 1.5])(
+    'recupera theta verdadeiro = %p num banco de discriminações DESIGUAIS, onde trocar `b` de item vira viés',
+    (thetaVerdadeiro) => {
+      // Terceiro e último ponto cego do termo de dificuldade: a ATRIBUIÇÃO de
+      // `b` ao item certo. Os dois bancos acima veem a MAGNITUDE e o SINAL de
+      // `b`, mas não veem um erro de copiar-e-colar em que cada lado da
+      // comparação usa o `b` do OUTRO item. O motivo é aritmético: esse erro
+      // desloca a diferença de utilidades por
+      //
+      //     (aEf_vencedor + aEf_perdedor) (b_vencedor - b_perdedor)
+      //
+      // enquanto θ entra com ganho (aEf_vencedor - aEf_perdedor). Num bloco de
+      // chaveamento oposto o primeiro ganho é (a+ - a-) e o segundo (a+ + a-),
+      // então com a+ = 1,2 e a- = 1,1 o erro entra 23x atenuado: 0,1 * 1,2
+      // contra 2,3, ou seja 0,052 na escala θ -- invisível sob a tolerância de
+      // 0,35.
+      //
+      // A cura é desbalancear a discriminação dos polos. Com a+ = 1,5 e
+      // a- = 0,7 o ganho do erro sobe para 0,8 e o de θ cai para 2,2, e com a
+      // separação de dificuldade em 1,0 o deslocamento vira
+      // 0,8 * 2,0 / 2,2 = 0,73 na escala θ -- viés puro, igual em todo bloco,
+      // que não cancela na média. Verificado por mutação: o estimador correto
+      // erra de 0,006 a 0,076; com `b` trocado entre vencedor e perdedor o
+      // erro vai a 0,58-0,76 e os cinco casos falham.
+      //
+      // Bancos reais têm blocos assim: um polo com carga fatorial alta contra
+      // um polo fraco é o caso comum, não a exceção.
+      const desigual = montarBanco(40, {
+        prefixo: 'g',
+        discriminacaoPositiva: 1.5,
+        discriminacaoNegativa: 0.7,
+        separacao: 1.0,
+      });
+      const rng = criarRng(20260801 + Math.round(thetaVerdadeiro * 100));
+
+      const media = mediaRecuperada(thetaVerdadeiro, desigual, 'conscienciosidade', rng);
+
+      expect(Math.abs(media - thetaVerdadeiro)).toBeLessThan(0.35);
+    },
+  );
+
   it('a ordenação entre respondentes é preservada (o que a ordenação dentro da vaga usa)', () => {
     const rng = criarRng(99991);
     const verdadeiros = [-2, -1, 0, 1, 2];
 
-    // Média de replicações pelo mesmo motivo do caso acima: UMA aplicação de
-    // 40 blocos carrega erro amostral real, então dois respondentes vizinhos
-    // podem trocar de posição por puro sorteio. Sem a média este caso passa
-    // ou falha conforme a semente. A média isola a propriedade do estimador
-    // do ruído amostral do instrumento; a comparação entre respondentes
-    // segue estrita.
-    const estimados = verdadeiros.map((tv) => mediaRecuperada(tv, banco, 'conscienciosidade', rng));
+    // UMA aplicação por respondente, de propósito: é exatamente assim que o
+    // produto ordena candidatos dentro de uma vaga. Tirar a média de várias
+    // replicações removeria justamente a sensibilidade a erro amostral que
+    // este caso afirma cobrir. A semente é fixa, então o resultado é
+    // reprodutível -- não há risco de falha intermitente.
+    const estimados = verdadeiros.map((tv) => {
+      const comparacoes = simularRespostas(tv, banco.itens, banco.blocos, rng);
+      return estimarThetaEAP(comparacoes, 'conscienciosidade', banco.itens).theta;
+    });
 
     // Sem percentil no ano 1, a ordenação DENTRO da vaga é o que o produto
     // entrega -- então monotonicidade importa mais que calibração absoluta.
     for (let i = 1; i < estimados.length; i++) {
       expect(estimados[i]).toBeGreaterThan(estimados[i - 1]);
     }
+  });
+
+  it('padrão de resposta extremo encolhe em direção ao prior (é EAP, não MLE)', () => {
+    // O estimador documenta a escolha de EAP sobre MLE assim: "MLE diverge em
+    // padrão de resposta extremo (o respondente que escolhe sempre o mesmo
+    // polo): a verossimilhança não tem máximo finito". Este caso é o que
+    // AFIRMA essa escolha -- sem ele, remover o prior do EAP (degenerando o
+    // estimador em MLE truncado na grade) não quebra nada neste arquivo.
+    //
+    // O respondente aponta o polo positivo como MAIS em todos os 40 blocos.
+    // A verossimilhança é monotônica crescente em θ: sem prior, o resultado é
+    // decidido só pelo truncamento da grade em +4 e sai em 3,20. Com o prior
+    // N(0,1), sai em 2,41.
+    const extremo: ComparacaoPar[] = [];
+    banco.blocos.forEach((itemIds, indice) => {
+      extremo.push(
+        ...decomporBlocoEmPares({
+          blockId: `extremo${indice}`,
+          itemIds,
+          maisId: itemIds[0],
+          menosId: itemIds[1],
+        }),
+      );
+    });
+
+    const { theta, se } = estimarThetaEAP(extremo, 'conscienciosidade', banco.itens);
+
+    // Âncora ABSOLUTA contra um posterior recalculado do zero (grade de passo
+    // 0,001 em ±8 contra 0,1 em ±4, e produto direto em vez de soma de logs),
+    // com o prior escrito explicitamente. Uma asserção só de faixa
+    // ("θ menor que 3") também mataria a remoção do prior, mas não mataria um
+    // prior com o desvio errado; a âncora mata os dois.
+    const referencia = eapReferencia(banco, 1);
+
+    // 0,02 de folga: a diferença observada entre a grade grossa do estimador
+    // (passo 0,1, truncada em ±4) e a grade fina da referência é de 0,004. Um
+    // estimador sem prior sai 0,78 acima -- 39x a folga.
+    expect(Math.abs(theta - referencia)).toBeLessThan(0.02);
+    // E o padrão extremo continua sendo evidência forte de θ alto: o
+    // encolhimento regulariza, não apaga o sinal.
+    expect(theta).toBeGreaterThan(2);
+    expect(se).toBeGreaterThan(0);
+    expect(se).toBeLessThan(1);
   });
 
   it('mais blocos reduzem o erro-padrão (o instrumento fica mais preciso)', () => {
