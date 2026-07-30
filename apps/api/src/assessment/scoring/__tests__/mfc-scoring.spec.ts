@@ -301,13 +301,15 @@ describe('estimarThetaEAP', () => {
     expect(se).toBeCloseTo(0.99956, 4);
   });
 
-  it('quando a verossimilhança sofre underflow em toda a grade, cai no prior sem devolver lixo', () => {
-    // Este é o único caminho que aciona o atalho de "sem evidência" do
-    // estimador. Não é hipotético: instrumento longo com padrão de resposta
-    // contraditório derruba o peso de TODOS os pontos da grade a zero em
-    // ponto flutuante. Aqui, 800 blocos afirmando p1 > n1 e outros 800
-    // afirmando n1 > p1: no melhor ponto da grade o peso é 0,25^800, muito
-    // abaixo do menor subnormal representável.
+  it('instrumento longo o bastante para estourar a precisão de ponto flutuante ainda é escorado de verdade', () => {
+    // 800 blocos afirmando p1 > n1 e outros 800 afirmando n1 > p1. No MELHOR
+    // ponto da grade o peso não estabilizado seria 0,25^800, muito abaixo do
+    // menor subnormal representável: sem a estabilização log-sum-exp a soma
+    // dos pesos zerava em toda a grade, o atalho de "sem evidência"
+    // disparava e o estimador devolvia { theta: 0, se: 1 } -- ou seja,
+    // "não sei nada sobre este respondente" para o padrão de resposta MAIS
+    // informativo possível sobre theta = 0. É essa falha silenciosa que a
+    // estabilização elimina.
     const contraditorio = [
       ...Array.from({ length: 800 }, (_, n) =>
         decomporBlocoEmPares({ blockId: `pa${n}`, itemIds: ['p1', 'n1'], maisId: 'p1', menosId: 'n1' }),
@@ -318,6 +320,38 @@ describe('estimarThetaEAP', () => {
     ];
 
     const { theta, se } = estimarThetaEAP(contraditorio, 'conscienciosidade', itens);
+
+    expect(Number.isFinite(theta)).toBe(true);
+    expect(Number.isFinite(se)).toBe(true);
+    // Empate perfeito entre os dois polos: o posterior é simétrico em 0.
+    expect(theta).toBeCloseTo(0, 6);
+    // E 1.600 comparações são MUITA evidência de que theta é 0, então o
+    // erro-padrão tem que ser minúsculo -- não o 1,0 do prior. Esta é a
+    // asserção que distingue "escorou" de "caiu no atalho": qualquer
+    // regressão que remova a estabilização volta a devolver se = 1 e falha
+    // aqui. O valor observado (~4,5e-4) é limitado pela resolução da grade
+    // (passo 0,1), não pela evidência.
+    expect(se).toBeGreaterThan(0);
+    expect(se).toBeLessThan(0.01);
+  });
+
+  it('parâmetro de item não-finito não vira NaN no escore: cai no prior', () => {
+    // O atalho de "sem evidência" continua existindo como defesa, mas agora
+    // seu único gatilho realista é lixo vindo do banco de itens (um `b` nulo
+    // que virou NaN na desserialização, por exemplo). Sem a guarda, o NaN
+    // atravessaria a quadratura e o candidato receberia theta = NaN.
+    const comLixo: Record<string, ItemNoBloco> = {
+      z1: { itemId: 'z1', dominio: 'conscienciosidade', valencia: 'positivo', params: { a: 1.2, b: Number.NaN, c: 0 } },
+      z2: { itemId: 'z2', dominio: 'conscienciosidade', valencia: 'negativo', params: { a: 1.2, b: 0, c: 0 } },
+    };
+    const pares = decomporBlocoEmPares({
+      blockId: 'bz',
+      itemIds: ['z1', 'z2'],
+      maisId: 'z1',
+      menosId: 'z2',
+    });
+
+    const { theta, se } = estimarThetaEAP(pares, 'conscienciosidade', comLixo);
 
     // O resultado honesto é o prior cheio, não uma divisão 0/0 nem um SE
     // negativo -- e é justamente aqui que um SE negativo poderia escapar,

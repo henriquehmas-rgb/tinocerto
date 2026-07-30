@@ -89,9 +89,14 @@ function gradeTheta(): number[] {
   return pontos;
 }
 
-/** Densidade do prior N(0,1) -- constante omitida (normaliza no fim). */
-function prior(theta: number): number {
-  return Math.exp(-0.5 * theta * theta);
+/**
+ * LOG-densidade do prior N(0,1) -- constante omitida (normaliza no fim).
+ *
+ * Em log, e não na densidade direta, porque a grade inteira fica no espaço
+ * logarítmico até a estabilização log-sum-exp de `estimarThetaEAP`.
+ */
+function logPrior(theta: number): number {
+  return -0.5 * theta * theta;
 }
 
 /**
@@ -123,7 +128,7 @@ export function estimarThetaEAP(
 
   const grade = gradeTheta();
 
-  const pesos = grade.map((theta) => {
+  const logPesos = grade.map((theta) => {
     let logVerossimilhanca = 0;
 
     for (const par of relevantes) {
@@ -147,14 +152,36 @@ export function estimarThetaEAP(
       logVerossimilhanca += Math.log(Math.max(pEscolha, 1e-12));
     }
 
-    return Math.exp(logVerossimilhanca) * prior(theta);
+    // Continua em log até a estabilização abaixo -- nunca exponenciar aqui.
+    return logVerossimilhanca + logPrior(theta);
   });
+
+  /*
+   * Estabilização log-sum-exp: subtrai o máximo da grade antes de
+   * exponenciar. Sem ela, o peso de um instrumento longo é um produto de
+   * muitas probabilidades < 1 e fura o menor subnormal representável em
+   * TODOS os pontos da grade ao mesmo tempo (com p ~ 0,5 isso acontece por
+   * volta de 1.075 comparações, e um respondente que responde contra o
+   * modelo chega lá bem antes). A soma zerava, o atalho de "sem evidência"
+   * disparava e a função devolvia { theta: 0, se: 1 } -- um escore que
+   * PARECE legítimo (θ exatamente no centro, incerteza cheia do prior) no
+   * lugar de um erro. Era a única falha silenciosa do estimador.
+   *
+   * Com a subtração do máximo, o ponto modal da grade pesa exatamente 1 e a
+   * soma nunca pode zerar, qualquer que seja o comprimento do instrumento.
+   * A constante subtraída cancela na normalização, então nem θ nem `se`
+   * mudam de valor onde não havia underflow.
+   */
+  const maxLogPeso = logPesos.reduce((acc, lp) => (lp > acc ? lp : acc), -Infinity);
+  const pesos = logPesos.map((lp) => Math.exp(lp - maxLogPeso));
 
   const somaPesos = pesos.reduce((acc, w) => acc + w, 0);
 
-  // Sem evidência nenhuma nesta dimensão (ou underflow total): devolve o
-  // prior. É o resultado honesto -- não sabemos nada, então θ = 0 com a
-  // incerteza cheia do prior, em vez de fingir precisão.
+  // Grade inutilizável (parâmetro NaN/Infinity vindo do banco de itens):
+  // devolve o prior. É o resultado honesto -- não sabemos nada, então θ = 0
+  // com a incerteza cheia do prior, em vez de fingir precisão. Ausência de
+  // evidência NÃO passa por aqui: sem comparação relevante a verossimilhança
+  // fica plana e a quadratura reconstrói o prior sozinha.
   if (!Number.isFinite(somaPesos) || somaPesos <= 0) {
     return { theta: 0, se: 1 };
   }

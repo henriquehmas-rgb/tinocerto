@@ -13,29 +13,69 @@ function criarRng(semente: number): () => number {
   };
 }
 
+/**
+ * Distância entre as duas dificuldades do bloco.
+ *
+ * ESTE NÚMERO É O QUE TORNA O TESTE CAPAZ DE VER O TERMO DE DIFICULDADE.
+ * Num bloco de chaveamento oposto a diferença de utilidade é
+ *
+ *     u(pos) - u(neg) = a+ (θ - b+) + a- (θ - b-) = (a+ + a-) θ - (a+ b+ + a- b-)
+ *
+ * com a+ = 1,2 e a- = 1,1. Se o bloco for montado de forma ESPELHADA
+ * (b- = -b+, que é o desenho intuitivo), o termo de dificuldade colapsa em
+ * (1,2 - 1,1) b+ = 0,1 b+ contra 2,3 θ: `b` praticamente some da conta, todo
+ * bloco acaba com limiar efetivo ~0 e o θ verdadeiro domina sozinho. O teste
+ * então recupera θ perfeitamente MESMO COM UM ESTIMADOR QUE IGNORA `b` ou
+ * que inverte o sinal dele -- verificado por mutação.
+ *
+ * Deslocando os dois polos NA MESMA DIREÇÃO em torno de um limiar
+ * (b+ = L + s, b- = L - s), o termo vira 1,2(L + s) + 1,1(L - s) = 2,3 L +
+ * 0,1 s, ou seja o limiar efetivo do bloco é L + 0,026 -- espalhado de
+ * verdade pela escala, como o comentário do banco sempre afirmou, e agora
+ * identificável.
+ */
+const SEPARACAO_DIFICULDADE = 0.6;
+
+interface OpcoesBanco {
+  /** Dimensão medida por todos os itens do banco. */
+  dominio?: string;
+  /** Centro da faixa de limiares efetivos (o θ em que o bloco é 50/50). */
+  centro?: number;
+  /** Prefixo dos ids, para bancos de dimensões diferentes coexistirem. */
+  prefixo?: string;
+}
+
 /** Monta um banco sintético de blocos com chaveamento oposto. */
-function montarBanco(nBlocos: number): { itens: Record<string, ItemNoBloco>; blocos: string[][] } {
+function montarBanco(
+  nBlocos: number,
+  opcoes: OpcoesBanco = {},
+): { itens: Record<string, ItemNoBloco>; blocos: string[][] } {
+  const dominio = opcoes.dominio ?? 'conscienciosidade';
+  const centro = opcoes.centro ?? 0;
+  const prefixo = opcoes.prefixo ?? 'b';
+
   const itens: Record<string, ItemNoBloco> = {};
   const blocos: string[][] = [];
 
   for (let b = 0; b < nBlocos; b++) {
-    const idPos = `b${b}_pos`;
-    const idNeg = `b${b}_neg`;
+    const idPos = `${prefixo}${b}_pos`;
+    const idNeg = `${prefixo}${b}_neg`;
 
-    // Dificuldades espalhadas pela escala para cobrir toda a faixa de θ.
-    const dificuldade = -1.5 + (3 * b) / Math.max(nBlocos - 1, 1);
+    // Limiares espalhados numa faixa de 3 pontos de θ em torno do centro,
+    // para o instrumento ter informação em toda a faixa de interesse.
+    const limiar = centro + (-1.5 + (3 * b) / Math.max(nBlocos - 1, 1));
 
     itens[idPos] = {
       itemId: idPos,
-      dominio: 'conscienciosidade',
+      dominio,
       valencia: 'positivo',
-      params: { a: 1.2, b: dificuldade, c: 0 },
+      params: { a: 1.2, b: limiar + SEPARACAO_DIFICULDADE, c: 0 },
     };
     itens[idNeg] = {
       itemId: idNeg,
-      dominio: 'conscienciosidade',
+      dominio,
       valencia: 'negativo',
-      params: { a: 1.1, b: -dificuldade, c: 0 },
+      params: { a: 1.1, b: limiar - SEPARACAO_DIFICULDADE, c: 0 },
     };
     blocos.push([idPos, idNeg]);
   }
@@ -71,7 +111,7 @@ function simularRespostas(
     const escolheA = rng() < pEscolheA;
     comparacoes.push(
       ...decomporBlocoEmPares({
-        blockId: `b${indice}`,
+        blockId: `${idA}_bloco${indice}`,
         itemIds,
         maisId: escolheA ? idA : idB,
         menosId: escolheA ? idB : idA,
@@ -82,8 +122,24 @@ function simularRespostas(
   return comparacoes;
 }
 
+/** Média de várias aplicações independentes do mesmo respondente. */
+function mediaRecuperada(
+  thetaVerdadeiro: number,
+  banco: { itens: Record<string, ItemNoBloco>; blocos: string[][] },
+  dimensao: string,
+  rng: () => number,
+  replicacoes = 30,
+): number {
+  const estimativas: number[] = [];
+  for (let r = 0; r < replicacoes; r++) {
+    const comparacoes = simularRespostas(thetaVerdadeiro, banco.itens, banco.blocos, rng);
+    estimativas.push(estimarThetaEAP(comparacoes, dimensao, banco.itens).theta);
+  }
+  return estimativas.reduce((acc, t) => acc + t, 0) / estimativas.length;
+}
+
 describe('recuperação de parâmetro — o estimador devolve o theta que gerou os dados', () => {
-  const { itens, blocos } = montarBanco(40);
+  const banco = montarBanco(40);
 
   it.each([-1.5, -0.75, 0, 0.75, 1.5])(
     'recupera theta verdadeiro = %p dentro da margem esperada',
@@ -92,17 +148,34 @@ describe('recuperação de parâmetro — o estimador devolve o theta que gerou 
 
       // Média de várias replicações: uma única aplicação de 40 blocos tem
       // erro amostral real: é o SE do próprio instrumento, não bug.
-      const estimativas: number[] = [];
-      for (let r = 0; r < 30; r++) {
-        const comparacoes = simularRespostas(thetaVerdadeiro, itens, blocos, rng);
-        estimativas.push(estimarThetaEAP(comparacoes, 'conscienciosidade', itens).theta);
-      }
-
-      const media = estimativas.reduce((acc, t) => acc + t, 0) / estimativas.length;
+      const media = mediaRecuperada(thetaVerdadeiro, banco, 'conscienciosidade', rng);
 
       // Tolerância de 0,35 na escala θ (desvios-padrão). EAP encolhe em
       // direção ao prior por construção, então nos extremos o viés é
-      // esperado e conhecido -- não é erro de implementação.
+      // esperado e conhecido -- não é erro de implementação. Os erros
+      // observados ficam entre 0,016 e 0,059, bem dentro da margem.
+      expect(Math.abs(media - thetaVerdadeiro)).toBeLessThan(0.35);
+    },
+  );
+
+  it.each([0.6, 1.2, 1.8])(
+    'recupera theta verdadeiro = %p num banco DESLOCADO, onde a dificuldade não pode ser ignorada',
+    (thetaVerdadeiro) => {
+      // Este caso existe para fechar o ponto cego do banco centrado. Lá os
+      // limiares efetivos são simétricos em torno de 0, e um estimador que
+      // ZERASSE `b` ou INVERTESSE O SINAL dele nos dois lados da comparação
+      // continua acertando a média, porque os desvios de bloco se cancelam
+      // entre si. Deslocando o banco inteiro para um centro de 1,2, o erro
+      // do estimador deixa de cancelar e vira viés puro:
+      //   - estimador que ignora `b`: erra por ~1,2 (o próprio centro);
+      //   - estimador com o sinal de `b` invertido: erra por ~2,4 (o dobro).
+      // Ambos muito além da tolerância de 0,35. Verificado por mutação.
+      const deslocado = montarBanco(40, { centro: 1.2, prefixo: 'd' });
+      const rng = criarRng(20260731 + Math.round(thetaVerdadeiro * 100));
+
+      const media = mediaRecuperada(thetaVerdadeiro, deslocado, 'conscienciosidade', rng);
+
+      // Erros observados com o estimador correto: 0,002 a 0,049.
       expect(Math.abs(media - thetaVerdadeiro)).toBeLessThan(0.35);
     },
   );
@@ -112,21 +185,12 @@ describe('recuperação de parâmetro — o estimador devolve o theta que gerou 
     const verdadeiros = [-2, -1, 0, 1, 2];
 
     // Média de replicações pelo mesmo motivo do caso acima: UMA aplicação de
-    // 40 blocos carrega erro amostral real (SE ~0,3 na escala θ), então dois
-    // respondentes vizinhos podem trocar de posição por puro sorteio. Sem a
-    // média este caso passa ou falha conforme a semente -- e em θ=1 e θ=2 o
-    // banco chega a produzir o MESMO padrão de resposta, que nenhum estimador
-    // consegue separar, porque a entrada é idêntica. A média isola a
-    // propriedade do estimador do ruído amostral do instrumento; a comparação
-    // entre respondentes segue estrita.
-    const estimados = verdadeiros.map((tv) => {
-      const replicacoes: number[] = [];
-      for (let r = 0; r < 30; r++) {
-        const comparacoes = simularRespostas(tv, itens, blocos, rng);
-        replicacoes.push(estimarThetaEAP(comparacoes, 'conscienciosidade', itens).theta);
-      }
-      return replicacoes.reduce((acc, t) => acc + t, 0) / replicacoes.length;
-    });
+    // 40 blocos carrega erro amostral real, então dois respondentes vizinhos
+    // podem trocar de posição por puro sorteio. Sem a média este caso passa
+    // ou falha conforme a semente. A média isola a propriedade do estimador
+    // do ruído amostral do instrumento; a comparação entre respondentes
+    // segue estrita.
+    const estimados = verdadeiros.map((tv) => mediaRecuperada(tv, banco, 'conscienciosidade', rng));
 
     // Sem percentil no ano 1, a ordenação DENTRO da vaga é o que o produto
     // entrega -- então monotonicidade importa mais que calibração absoluta.
@@ -138,8 +202,8 @@ describe('recuperação de parâmetro — o estimador devolve o theta que gerou 
   it('mais blocos reduzem o erro-padrão (o instrumento fica mais preciso)', () => {
     const rng = criarRng(4242);
 
-    const curto = montarBanco(10);
-    const longo = montarBanco(60);
+    const curto = montarBanco(10, { prefixo: 'c' });
+    const longo = montarBanco(60, { prefixo: 'l' });
 
     const seCurto = estimarThetaEAP(
       simularRespostas(0.5, curto.itens, curto.blocos, rng),
@@ -155,15 +219,33 @@ describe('recuperação de parâmetro — o estimador devolve o theta que gerou 
     expect(seLongo).toBeLessThan(seCurto);
   });
 
-  it('a escoragem de uma aplicação completa roda muito abaixo do SLO de 2s', () => {
+  it('a escoragem de uma aplicação completa de 5 dimensões roda muito abaixo do SLO de 2s', () => {
     const rng = criarRng(777);
-    const comparacoes = simularRespostas(0.3, itens, blocos, rng);
+    const dimensoes = ['conscienciosidade', 'extroversao', 'amabilidade', 'estabilidade', 'abertura'];
+
+    // Aplicação completa DE VERDADE: um banco de 40 blocos POR dimensão.
+    // Com um banco de dimensão única (todos os itens em 'conscienciosidade'),
+    // as outras 4 chamadas filtravam ZERO comparações relevantes e
+    // percorriam a grade sem fazer conta nenhuma -- o teste media o custo de
+    // UMA dimensão e chamava isso de cinco.
+    const itensCompleto: Record<string, ItemNoBloco> = {};
+    const comparacoes: ComparacaoPar[] = [];
+    dimensoes.forEach((dimensao, d) => {
+      const bancoDimensao = montarBanco(40, { dominio: dimensao, prefixo: `s${d}_` });
+      Object.assign(itensCompleto, bancoDimensao.itens);
+      comparacoes.push(...simularRespostas(0.3, bancoDimensao.itens, bancoDimensao.blocos, rng));
+    });
 
     const inicio = Date.now();
-    for (const dimensao of ['conscienciosidade', 'extroversao', 'amabilidade', 'estabilidade', 'abertura']) {
-      estimarThetaEAP(comparacoes, dimensao, itens);
-    }
+    const resultados = dimensoes.map((dimensao) => estimarThetaEAP(comparacoes, dimensao, itensCompleto));
     const decorrido = Date.now() - inicio;
+
+    // Guarda contra a regressão que esvaziava a medição: cada dimensão
+    // precisa ter sido escorada com evidência de verdade. Caindo no prior o
+    // SE seria ~1 e o tempo medido não significaria nada.
+    for (const resultado of resultados) {
+      expect(resultado.se).toBeLessThan(0.5);
+    }
 
     // SLO do roadmap: theta/se disponíveis em < 2s após a última resposta.
     // As 5 dimensões juntas devem ficar em milissegundos.
