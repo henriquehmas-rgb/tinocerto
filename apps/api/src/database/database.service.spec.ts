@@ -77,27 +77,42 @@ describe('DatabaseService', () => {
   // depois que qualquer transação anterior já setou o GUC customizado
   // app.tenant_id localmente (via set_config(..., true), o padrão do
   // TenantContext.run()) e liberou a conexão de volta ao pool, o GUC
-  // reverte para STRING VAZIA, não NULL. `''::uuid` estoura 22P02
-  // (invalid input syntax for type uuid) na política RLS
-  // (`tenant_id = current_setting('app.tenant_id', true)::uuid`). Nenhum
-  // dos dois vaza dado — os dois falham fechado — só o "formato" da falha
-  // muda. Este teste prova especificamente o caminho de conexão
-  // RECICLADA usando o pool real de DatabaseService (via DI): seta e
-  // libera o GUC numa conexão, reusa a MESMA conexão (agora idle, único
-  // client do pool) sem nenhum set_config novo, e confirma que o
-  // resultado é ou 0 linhas ou 22P02 — nunca uma linha vazando.
-  it('conexão reciclada do pool de produção falha fechado (0 linhas OU 22P02), nunca vaza dado', async () => {
+  // reverte para STRING VAZIA, não NULL.
+  //
+  // [platform_0002__rls_guc_fail_closed.sql] Antes daquela migration, esse
+  // '' fazia `''::uuid` estourar 22P02 dentro da própria política RLS, e
+  // este teste aceitava "0 linhas OU 22P02" como resultado válido. Aceitar
+  // as duas formas escondia um problema real: a exceção derrubava o
+  // processo Node inteiro quando o caminho de leitura era um laço
+  // fire-and-forget sem try/catch (foi o que aconteceu com os dois
+  // consumers de outbox da Fase 1b). Agora a política usa
+  // `NULLIF(current_setting('app.tenant_id', true), '')::uuid`, então o
+  // comportamento é DETERMINÍSTICO: sempre 0 linhas, nunca exceção.
+  //
+  // Este teste passou a exigir exatamente isso — 0 linhas E nenhum erro —
+  // em vez de tolerar as duas formas. Se alguém reintroduzir o cast direto
+  // numa política nova, o 22P02 volta e este teste falha alto, em vez de
+  // aceitar silenciosamente a variante que derruba o processo.
+  it('conexão reciclada do pool de produção falha fechado com 0 linhas e SEM exceção (nunca 22P02, nunca vaza dado)', async () => {
     const moduleRef = await Test.createTestingModule({
       imports: [DatabaseModule],
     }).compile();
     const db = moduleRef.get(DatabaseService);
     const adminPool = new Pool({ connectionString: process.env.DATABASE_URL });
 
+    // Declarado FORA do try: a limpeza precisa acontecer no finally, não no
+    // fim do caminho feliz. Antes, os DELETEs ficavam depois das asserções
+    // dentro do try -- uma asserção falhando pulava a limpeza e DEIXAVA a
+    // linha de tenant no banco, quebrando um arquivo de spec sem relação
+    // nenhuma na próxima rodada (aconteceu de verdade: o CNPJ deste fixture
+    // colidia com pipeline-stage-transition.service.spec.ts).
+    let tenantId: string | undefined;
+
     try {
       const t = await adminPool.query<{ id: string }>(
-        `INSERT INTO tenant (razao_social, cnpj, slug) VALUES ('Empresa Reciclada', '00000000000022', 'test-tenant-00000000000022') RETURNING id`,
+        `INSERT INTO tenant (razao_social, cnpj, slug) VALUES ('Empresa Reciclada', '00000000000045', 'test-tenant-00000000000045') RETURNING id`,
       );
-      const tenantId = t.rows[0].id;
+      tenantId = t.rows[0].id;
       await adminPool.query(
         `INSERT INTO user_account (tenant_id, email) VALUES ($1, 'reciclada@teste.com')`,
         [tenantId],
@@ -132,18 +147,22 @@ describe('DatabaseService', () => {
           // Já abortada (caso 22P02) -- nada a fazer.
         }
 
-        if (caughtCode !== undefined) {
-          expect(caughtCode).toBe('22P02');
-        } else {
-          expect(rowCount).toBe(0);
-        }
+        // Determinístico agora: NENHUM erro, e exatamente 0 linhas.
+        // (Antes de platform_0002 isto era "0 linhas OU 22P02".)
+        expect(caughtCode).toBeUndefined();
+        expect(rowCount).toBe(0);
       } finally {
         client2.release();
       }
 
-      await adminPool.query('DELETE FROM user_account WHERE tenant_id = $1', [tenantId]);
-      await adminPool.query('DELETE FROM tenant WHERE id = $1', [tenantId]);
     } finally {
+      // Limpeza no finally: roda mesmo se uma asserção acima falhar, então
+      // uma falha deste teste nunca mais vaza uma linha de tenant para os
+      // outros arquivos de spec.
+      if (tenantId !== undefined) {
+        await adminPool.query('DELETE FROM user_account WHERE tenant_id = $1', [tenantId]);
+        await adminPool.query('DELETE FROM tenant WHERE id = $1', [tenantId]);
+      }
       await adminPool.end();
       await moduleRef.close();
     }

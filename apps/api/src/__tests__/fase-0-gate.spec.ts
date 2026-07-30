@@ -319,6 +319,66 @@ describe('Portão da Fase 0 — critérios de "pronto" consolidados', () => {
     },
   );
 
+  it(
+    'nenhuma policy faz o cast direto de app.tenant_id — todas usam NULLIF, ' +
+      'para falhar fechado em conexão reciclada em vez de estourar 22P02',
+    async () => {
+      // [platform_0002__rls_guc_fail_closed.sql] `set_config('app.tenant_id',
+      // ..., true)` é escopado à transação, mas ao fim dela o Postgres NÃO
+      // reverte um GUC customizado para NULL — reverte para STRING VAZIA. Numa
+      // conexão RECICLADA do pool (o caso normal: é o mesmo pool compartilhado
+      // por toda a app), `current_setting('app.tenant_id', true)` devolve '' e
+      // o cast direto `''::uuid` ESTOURA 22P02 dentro da própria política, em
+      // vez de simplesmente não casar linha nenhuma.
+      //
+      // Isso falha fechado (não vaza dado), mas transformar "0 linhas" em
+      // exceção dura já derrubou o processo Node inteiro em produção: os dois
+      // consumers de outbox da Fase 1b rodam `void this.consumeLoop()`
+      // (fire-and-forget), a 22P02 virou unhandled rejection e levou o
+      // servidor HTTP junto — reproduzido 6x por revisão independente.
+      //
+      // A correção é `NULLIF(current_setting('app.tenant_id', true), '')::uuid`:
+      // '' e NULL viram NULL, a comparação vira NULL, a RLS trata como falso →
+      // 0 linhas, sem exceção. Um tenant_id genuinamente malformado ainda
+      // estoura, de propósito (é bug de chamador e deve aparecer alto).
+      //
+      // Este teste é o que impede a REINTRODUÇÃO da classe do bug: vale para
+      // qualquer tabela, inclusive as que ainda não existem. Uma policy nova
+      // de Fase 2+ que copie o padrão antigo falha aqui, não em produção.
+      const { rows } = await adminPool.query<{ tablename: string; policyname: string }>(`
+        SELECT tablename, policyname
+        FROM pg_policies
+        WHERE schemaname = 'public'
+          AND (coalesce(qual, '') LIKE '%app.tenant_id%'
+               OR coalesce(with_check, '') LIKE '%app.tenant_id%')
+          AND NOT (coalesce(qual, '') LIKE '%NULLIF%'
+                   AND coalesce(with_check, '') LIKE '%NULLIF%')
+        ORDER BY tablename, policyname
+      `);
+
+      expect(rows.map((r) => `${r.tablename}.${r.policyname}`)).toEqual([]);
+    },
+  );
+
+  it(
+    'a checagem de NULLIF acima não é vácua — existe de fato um conjunto de ' +
+      'policies usando app.tenant_id para ela vigiar',
+    async () => {
+      // Guarda de "asserção que não pode falhar": se um erro de nome de
+      // schema/coluna fizesse a query anterior devolver 0 linhas sempre, ela
+      // passaria verde por acidente e não porque as policies estão corretas.
+      const { rows } = await adminPool.query<{ total: string }>(`
+        SELECT count(*) AS total
+        FROM pg_policies
+        WHERE schemaname = 'public'
+          AND (coalesce(qual, '') LIKE '%app.tenant_id%'
+               OR coalesce(with_check, '') LIKE '%app.tenant_id%')
+      `);
+
+      expect(Number(rows[0].total)).toBeGreaterThan(0);
+    },
+  );
+
   it('app_runtime não é superuser nem tem bypassrls', async () => {
     const rows = await adminPool.query<{ rolsuper: boolean; rolbypassrls: boolean }>(
       `SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = 'app_runtime'`,

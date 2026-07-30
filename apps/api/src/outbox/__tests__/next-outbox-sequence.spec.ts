@@ -19,11 +19,11 @@ describe('nextOutboxSequence', () => {
     // colisao fica latente; mas se um afterAll falhar antes de limpar
     // (crash, timeout, thrown error), o tenant orfao quebra o beforeAll do
     // OUTRO arquivo por um motivo sem relacao com o proprio arquivo.
-    // Trocado para '00000000000025', o proximo valor livre (mesmo tipo de
+    // Trocado para '00000000000048', o proximo valor livre (mesmo tipo de
     // correcao de fixture ja aplicado em audit-log.service.spec.ts,
     // outbox-to-audit.consumer.spec.ts e assessment-result-stub-rls.spec.ts).
     const t = await adminPool.query<{ id: string }>(
-      `INSERT INTO tenant (razao_social, cnpj, slug) VALUES ('Empresa Sequence', '00000000000025', 'test-tenant-00000000000025') RETURNING id`,
+      `INSERT INTO tenant (razao_social, cnpj, slug) VALUES ('Empresa Sequence', '00000000000048', 'test-tenant-00000000000048') RETURNING id`,
     );
     tenantId = t.rows[0].id;
   });
