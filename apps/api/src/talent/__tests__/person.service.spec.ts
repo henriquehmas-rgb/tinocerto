@@ -6,7 +6,7 @@ describe('PersonService', () => {
   const originalKek = process.env.ENVELOPE_ENCRYPTION_KEK;
   const originalPepper = process.env.CPF_HASH_PEPPER;
   const adminPool = new Pool({ connectionString: process.env.DATABASE_URL });
-  let personIdsToClean: string[] = [];
+  const personIdsToClean: string[] = [];
 
   beforeAll(() => {
     process.env.ENVELOPE_ENCRYPTION_KEK = Buffer.alloc(32, 7).toString('base64');
