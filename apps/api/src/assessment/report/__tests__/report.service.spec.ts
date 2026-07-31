@@ -342,6 +342,66 @@ describe('ReportService (trilho A)', () => {
     }
   });
 
+  // ------------------------------------------------------------------
+  // A BASE LEGAL (`consent`) tem de valer no caminho de leitura.
+  //
+  // `result_grant.consent_id` é NOT NULL desde sempre, e até aqui era
+  // escrita-só: a query do relatório olhava `g.revoked_at` e nunca tocava
+  // em `consent`. Gravar `consent.revoked_at` -- o ato do titular -- não
+  // tinha efeito nenhum sobre o acesso: o registro de revogação existia,
+  // passava por qualquer auditoria que confiasse na tabela, e o relatório
+  // continuava saindo. Os dois casos abaixo são a prova de que o controle
+  // DISPARA; sem eles, apagar o JOIN em `consent` volta a passar verde.
+  // ------------------------------------------------------------------
+
+  it('base legal REVOGADA fecha o relatório, mesmo com o grant vivo', async () => {
+    // Controle positivo primeiro: com a base legal de pé, sai relatório.
+    // Sem ele, o `rejects` abaixo poderia estar passando por outro motivo.
+    expect((await gerarComo(tenantComGrant, resultId)).secoes).toHaveLength(5);
+
+    try {
+      await adminPool.query('UPDATE consent SET revoked_at = now() WHERE id = $1', [consentId]);
+
+      // O grant continua vivo e não revogado -- é a base legal que caiu.
+      const grant = await adminPool.query<{ revoked_at: Date | null; expires_at: Date | null }>(
+        'SELECT revoked_at, expires_at FROM result_grant WHERE assessment_result_id = $1 AND tenant_id = $2',
+        [resultId, tenantComGrant],
+      );
+      expect(grant.rows[0].revoked_at).toBeNull();
+      expect(grant.rows[0].expires_at).toBeNull();
+
+      await expect(gerarComo(tenantComGrant, resultId)).rejects.toThrow(/não encontrado/i);
+    } finally {
+      await adminPool.query('UPDATE consent SET revoked_at = NULL WHERE id = $1', [consentId]);
+    }
+
+    expect((await gerarComo(tenantComGrant, resultId)).secoes).toHaveLength(5);
+  });
+
+  it('base legal com ttl_meses vencido fecha o relatório', async () => {
+    // `ttl_meses` é como a retenção é expressa (consent e retention_policy).
+    // Enquanto ninguém a lia, era campo decorativo: prazo registrado que
+    // nunca vencia na prática.
+    try {
+      await adminPool.query(
+        `UPDATE consent SET ttl_meses = 1, granted_at = now() - interval '2 months' WHERE id = $1`,
+        [consentId],
+      );
+
+      await expect(gerarComo(tenantComGrant, resultId)).rejects.toThrow(/não encontrado/i);
+
+      // E um prazo que AINDA não venceu não pode fechar nada -- senão o
+      // teste acima passaria com um predicado que nega sempre.
+      await adminPool.query(`UPDATE consent SET ttl_meses = 24 WHERE id = $1`, [consentId]);
+      expect((await gerarComo(tenantComGrant, resultId)).secoes).toHaveLength(5);
+    } finally {
+      await adminPool.query(
+        'UPDATE consent SET ttl_meses = NULL, granted_at = now() WHERE id = $1',
+        [consentId],
+      );
+    }
+  });
+
   it('sem app.tenant_id nenhum grant vale — a leitura falha FECHADA', async () => {
     // Conexão crua, fora de TenantContext: a GUC não está setada, então o
     // NULLIF resolve para NULL e o EXISTS nunca casa.
@@ -383,6 +443,29 @@ describe('ReportService (trilho A)', () => {
       await expect(new ReportService().gerar(client, resultId)).rejects.toThrow(/não encontrado/i);
     } finally {
       client.release();
+    }
+  });
+
+  it('conexão que ignora RLS não aceita base legal de OUTRO tenant', async () => {
+    // Na conexão de app_runtime a RLS da trust_0004 já esconderia a linha
+    // de `consent` do outro tenant, então este caso só é de verdade aqui,
+    // onde as policies não rodam e o predicado escrito na query é tudo.
+    const client = await adminPool.connect();
+    try {
+      await adminPool.query('UPDATE consent SET tenant_id = $1 WHERE id = $2', [
+        tenantSemGrant,
+        consentId,
+      ]);
+
+      await client.query('BEGIN');
+      await client.query(`SELECT set_config('app.tenant_id', $1, true)`, [tenantComGrant]);
+      await expect(new ReportService().gerar(client, resultId)).rejects.toThrow(/não encontrado/i);
+    } finally {
+      await client.query('ROLLBACK').catch(() => undefined);
+      client.release();
+      // Volta ao escopo de plataforma (tenant_id NULL), que é como o
+      // fixture nasce e é o que os outros casos assumem.
+      await adminPool.query('UPDATE consent SET tenant_id = NULL WHERE id = $1', [consentId]);
     }
   });
 

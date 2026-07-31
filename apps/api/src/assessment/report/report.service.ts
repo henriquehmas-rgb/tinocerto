@@ -113,6 +113,23 @@ export class ReportService {
    * resolve para NULL e derruba o `EXISTS`, isto é, falha FECHADO. Dois
    * testes em report.service.spec.ts rodam justamente sobre a conexão que
    * ignora RLS, para que remover este predicado não passe verde.
+   *
+   * E A BASE LEGAL TAMBÉM É CONSULTADA, não só o grant. `result_grant`
+   * carrega `consent_id NOT NULL` justamente porque a autorização de
+   * leitura é derivada de uma base legal registrada em `consent` -- mas
+   * enquanto esta query olhava só para `g.revoked_at`, gravar
+   * `consent.revoked_at` não tinha EFEITO NENHUM sobre o acesso: o
+   * registro de revogação existia, ficava bonito na auditoria, e o
+   * relatório continuava saindo. Um controle de conformidade que não
+   * consegue disparar é pior que a ausência dele, porque é acreditado.
+   * Com o JOIN, revogar a base legal fecha o caminho de leitura na hora,
+   * e a mesma coisa vale para `ttl_meses` -- que é como `retention_policy`
+   * expressa prazo e até aqui não tinha por onde agir. `c.tenant_id` é
+   * conferido contra `g.tenant_id` pelo mesmo motivo do predicado de
+   * tenant acima (a conexão que ignora RLS), e admite NULL porque
+   * consentimento de escopo de plataforma é legítimo -- é exatamente o
+   * predicado da policy da trust_0004, escrito à mão para valer também
+   * onde a policy não roda.
    */
   async gerar(db: PoolClient, assessmentResultId: string): Promise<RelatorioTrilhoA> {
     const { rows } = await db.query<{
@@ -128,10 +145,15 @@ export class ReportService {
           AND EXISTS (
             SELECT 1
               FROM result_grant g
+              JOIN consent c ON c.id = g.consent_id
              WHERE g.assessment_result_id = r.id
                AND g.tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid
                AND g.revoked_at IS NULL
                AND (g.expires_at IS NULL OR g.expires_at > now())
+               AND c.revoked_at IS NULL
+               AND (c.ttl_meses IS NULL
+                    OR c.granted_at + (c.ttl_meses * interval '1 month') > now())
+               AND (c.tenant_id IS NULL OR c.tenant_id = g.tenant_id)
           )`,
       [assessmentResultId],
     );

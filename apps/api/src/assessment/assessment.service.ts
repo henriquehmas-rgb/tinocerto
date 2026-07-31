@@ -546,9 +546,22 @@ export class AssessmentService {
    *
    * Reaproveita a linha viva do par (person, tenant) em vez de empilhar
    * uma por assessment: a base legal é do processo seletivo, não de cada
-   * aplicação. Revogar a linha (revoked_at) tem de continuar sendo uma
-   * decisão do titular, então uma linha revogada NÃO é reutilizada nem
-   * ressuscitada aqui.
+   * aplicação.
+   *
+   * O QUE ACONTECE COM UMA LINHA REVOGADA, exatamente: ela não é
+   * reutilizada nem ressuscitada -- a busca acima filtra
+   * `revoked_at IS NULL` e nada aqui escreve `revoked_at = NULL`. Mas se
+   * NÃO houver linha viva, este método INSERE uma nova, com a mesma
+   * pessoa, o mesmo tenant e a mesma finalidade. Isso é deliberado e é
+   * correto para a base legal deste caso (LGPD art. 7, V): um assessment
+   * novo, respondido depois, é OUTRO tratamento, com o seu próprio
+   * registro e a sua própria data. O que NÃO pode acontecer -- e era o
+   * furo -- é a revogação não valer para os grants JÁ EMITIDOS sobre a
+   * linha antiga. Quem garante isso é o caminho de leitura:
+   * `ReportService.gerar` faz JOIN em `consent` e exige
+   * `revoked_at IS NULL` (mais o `ttl_meses`), então revogar fecha na hora
+   * todo relatório apoiado naquela base, e o registro novo só autoriza o
+   * que vier depois dele.
    */
   private async baseLegalDoProcessoSeletivo(
     client: PoolClient,

@@ -1,5 +1,10 @@
 import { Pool } from 'pg';
-import { decomporBlocoEmPares, estimarThetaEAP, ItemNoBloco } from '../scoring/mfc-scoring';
+import {
+  decomporBlocoEmPares,
+  escoreBrutoPorDimensao,
+  estimarThetaEAP,
+  ItemNoBloco,
+} from '../scoring/mfc-scoring';
 import {
   INSTRUMENT_VERSION_SEMEADA,
   ITENS_SEMEADOS,
@@ -104,6 +109,39 @@ describe('banco de itens semeado', () => {
       expect(Number(linha.n)).toBe(2);
       expect(Number(linha.positivos)).toBe(1);
       expect(Number(linha.negativos)).toBe(1);
+    }
+  });
+
+  /**
+   * POSIÇÃO x VALÊNCIA (assessment_0016).
+   *
+   * O teste acima confere que todo bloco TEM um item de cada valência --
+   * e passava verde enquanto os 20 blocos abriam, sem exceção, pelo item
+   * positivo. `posicao` é a ordem de apresentação: com ela colada à
+   * valência, "aponte sempre a primeira alternativa como MAIS" -- que não
+   * lê o enunciado -- devolvia θ ≈ +1,35 nas cinco dimensões.
+   *
+   * A conferência é POR DOMÍNIO, não no agregado: 10/10 no total poderia
+   * esconder um domínio inteiro confundido, compensado por outro. São os
+   * 2 de 4 DENTRO do domínio que zeram o escore de quem responde por
+   * posição -- ver o teste de comportamento mais abaixo.
+   */
+  it('a valência não é previsível pela posição de apresentação', async () => {
+    const { rows } = await adminPool.query<{ dominio: string; abre_negativo: string; n: string }>(
+      `SELECT i.dominio,
+              count(*) FILTER (WHERE i.chave_valencia = 'negativo') AS abre_negativo,
+              count(*) AS n
+         FROM block b
+         JOIN block_item bi ON bi.block_id = b.id AND bi.posicao = 1
+         JOIN item i ON i.id = bi.item_id
+        WHERE b.instrument_version_id = '${INSTRUMENT_VERSION_SEMEADA}'
+        GROUP BY i.dominio`,
+    );
+
+    expect(rows).toHaveLength(5);
+    for (const linha of rows) {
+      expect(Number(linha.n)).toBe(4);
+      expect(Number(linha.abre_negativo)).toBe(2);
     }
   });
 
@@ -238,6 +276,47 @@ describe('informação do instrumento semeado', () => {
       expect(maior - menor).toBeGreaterThanOrEqual(1.5);
       expect(menor).toBeLessThanOrEqual(-0.7);
       expect(maior).toBeGreaterThanOrEqual(0.7);
+    }
+  });
+
+  /**
+   * RESPONDENTE CEGO A CONTEÚDO -- a guarda de comportamento da
+   * assessment_0016.
+   *
+   * `blocos[].itemIds` vem `ORDER BY b.ordem, bi.posicao`, então
+   * `itemIds[0]` é literalmente a primeira alternativa apresentada. Este
+   * teste responde o instrumento inteiro pela POSIÇÃO, sem olhar o
+   * enunciado, o domínio ou a valência -- as duas estratégias possíveis --
+   * e exige que nenhuma delas produza escore. Antes do contrabalanceamento
+   * "sempre a primeira" devolvia θ ≈ +1,35 SIMULTANEAMENTE nas cinco
+   * dimensões, isto é, o perfil máximo sem processar conteúdo nenhum.
+   *
+   * O teste de contagem lá em cima (2 de 4 por domínio) prende a CAUSA;
+   * este prende o EFEITO, que é o que de fato importa e o que continuaria
+   * valendo se um dia o instrumento semeado mudar de tamanho.
+   */
+  it('responder sempre pela POSIÇÃO não escora em dimensão nenhuma', () => {
+    for (const posicaoFixa of [0, 1]) {
+      const comparacoes = blocos.flatMap((bloco) =>
+        decomporBlocoEmPares({
+          blockId: `bloco-${bloco.ordem}`,
+          itemIds: bloco.itemIds,
+          maisId: bloco.itemIds[posicaoFixa],
+          menosId: bloco.itemIds[1 - posicaoFixa],
+        }),
+      );
+
+      for (const dominio of dominios) {
+        // Escore bruto é contagem de endosso chaveada, sem parâmetro: com
+        // 2 dos 4 blocos do domínio invertidos ele fecha em ZERO por
+        // construção, qualquer que seja a calibração.
+        expect(escoreBrutoPorDimensao(comparacoes, dominio, itens)).toBe(0);
+
+        // E o θ estimado não pode cair em faixa nenhuma do relatório --
+        // o corte de "alto"/"baixo" em report.service.ts é ±0,5.
+        const { theta } = estimarThetaEAP(comparacoes, dominio, itens);
+        expect(Math.abs(theta)).toBeLessThan(0.5);
+      }
     }
   });
 
