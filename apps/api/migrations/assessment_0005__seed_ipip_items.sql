@@ -8,6 +8,16 @@
 -- humor ou condição de saúde. Os itens de estabilidade em particular falam
 -- de reação a pressão de trabalho, não de estado afetivo -- o instrumento é
 -- comportamental não-psicológico (Res. CFP 31/2022).
+--
+-- NOTA (fix round 1): os valores de `b` e o pareamento dos blocos abaixo
+-- foram SUBSTITUÍDOS pela assessment_0012 -- como estão aqui, os 20 limiares
+-- efetivos de bloco colapsam numa faixa de 0,5 ponto em torno de θ ≈ 0,1 e o
+-- instrumento não separa candidato nenhum fora dela. O cabeçalho da 0012
+-- explica o desenho que substitui este. Esta migration NÃO foi editada nesse
+-- ponto de propósito: ela já foi aplicada, o runner é por NOME e sem
+-- checksum, então editar o dado aqui divergiria banco novo de banco antigo.
+-- A única edição feita aqui é o ESCOPO das leituras de `item` (abaixo), que é
+-- semanticamente idêntica sobre a tabela vazia em que esta migration roda.
 
 CREATE TEMP TABLE seed_item (
   enunciado text,
@@ -17,6 +27,11 @@ CREATE TEMP TABLE seed_item (
   a         numeric,
   b         numeric
 ) ON COMMIT DROP;
+
+-- O mapeamento de volta ao item inserido é feito por `enunciado`. Sem esta
+-- unicidade DENTRO do seed, um enunciado repetido aqui fanaria o JOIN e
+-- geraria linhas de parâmetro a mais.
+CREATE UNIQUE INDEX ON seed_item (enunciado);
 
 INSERT INTO seed_item (enunciado, dominio, faceta, valencia, a, b) VALUES
 -- Conscienciosidade
@@ -65,15 +80,30 @@ INSERT INTO seed_item (enunciado, dominio, faceta, valencia, a, b) VALUES
 ('No trabalho, eu acho perda de tempo discutir formas alternativas.',     'abertura', 'criatividade', 'negativo', 1.15,  0.40),
 ('No trabalho, eu me incomodo quando mudam o processo estabelecido.',     'abertura', 'aprendizado',  'negativo', 1.05,  0.20);
 
--- Insere os itens em pre_teste.
-INSERT INTO item (enunciado, dominio, faceta, chave_valencia, ciclo_vida)
-SELECT enunciado, dominio, faceta, valencia, 'pre_teste' FROM seed_item;
+-- Insere os itens em pre_teste, CAPTURANDO os ids gerados. `item` é tabela
+-- GLOBAL e compartilhada -- reler `item` sem escopo para achar "os itens que
+-- acabei de inserir" é a leitura que esta migration não pode fazer: não há
+-- UNIQUE em item.enunciado, e outro spec desta mesma suíte já usa um dos
+-- enunciados do seed como fixture. Capturar o RETURNING fecha isso: daqui
+-- para baixo nada mais varre `item`.
+CREATE TEMP TABLE seed_item_id (
+  item_id   uuid PRIMARY KEY,
+  enunciado text NOT NULL UNIQUE
+) ON COMMIT DROP;
+
+WITH inseridos AS (
+  INSERT INTO item (enunciado, dominio, faceta, chave_valencia, ciclo_vida)
+  SELECT enunciado, dominio, faceta, valencia, 'pre_teste' FROM seed_item
+  RETURNING id, enunciado
+)
+INSERT INTO seed_item_id (item_id, enunciado)
+SELECT id, enunciado FROM inseridos;
 
 -- Parâmetros PROVISÓRIOS de literatura -- nada calibrado.
 INSERT INTO item_parameter_version (item_id, modelo, a, b, c, calibracao_versao, provisorio, amostra_n)
-SELECT i.id, '2PL', s.a, s.b, 0, 'literatura_v1', true, 0
-  FROM item i
-  JOIN seed_item s ON s.enunciado = i.enunciado;
+SELECT m.item_id, '2PL', s.a, s.b, 0, 'literatura_v1', true, 0
+  FROM seed_item_id m
+  JOIN seed_item s ON s.enunciado = m.enunciado;
 
 -- Instrumento inicial, em modo LINEAR (decisão de bootstrap desta fase).
 INSERT INTO instrument (id, nome) VALUES
@@ -95,10 +125,15 @@ DECLARE
   novo_bloco uuid;
 BEGIN
   FOREACH dom IN ARRAY ARRAY['conscienciosidade','extroversao','amabilidade','estabilidade','abertura'] LOOP
-    SELECT array_agg(id ORDER BY enunciado) INTO positivos
-      FROM item WHERE dominio = dom AND chave_valencia = 'positivo';
-    SELECT array_agg(id ORDER BY enunciado) INTO negativos
-      FROM item WHERE dominio = dom AND chave_valencia = 'negativo';
+    -- Escopado ao seed via seed_item_id (ver acima): nunca varre `item`.
+    SELECT array_agg(m.item_id ORDER BY s.enunciado) INTO positivos
+      FROM seed_item s
+      JOIN seed_item_id m ON m.enunciado = s.enunciado
+     WHERE s.dominio = dom AND s.valencia = 'positivo';
+    SELECT array_agg(m.item_id ORDER BY s.enunciado) INTO negativos
+      FROM seed_item s
+      JOIN seed_item_id m ON m.enunciado = s.enunciado
+     WHERE s.dominio = dom AND s.valencia = 'negativo';
 
     FOR i IN 1..array_length(positivos, 1) LOOP
       ordem_global := ordem_global + 1;
