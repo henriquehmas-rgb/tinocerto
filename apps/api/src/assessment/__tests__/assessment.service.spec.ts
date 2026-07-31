@@ -765,8 +765,19 @@ describe('AssessmentService', () => {
         observado,
         new Promise((r) => setTimeout(() => r(AINDA_ESPERANDO), 750)),
       ]);
-      // Prova direta de que a leitura de cabeçalho pede o lock: com um SELECT
-      // solto ela teria terminado em milissegundos.
+      // Esta asserção prova que a transação está BLOQUEADA -- e só isso.
+      // Não prova que é a leitura de cabeçalho que pede o lock, embora seja
+      // tentador ler assim. Sem o FOR UPDATE a transação esperaria no mesmo
+      // ponto do relógio por outro motivo: o INSERT em item_response pega
+      // FOR KEY SHARE na linha pai de assessment_application por causa da FK,
+      // e FOR KEY SHARE conflita com o FOR UPDATE que o bloqueador segura.
+      // Verificado: contra o serviço pré-correção este expect passa igual, e
+      // a falha aparece só na asserção final.
+      //
+      // Quem carrega a prova do lock é a asserção do fim do teste: sem
+      // FOR UPDATE a leitura de cabeçalho enxerga o status ANTIGO, o INSERT
+      // destrava depois do COMMIT do bloqueador e a resposta é gravada órfã
+      // contra um status já obsoleto -- em vez de rejeitada.
       expect(corrida).toBe(AINDA_ESPERANDO);
 
       await bloqueador.query(
@@ -835,6 +846,10 @@ describe('AssessmentService', () => {
         observado,
         new Promise((r) => setTimeout(() => r(AINDA_ESPERANDO), 750)),
       ]);
+      // Mesma leitura do teste de responderBloco acima: prova bloqueio, não
+      // prova de onde vem o lock. Aqui o caminho pré-correção espera no
+      // UPDATE final de assessment_application. A prova do FOR UPDATE está
+      // na asserção do fim.
       expect(corrida).toBe(AINDA_ESPERANDO);
 
       await bloqueador.query(
