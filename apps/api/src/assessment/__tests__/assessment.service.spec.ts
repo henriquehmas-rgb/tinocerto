@@ -623,4 +623,250 @@ describe('AssessmentService', () => {
     );
     expect(status.rows[0].status).toBe('iniciado');
   });
+
+  it('recusa iniciar depois do prazo do convite (expira_em), sem depender do status', async () => {
+    // Nada no repositório escreve o status 'expirado' -- não existe job de
+    // expiração nesta fase. Quem só olha `status` deixa o prazo sem dono: o
+    // convite vencido continua 'convidado' e seria aceito. A condição que
+    // expirou é a do relógio.
+    const ctx = new TenantContext(appPool);
+    const svc = service();
+
+    const { id } = await ctx.run(tenantId, (client) =>
+      svc.convidar(client, {
+        tenantId,
+        applicationId,
+        personId,
+        instrumentVersionId: VERSION_ID,
+        expiraEm: new Date(Date.now() - 24 * 60 * 60 * 1000),
+      }),
+    );
+
+    const gravado = await adminPool.query<{ status: string; expira_em: Date }>(
+      'SELECT status, expira_em FROM assessment_application WHERE id = $1',
+      [id],
+    );
+    // O prazo está no passado E o status continua 'convidado' -- é
+    // exatamente a combinação que a guarda de status não enxerga.
+    expect(gravado.rows[0].status).toBe('convidado');
+    expect(gravado.rows[0].expira_em.getTime()).toBeLessThan(Date.now());
+
+    await expect(ctx.run(tenantId, (client) => svc.iniciar(client, id))).rejects.toThrow(
+      /prazo expirado/i,
+    );
+
+    const depois = await adminPool.query<{ status: string }>(
+      'SELECT status FROM assessment_application WHERE id = $1',
+      [id],
+    );
+    expect(depois.rows[0].status).toBe('convidado');
+  });
+
+  it('recusa resposta depois do prazo mesmo com status iniciado, e não toca o silo', async () => {
+    // O caso de produção: candidato começou dentro do prazo, sumiu, e volta
+    // depois do vencimento. Sem checagem de relógio a resposta é aceita,
+    // escorada e o resultado compartilhado com outros tenants via
+    // result_grant -- e ainda entra na amostra de calibração vinda de um
+    // protocolo cujas condições de aplicação não valem mais.
+    const ctx = new TenantContext(appPool);
+    const svc = service();
+
+    const { id } = await ctx.run(tenantId, (client) =>
+      svc.convidar(client, {
+        tenantId,
+        applicationId,
+        personId,
+        instrumentVersionId: VERSION_ID,
+        expiraEm: new Date(Date.now() + 60 * 60 * 1000),
+      }),
+    );
+    await ctx.run(tenantId, (client) => svc.iniciar(client, id));
+
+    // O prazo vence com o protocolo já em andamento.
+    await adminPool.query(
+      `UPDATE assessment_application SET expira_em = now() - interval '1 second' WHERE id = $1`,
+      [id],
+    );
+    const antes = await adminPool.query<{ status: string }>(
+      'SELECT status FROM assessment_application WHERE id = $1',
+      [id],
+    );
+    expect(antes.rows[0].status).toBe('iniciado');
+
+    const [bloco] = await blocosDoInstrumento();
+    const { maisId, menosId } = endossar(bloco, 'positivo');
+
+    await expect(
+      ctx.run(tenantId, (client) =>
+        svc.responderBloco(client, encryption, {
+          assessmentApplicationId: id,
+          blockId: bloco.blockId,
+          itemIds: bloco.itemIds,
+          maisId,
+          menosId,
+        }),
+      ),
+    ).rejects.toThrow(/prazo expirado/i);
+
+    const gravou = await adminPool.query(
+      'SELECT 1 FROM item_response WHERE assessment_application_id = $1',
+      [id],
+    );
+    expect(gravou.rows).toHaveLength(0);
+  });
+
+  it('responderBloco trava a linha do assessment: não grava resposta órfã contra status obsoleto', async () => {
+    // Regressão de concorrência. Sob READ COMMITTED (o que TenantContext.run
+    // usa) um SELECT sem FOR UPDATE não trava nada, então `responderBloco`
+    // enxerga 'iniciado' mesmo com uma transação concorrente já a caminho de
+    // concluir o protocolo -- e a resposta commita pendurada num assessment
+    // 'concluido', dentro do silo GLOBAL, sem entrar em nenhum θ e entrando
+    // na amostra de calibração.
+    //
+    // Aqui a transação concorrente é simulada de forma determinística: um
+    // client segura o lock da linha e só então a conclui. Sem o FOR UPDATE em
+    // `responderBloco`, a leitura de cabeçalho passa direto pelo lock, lê o
+    // status velho e o INSERT no silo acontece.
+    const ctx = new TenantContext(appPool);
+    const svc = service();
+
+    const { id } = await ctx.run(tenantId, (client) =>
+      svc.convidar(client, { tenantId, applicationId, personId, instrumentVersionId: VERSION_ID }),
+    );
+    await ctx.run(tenantId, (client) => svc.iniciar(client, id));
+
+    const [bloco] = await blocosDoInstrumento();
+    const { maisId, menosId } = endossar(bloco, 'positivo');
+
+    const bloqueador = await adminPool.connect();
+    let pendente: Promise<unknown> | undefined;
+    try {
+      await bloqueador.query('BEGIN');
+      await bloqueador.query('SELECT id FROM assessment_application WHERE id = $1 FOR UPDATE', [id]);
+
+      pendente = ctx.run(tenantId, (client) =>
+        svc.responderBloco(client, encryption, {
+          assessmentApplicationId: id,
+          blockId: bloco.blockId,
+          itemIds: bloco.itemIds,
+          maisId,
+          menosId,
+        }),
+      );
+      // Anexa um handler já agora para que uma rejeição futura nunca conte
+      // como unhandled rejection enquanto esperamos.
+      const observado = pendente.then(
+        () => 'resolveu',
+        () => 'rejeitou',
+      );
+
+      const AINDA_ESPERANDO = 'ainda-esperando';
+      const corrida = await Promise.race([
+        observado,
+        new Promise((r) => setTimeout(() => r(AINDA_ESPERANDO), 750)),
+      ]);
+      // Prova direta de que a leitura de cabeçalho pede o lock: com um SELECT
+      // solto ela teria terminado em milissegundos.
+      expect(corrida).toBe(AINDA_ESPERANDO);
+
+      await bloqueador.query(
+        `UPDATE assessment_application SET status = 'concluido', concluido_em = now() WHERE id = $1`,
+        [id],
+      );
+      await bloqueador.query('COMMIT');
+    } finally {
+      try {
+        // No-op depois do COMMIT. Existe para o caso de uma asserção falhar
+        // no meio: sem isto o client voltaria ao pool com transação aberta,
+        // ainda segurando o lock, e travaria os testes seguintes.
+        await bloqueador.query('ROLLBACK');
+      } catch {
+        // ignorado de propósito
+      }
+      bloqueador.release();
+    }
+
+    // Liberado o lock, a leitura relê a linha JÁ atualizada (EvalPlanQual) e
+    // cai na guarda de status em vez de escrever.
+    await expect(pendente).rejects.toThrow(/não aceita resposta \(status atual: concluido\)/i);
+
+    const orfa = await adminPool.query(
+      'SELECT 1 FROM item_response WHERE assessment_application_id = $1',
+      [id],
+    );
+    expect(orfa.rows).toHaveLength(0);
+  }, 30000);
+
+  it('concluir trava a linha do assessment: não escora duas vezes o mesmo protocolo', async () => {
+    // Mesma classe de problema do lado da conclusão. Sem FOR UPDATE, dois
+    // `concluir` concorrentes leem 'iniciado' e ambos escoram; hoje o segundo
+    // só morre porque a UNIQUE (tenant_id, aggregate_id, sequence) do outbox
+    // recusa o segundo 'assessment.completed' -- acidente do esquema de
+    // eventos, não uma guarda deste serviço. Com o lock a recusa vem da
+    // guarda de status, que é o que se quis escrever.
+    const ctx = new TenantContext(appPool);
+    const svc = service();
+
+    const { id } = await ctx.run(tenantId, (client) =>
+      svc.convidar(client, { tenantId, applicationId, personId, instrumentVersionId: VERSION_ID }),
+    );
+    await ctx.run(tenantId, (client) => svc.iniciar(client, id));
+    await responderTudo(svc, ctx, id, 'positivo');
+
+    const antes = await adminPool.query<{ n: string }>(
+      'SELECT count(*) AS n FROM assessment_result WHERE person_id = $1',
+      [personId],
+    );
+
+    const bloqueador = await adminPool.connect();
+    let pendente: Promise<unknown> | undefined;
+    try {
+      await bloqueador.query('BEGIN');
+      await bloqueador.query('SELECT id FROM assessment_application WHERE id = $1 FOR UPDATE', [id]);
+
+      pendente = ctx.run(tenantId, (client) => svc.concluir(client, encryption, id));
+      const observado = pendente.then(
+        () => 'resolveu',
+        () => 'rejeitou',
+      );
+
+      const AINDA_ESPERANDO = 'ainda-esperando';
+      const corrida = await Promise.race([
+        observado,
+        new Promise((r) => setTimeout(() => r(AINDA_ESPERANDO), 750)),
+      ]);
+      expect(corrida).toBe(AINDA_ESPERANDO);
+
+      await bloqueador.query(
+        `UPDATE assessment_application SET status = 'concluido', concluido_em = now() WHERE id = $1`,
+        [id],
+      );
+      await bloqueador.query('COMMIT');
+    } finally {
+      try {
+        // No-op depois do COMMIT. Existe para o caso de uma asserção falhar
+        // no meio: sem isto o client voltaria ao pool com transação aberta,
+        // ainda segurando o lock, e travaria os testes seguintes.
+        await bloqueador.query('ROLLBACK');
+      } catch {
+        // ignorado de propósito
+      }
+      bloqueador.release();
+    }
+
+    await expect(pendente).rejects.toThrow(/não pode ser concluído \(status atual: concluido\)/i);
+
+    const depois = await adminPool.query<{ n: string }>(
+      'SELECT count(*) AS n FROM assessment_result WHERE person_id = $1',
+      [personId],
+    );
+    // Nenhum resultado nasceu da tentativa que perdeu a corrida.
+    expect(depois.rows[0].n).toBe(antes.rows[0].n);
+
+    const eventos = await adminPool.query<{ event_type: string }>(
+      `SELECT event_type FROM outbox_event WHERE aggregate_id = $1 AND event_type = 'assessment.completed'`,
+      [id],
+    );
+    expect(eventos.rows).toHaveLength(0);
+  }, 60000);
 });

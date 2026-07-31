@@ -98,8 +98,16 @@ export class AssessmentService {
   }
 
   async iniciar(client: PoolClient, assessmentApplicationId: string): Promise<void> {
-    const atual = await client.query<{ tenant_id: string; status: string }>(
-      `SELECT tenant_id, status FROM assessment_application WHERE id = $1`,
+    // FOR UPDATE: ver o comentário do lock em `responderBloco`. Aqui o efeito
+    // é serializar dois `iniciar` concorrentes -- sem o lock os dois leem
+    // 'convidado' e só a UNIQUE (tenant_id, aggregate_id, sequence) do outbox
+    // impede o segundo `assessment.started`, o que é sorte do esquema de
+    // eventos, não uma garantia que este método tome.
+    const atual = await client.query<{ tenant_id: string; status: string; expirado: boolean }>(
+      `SELECT tenant_id, status,
+              (expira_em IS NOT NULL AND expira_em <= now()) AS expirado
+         FROM assessment_application WHERE id = $1
+         FOR UPDATE`,
       [assessmentApplicationId],
     );
     if (atual.rows.length === 0) {
@@ -108,6 +116,13 @@ export class AssessmentService {
     if (atual.rows[0].status !== 'convidado') {
       throw new Error(
         `Assessment ${assessmentApplicationId} não pode ser iniciado (status atual: ${atual.rows[0].status})`,
+      );
+    }
+    // Prazo do convite. Ver o comentário em `responderBloco` sobre por que a
+    // checagem é de RELÓGIO e não de status.
+    if (atual.rows[0].expirado) {
+      throw new Error(
+        `Assessment ${assessmentApplicationId} não pode ser iniciado: prazo expirado (expira_em)`,
       );
     }
 
@@ -136,8 +151,26 @@ export class AssessmentService {
     // Esta leitura é o que traz o isolamento de volta: ela passa pela RLS de
     // assessment_application, então o assessment de outro tenant simplesmente
     // não aparece e a escrita morre aqui, antes de tocar o silo.
-    const cabecalho = await client.query<{ status: string; instrument_version_id: string }>(
-      `SELECT status, instrument_version_id FROM assessment_application WHERE id = $1`,
+    //
+    // FOR UPDATE, e não um SELECT solto: sob READ COMMITTED (o que
+    // TenantContext.run usa -- o BEGIN é sem ISOLATION LEVEL) um SELECT
+    // comum não trava a linha, então esta transação e um `concluir`
+    // concorrente enxergam ambas 'iniciado' e as duas seguem em frente. Se a
+    // resposta commitar depois de `concluir` já ter lido `item_response`, ela
+    // fica no silo GLOBAL pendurada num assessment que virou 'concluido' e
+    // nunca mais é escorada: entra na amostra de calibração sem entrar em
+    // nenhum θ. O lock é o que torna a guarda de status abaixo serializável
+    // -- com ele a segunda transação espera, relê a linha já atualizada
+    // (EvalPlanQual) e cai na guarda em vez de escrever.
+    const cabecalho = await client.query<{
+      status: string;
+      instrument_version_id: string;
+      expirado: boolean;
+    }>(
+      `SELECT status, instrument_version_id,
+              (expira_em IS NOT NULL AND expira_em <= now()) AS expirado
+         FROM assessment_application WHERE id = $1
+         FOR UPDATE`,
       [input.assessmentApplicationId],
     );
     if (cabecalho.rows.length === 0) {
@@ -148,10 +181,24 @@ export class AssessmentService {
     // 'concluido' nunca seria escorada (o resultado já foi gravado e não há
     // recontagem), mas entraria na amostra de calibração vinda de um
     // protocolo cujas condições de aplicação não valem mais. Antes de
-    // 'iniciado' e depois de 'expirado', mesma coisa.
+    // 'iniciado', mesma coisa.
     if (cabecalho.rows[0].status !== 'iniciado') {
       throw new Error(
         `Assessment ${input.assessmentApplicationId} não aceita resposta (status atual: ${cabecalho.rows[0].status})`,
+      );
+    }
+
+    // 2b) E o prazo do convite tem de estar de pé. A guarda de status acima
+    // NÃO cobre isto: nada no repositório escreve o status 'expirado' (não há
+    // job de expiração nesta fase), então um convite cujo `expira_em` passou
+    // há um ano continua com status 'iniciado' e seria aceito. A condição de
+    // aplicação que expirou é a do RELÓGIO, e é o relógio que precisa ser
+    // consultado -- mesmo padrão de candidate-token.service.ts. Usamos now()
+    // do BANCO (e não Date.now() do processo) porque é o mesmo relógio que
+    // gravou `expira_em`: sem depender de sincronia entre app e banco.
+    if (cabecalho.rows[0].expirado) {
+      throw new Error(
+        `Assessment ${input.assessmentApplicationId} não aceita resposta: prazo expirado (expira_em)`,
       );
     }
 
@@ -230,8 +277,22 @@ export class AssessmentService {
       instrument_version_id: string;
       status: string;
     }>(
+      // FOR UPDATE pelo mesmo motivo de `responderBloco`: a guarda de status
+      // logo abaixo só vale se ninguém puder mudar a linha entre a leitura e
+      // o UPDATE final. Sem o lock, dois `concluir` concorrentes leem
+      // 'iniciado' e ambos escoram; hoje o segundo morre na UNIQUE do outbox,
+      // o que é acidente do esquema de eventos e não uma garantia deste
+      // método. Todos os caminhos travam ESTA linha e só ela, sempre antes de
+      // qualquer outra escrita -- ordem única, sem ciclo de deadlock.
+      //
+      // Note que `concluir` NÃO checa `expira_em`. O prazo é condição de
+      // COLETA, e a coleta já foi barrada em `responderBloco`: aqui só se
+      // escora evidência que entrou dentro do prazo. Recusar por relógio
+      // neste ponto descartaria um protocolo íntegro só porque a chamada de
+      // conclusão chegou segundos depois da última resposta.
       `SELECT tenant_id, person_id, instrument_version_id, status
-         FROM assessment_application WHERE id = $1`,
+         FROM assessment_application WHERE id = $1
+         FOR UPDATE`,
       [assessmentApplicationId],
     );
     if (cabecalho.rows.length === 0) {
