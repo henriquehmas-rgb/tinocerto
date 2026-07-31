@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { Pool, PoolClient } from 'pg';
+import { PoolClient } from 'pg';
 import { classificarTermosClinicos } from './clinical-vocabulary-linter';
 
 export const RODAPE_OBRIGATORIO =
@@ -9,7 +9,24 @@ export interface SecaoRelatorio {
   dimensao: string;
   titulo: string;
   texto: string;
-  escoreBruto: number;
+  /**
+   * Estimativa de theta da dimensão (escala logit), com `erroPadrao` sendo
+   * o erro padrão DESTA estimativa -- os dois vêm do mesmo par
+   * `theta`/`se_theta` gravado em `assessment_result`.
+   *
+   * NÃO se chama `escoreBruto` de propósito. Neste repositório "escore
+   * bruto" já tem um significado fechado e testado: é a CONTAGEM de
+   * endosso chaveada da dimensão (`assessment_result.escore_bruto`,
+   * produzida por `escoreBrutoPorDimensao` em mfc-scoring.ts), justamente
+   * a quantidade observada contra a qual uma calibração futura é
+   * conferida. Para o mesmo resultado, theta pode ser -0.8 enquanto o
+   * escore bruto é -8: publicar theta sob o nome "escoreBruto" entregaria
+   * dois números diferentes com um nome só ao recrutador e ao candidato, e
+   * convidaria a ler um logit de calibração provisória como se fosse algo
+   * contável. É o mesmo risco de "parece medida e não é" que
+   * mfc-scoring.ts já documenta.
+   */
+  estimativaTheta: number;
   erroPadrao: number;
 }
 
@@ -72,20 +89,32 @@ export class ReportService {
    *
    * PRÉ-CONDIÇÃO DE AUTORIZAÇÃO: `db` precisa estar dentro de um
    * `TenantContext.run()` -- é de lá que sai o `app.tenant_id` consultado
-   * abaixo. `assessment_result` é GLOBAL (sem `tenant_id`, sem RLS): é o
-   * ativo reaproveitável entre tenants. Quem autoriza a leitura é
+   * abaixo. O parâmetro é `PoolClient`, e não `Pool | PoolClient`, porque
+   * a GUC de tenant é transaction-local (`set_config(..., true)`): num
+   * `Pool` cru ela NUNCA existe, então todo chamador que passasse um
+   * `Pool` receberia `NotFoundException` para sempre -- falha fechada,
+   * mas como mistério de runtime. Com `PoolClient` no tipo, esse erro
+   * vira erro de compilação e a pré-condição para de morar só no
+   * comentário.
+   *
+   * `assessment_result` é GLOBAL (sem `tenant_id`, sem RLS): é o ativo
+   * reaproveitável entre tenants. Quem autoriza a leitura é
    * `result_grant`, a ponte de consentimento. Sem o JOIN explícito, um
    * `SELECT ... WHERE id = $1` devolveria o relatório comportamental de
    * QUALQUER candidato para QUALQUER recrutador que soubesse o UUID --
    * IDOR cross-tenant no payload mais sensível da fase. A RLS de
    * `result_grant` sozinha não fecha isso: ela filtra a ponte, não o
    * resultado, e nem sequer se aplica a uma conexão que não seja
-   * `app_runtime`. Por isso o predicado de tenant aparece ESCRITO na query
-   * (defesa em profundidade), no formato `NULLIF(...)` obrigatório da
-   * Fase 0 -- que, com a GUC ausente, resolve para NULL e derruba o
-   * `EXISTS`, isto é, falha FECHADO.
+   * `app_runtime` (o papel `tinocerto` é rolsuper/rolbypassrls, então em
+   * conexão de admin/ops/migração as policies simplesmente não rodam).
+   * Nesse caminho o predicado de tenant ESCRITO na query é o ÚNICO
+   * controle -- por isso ele aparece aqui (defesa em profundidade), no
+   * formato `NULLIF(...)` obrigatório da Fase 0, que com a GUC ausente
+   * resolve para NULL e derruba o `EXISTS`, isto é, falha FECHADO. Dois
+   * testes em report.service.spec.ts rodam justamente sobre a conexão que
+   * ignora RLS, para que remover este predicado não passe verde.
    */
-  async gerar(db: Pool | PoolClient, assessmentResultId: string): Promise<RelatorioTrilhoA> {
+  async gerar(db: PoolClient, assessmentResultId: string): Promise<RelatorioTrilhoA> {
     const { rows } = await db.query<{
       id: string;
       theta: Record<string, number> | null;
@@ -140,7 +169,7 @@ export class ReportService {
         dimensao,
         titulo: rotulo.titulo,
         texto,
-        escoreBruto: Number(valor.toFixed(3)),
+        estimativaTheta: Number(valor.toFixed(3)),
         erroPadrao: Number(erroPadrao.toFixed(3)),
       };
     });

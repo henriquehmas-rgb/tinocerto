@@ -22,12 +22,33 @@ describe('ReportService (trilho A)', () => {
   let resultSemConfiancaId: string;
   let resultSeIncompletoId: string;
 
-  async function inserirResultado(theta: unknown, seTheta: unknown, confianca: number | null): Promise<string> {
+  /**
+   * `escore_bruto` NÃO é uma cópia de theta -- é a contagem de endosso
+   * chaveada (ver mfc-scoring.ts). O fixture grava os dois com valores
+   * distintos de propósito: é o que permite provar que o relatório publica
+   * theta, e não a contagem, sob um nome que não confunde os dois.
+   */
+  async function inserirResultado(
+    theta: Record<string, number>,
+    seTheta: Record<string, number>,
+    confianca: number | null,
+    escoreBrutoObservado?: Record<string, number>,
+  ): Promise<string> {
+    const contagens =
+      escoreBrutoObservado ??
+      Object.fromEntries(Object.entries(theta).map(([d, v]) => [d, Math.round(v * 10)]));
     const r = await adminPool.query<{ id: string }>(
       `INSERT INTO assessment_result
          (person_id, instrument_version_id, theta, se_theta, escore_bruto, protocolo_confianca, respondido_em, calibracao_versao)
-       VALUES ($1,$2,$3,$4,$3,$5,now(),'literatura_v1') RETURNING id`,
-      [personId, VERSION_ID, JSON.stringify(theta), JSON.stringify(seTheta), confianca],
+       VALUES ($1,$2,$3,$4,$5,$6,now(),'literatura_v1') RETURNING id`,
+      [
+        personId,
+        VERSION_ID,
+        JSON.stringify(theta),
+        JSON.stringify(seTheta),
+        JSON.stringify(contagens),
+        confianca,
+      ],
     );
     return r.rows[0].id;
   }
@@ -83,6 +104,7 @@ describe('ReportService (trilho A)', () => {
       { conscienciosidade: 0.8, extroversao: -0.3, amabilidade: 0.1, estabilidade: 0.5, abertura: -0.2 },
       { conscienciosidade: 0.35, extroversao: 0.4, amabilidade: 0.42, estabilidade: 0.38, abertura: 0.45 },
       0.62,
+      { conscienciosidade: 8, extroversao: -3, amabilidade: 1, estabilidade: 5, abertura: -2 },
     );
 
     // Cobre a faixa BAIXA e as duas BORDAS do corte, que o fixture acima
@@ -131,27 +153,52 @@ describe('ReportService (trilho A)', () => {
   // A escolha da faixa narrativa é a ÚNICA lógica substantiva do serviço.
   // Sem estas asserções, inverter alto/baixo no corte -- ou publicar o erro
   // padrão no lugar do escore -- passaria verde e chegaria ao cliente.
-  it('amarra faixa narrativa, escore e erro padrão de cada dimensão ao theta gravado', async () => {
+  it('amarra faixa narrativa, estimativa de theta e erro padrão de cada dimensão ao theta gravado', async () => {
     const relatorio = await gerarComo(tenantComGrant, resultId);
 
     // theta 0.8 > 0.5 -> faixa ALTA
     expect(secao(relatorio, 'conscienciosidade').texto).toBe(ROTULOS.conscienciosidade.alto);
     expect(secao(relatorio, 'conscienciosidade').titulo).toBe(ROTULOS.conscienciosidade.titulo);
-    expect(secao(relatorio, 'conscienciosidade').escoreBruto).toBe(0.8);
+    expect(secao(relatorio, 'conscienciosidade').estimativaTheta).toBe(0.8);
     expect(secao(relatorio, 'conscienciosidade').erroPadrao).toBe(0.35);
 
     // theta -0.3 -> faixa MÉDIA (não é baixa: -0.3 não é < -0.5)
     expect(secao(relatorio, 'extroversao').texto).toBe(ROTULOS.extroversao.medio);
-    expect(secao(relatorio, 'extroversao').escoreBruto).toBe(-0.3);
+    expect(secao(relatorio, 'extroversao').estimativaTheta).toBe(-0.3);
     expect(secao(relatorio, 'extroversao').erroPadrao).toBe(0.4);
 
     expect(secao(relatorio, 'amabilidade').texto).toBe(ROTULOS.amabilidade.medio);
-    expect(secao(relatorio, 'amabilidade').escoreBruto).toBe(0.1);
+    expect(secao(relatorio, 'amabilidade').estimativaTheta).toBe(0.1);
 
     expect(secao(relatorio, 'abertura').texto).toBe(ROTULOS.abertura.medio);
-    expect(secao(relatorio, 'abertura').escoreBruto).toBe(-0.2);
+    expect(secao(relatorio, 'abertura').estimativaTheta).toBe(-0.2);
 
     expect(relatorio.indiceConfiancaProtocolo).toBe(0.62);
+  });
+
+  // "Escore bruto" já tem significado fechado e testado neste repositório:
+  // é a CONTAGEM de endosso chaveada (mfc-scoring.ts, e o teste
+  // "escore_bruto gravado é a contagem observada, não uma cópia de theta"
+  // em assessment.service.spec.ts). Publicar theta sob esse nome faria o
+  // mesmo resultado exibir -0.8 no relatório e -8 na exportação auditada,
+  // dois números sob um nome só, no payload que chega ao recrutador e ao
+  // candidato.
+  it('publica a estimativa de theta -- não a contagem de escore bruto, e não sob esse nome', async () => {
+    const relatorio = await gerarComo(tenantComGrant, resultId);
+
+    expect(secao(relatorio, 'conscienciosidade').estimativaTheta).toBe(0.8);
+
+    const linha = await adminPool.query<{
+      theta: Record<string, number>;
+      escore_bruto: Record<string, number>;
+    }>('SELECT theta, escore_bruto FROM assessment_result WHERE id = $1', [resultId]);
+    expect(linha.rows[0].theta.conscienciosidade).toBe(0.8);
+    expect(linha.rows[0].escore_bruto.conscienciosidade).toBe(8);
+    expect(linha.rows[0].escore_bruto).not.toEqual(linha.rows[0].theta);
+
+    const serializado = JSON.stringify(relatorio).toLowerCase();
+    expect(serializado).not.toContain('escorebruto');
+    expect(serializado).not.toContain('escore_bruto');
   });
 
   it('cobre a faixa baixa e as duas bordas do corte (±0.5 fica na faixa média)', async () => {
@@ -159,7 +206,7 @@ describe('ReportService (trilho A)', () => {
 
     // theta -0.8 < -0.5 -> faixa BAIXA
     expect(secao(relatorio, 'conscienciosidade').texto).toBe(ROTULOS.conscienciosidade.baixo);
-    expect(secao(relatorio, 'conscienciosidade').escoreBruto).toBe(-0.8);
+    expect(secao(relatorio, 'conscienciosidade').estimativaTheta).toBe(-0.8);
     expect(secao(relatorio, 'conscienciosidade').erroPadrao).toBe(0.3);
 
     // theta 0.51 -> ALTA; 0.5 exato -> MÉDIA (o corte é estrito, não >=)
@@ -234,12 +281,67 @@ describe('ReportService (trilho A)', () => {
 
   it('sem app.tenant_id nenhum grant vale — a leitura falha FECHADA', async () => {
     // Conexão crua, fora de TenantContext: a GUC não está setada, então o
-    // NULLIF resolve para NULL e o EXISTS nunca casa. É o caso que garante
-    // que a autorização não depende só da RLS de result_grant.
+    // NULLIF resolve para NULL e o EXISTS nunca casa.
     const client = await appPool.connect();
     try {
       await expect(new ReportService().gerar(client, resultId)).rejects.toThrow(/não encontrado/i);
     } finally {
+      client.release();
+    }
+  });
+
+  // ------------------------------------------------------------------
+  // Os testes de autorização acima todos passam pelo pool `app_runtime`,
+  // onde a RLS de `result_grant` já barra sozinha -- então eles ficariam
+  // verdes mesmo se o predicado de tenant fosse apagado da query do
+  // ReportService. Os dois abaixo rodam sobre a conexão de admin, que é
+  // rolsuper/rolbypassrls: ali as policies de `result_grant` NÃO rodam e o
+  // predicado escrito na query é o ÚNICO controle entre o chamador e o
+  // grant de outro tenant. É exatamente o caminho de conexões de
+  // admin/ops/migração e o caminho que o gate consolidado da fase usa.
+  // ------------------------------------------------------------------
+
+  it('conexão que ignora RLS, sem app.tenant_id, não recebe relatório', async () => {
+    const client = await adminPool.connect();
+    try {
+      const papel = await client.query<{ rolsuper: boolean; rolbypassrls: boolean }>(
+        'SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user',
+      );
+      // Premissa do teste: se este papel deixar de ignorar RLS, o teste
+      // deixa de exercitar o caminho que ele existe para cobrir -- e falha
+      // aqui, alto e claro, em vez de virar um teste vazio e silencioso.
+      expect(papel.rows[0].rolsuper || papel.rows[0].rolbypassrls).toBe(true);
+
+      // E a RLS está mesmo desligada nesta conexão: o grant do outro tenant
+      // é visível a olho nu.
+      const grants = await client.query('SELECT 1 FROM result_grant WHERE assessment_result_id = $1', [resultId]);
+      expect(grants.rows.length).toBeGreaterThan(0);
+
+      await expect(new ReportService().gerar(client, resultId)).rejects.toThrow(/não encontrado/i);
+    } finally {
+      client.release();
+    }
+  });
+
+  it('conexão que ignora RLS não enxerga o grant de OUTRO tenant', async () => {
+    const client = await adminPool.connect();
+    try {
+      await client.query('BEGIN');
+
+      await client.query(`SELECT set_config('app.tenant_id', $1, true)`, [tenantSemGrant]);
+      await expect(new ReportService().gerar(client, resultId)).rejects.toThrow(/não encontrado/i);
+
+      // Controle positivo: no MESMO caminho sem RLS, o tenant que de fato
+      // tem grant recebe. Sem isto, o teste acima passaria por qualquer
+      // motivo (query quebrada, fixture ausente).
+      await client.query(`SELECT set_config('app.tenant_id', $1, true)`, [tenantComGrant]);
+      const relatorio = await new ReportService().gerar(client, resultId);
+      expect(relatorio.secoes).toHaveLength(5);
+    } finally {
+      // ROLLBACK no finally: uma asserção que falha no meio não pode
+      // devolver ao pool uma conexão com transação aberta (e com a GUC de
+      // tenant ainda setada) para o próximo teste herdar.
+      await client.query('ROLLBACK').catch(() => undefined);
       client.release();
     }
   });
