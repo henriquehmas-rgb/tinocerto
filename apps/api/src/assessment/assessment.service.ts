@@ -3,7 +3,14 @@ import { PoolClient } from 'pg';
 import { OutboxService } from '../outbox/outbox.service';
 import { nextOutboxSequence } from '../outbox/next-outbox-sequence';
 import { EnvelopeEncryptionService } from '../talent/envelope-encryption.service';
-import { decomporBlocoEmPares, estimarThetaEAP, ComparacaoPar, ItemNoBloco } from './scoring/mfc-scoring';
+import {
+  ComparacaoPar,
+  ItemNoBloco,
+  comparacoesRelevantes,
+  decomporBlocoEmPares,
+  escoreBrutoPorDimensao,
+  estimarThetaEAP,
+} from './scoring/mfc-scoring';
 
 export interface ConvidarInput {
   tenantId: string;
@@ -28,6 +35,8 @@ export interface ResultadoEscoragem {
   assessmentResultId: string;
   theta: Record<string, number>;
   seTheta: Record<string, number>;
+  escoreBruto: Record<string, number>;
+  calibracaoVersao: string;
 }
 
 const DIMENSOES = ['conscienciosidade', 'extroversao', 'amabilidade', 'estabilidade', 'abertura'];
@@ -37,6 +46,30 @@ export class AssessmentService {
   constructor(private readonly outbox: OutboxService) {}
 
   async convidar(client: PoolClient, input: ConvidarInput): Promise<{ id: string }> {
+    // O titular do assessment é o titular da CANDIDATURA -- não um person_id
+    // solto vindo do chamador. `assessment_application.person_id` tem FK
+    // simples para a tabela GLOBAL person, sem nenhuma relação com a
+    // candidatura referenciada; sem esta conferência o banco aceita, e aceita
+    // em silêncio, um resultado comportamental atribuído a outra pessoa --
+    // numa tabela (assessment_result) que é global e compartilhada com
+    // outros tenants via result_grant. Erro assim não tem como ser desfeito
+    // depois: o dado já foi lido por quem recebeu o grant.
+    const candidatura = await client.query<{ person_id: string }>(
+      `SELECT person_id FROM application WHERE tenant_id = $1 AND id = $2`,
+      [input.tenantId, input.applicationId],
+    );
+    if (candidatura.rows.length === 0) {
+      throw new Error(
+        `Candidatura ${input.applicationId} não encontrada no tenant ${input.tenantId}`,
+      );
+    }
+    const titular = candidatura.rows[0].person_id;
+    if (titular !== input.personId) {
+      throw new Error(
+        `Candidatura ${input.applicationId}: person_id ${input.personId} não é o titular da candidatura`,
+      );
+    }
+
     const result = await client.query<{ id: string }>(
       `INSERT INTO assessment_application
          (tenant_id, application_id, person_id, instrument_version_id, nivel_integridade, multiplicador_tempo, expira_em)
@@ -44,7 +77,9 @@ export class AssessmentService {
       [
         input.tenantId,
         input.applicationId,
-        input.personId,
+        // Valor do BANCO, não o do chamador -- já conferimos que são iguais,
+        // e usar o do banco tira a última chance de divergência.
+        titular,
         input.instrumentVersionId,
         input.nivelIntegridade ?? 0,
         input.multiplicadorTempo ?? null,
@@ -56,7 +91,7 @@ export class AssessmentService {
     await this.emitir(client, input.tenantId, id, 'assessment.invited', {
       assessment_application_id: id,
       application_id: input.applicationId,
-      person_id: input.personId,
+      person_id: titular,
     });
 
     return { id };
@@ -91,18 +126,86 @@ export class AssessmentService {
     encryption: EnvelopeEncryptionService,
     input: ResponderBlocoInput,
   ): Promise<{ id: string }> {
-    // Valida a coerência da escolha ANTES de gravar -- decomporBlocoEmPares
-    // rejeita mais == menos e escolha fora do bloco. Bloco incoerente é
-    // rejeitado na escrita, nunca normalizado em silêncio.
+    // 1) O assessment existe E é visível para o tenant desta conexão.
+    //
+    // item_response é SILO GLOBAL: sem tenant_id, sem RLS, com INSERT
+    // liberado para app_runtime. Escrever direto nele é, por construção, um
+    // caminho SEM isolamento -- uma conexão sob o GUC do tenant A conseguiria
+    // gravar resposta contra o assessment do tenant B, envenenando o θ de um
+    // candidato que ela nem enxerga e contaminando a amostra de calibração.
+    // Esta leitura é o que traz o isolamento de volta: ela passa pela RLS de
+    // assessment_application, então o assessment de outro tenant simplesmente
+    // não aparece e a escrita morre aqui, antes de tocar o silo.
+    const cabecalho = await client.query<{ status: string; instrument_version_id: string }>(
+      `SELECT status, instrument_version_id FROM assessment_application WHERE id = $1`,
+      [input.assessmentApplicationId],
+    );
+    if (cabecalho.rows.length === 0) {
+      throw new Error(`Assessment ${input.assessmentApplicationId} não encontrado`);
+    }
+
+    // 2) Só responde quem está em andamento. Resposta gravada depois de
+    // 'concluido' nunca seria escorada (o resultado já foi gravado e não há
+    // recontagem), mas entraria na amostra de calibração vinda de um
+    // protocolo cujas condições de aplicação não valem mais. Antes de
+    // 'iniciado' e depois de 'expirado', mesma coisa.
+    if (cabecalho.rows[0].status !== 'iniciado') {
+      throw new Error(
+        `Assessment ${input.assessmentApplicationId} não aceita resposta (status atual: ${cabecalho.rows[0].status})`,
+      );
+    }
+
+    // 3) O bloco tem de ser DESTE instrumento, e os itens têm de ser
+    // exatamente os que o bloco contém no banco.
+    //
+    // Sem esta conferência, `itemIds` é palavra do chamador: dá para mandar,
+    // no lugar do bloco de abertura, o par de itens mais fortes de
+    // conscienciosidade e vencer a comparação -- escorando uma dimensão que
+    // o bloco não mede. `decomporBlocoEmPares` é função pura e não tem como
+    // pegar isso: ela só confere mais != menos e pertinência ao array que
+    // recebeu. Como o payload gravado é o que `concluir` descriptografa e
+    // decompõe de novo, uma mentira aqui vira θ forjado lá.
+    const composicao = await client.query<{ item_id: string }>(
+      `SELECT bi.item_id
+         FROM block b
+         JOIN block_item bi ON bi.block_id = b.id
+        WHERE b.id = $1 AND b.instrument_version_id = $2
+        ORDER BY bi.posicao`,
+      [input.blockId, cabecalho.rows[0].instrument_version_id],
+    );
+    if (composicao.rows.length === 0) {
+      throw new Error(
+        `Bloco ${input.blockId} não pertence ao instrumento deste assessment (${input.assessmentApplicationId})`,
+      );
+    }
+    const itensDoBloco = composicao.rows.map((linha) => linha.item_id);
+
+    const informados = new Set(input.itemIds);
+    if (informados.size !== input.itemIds.length) {
+      throw new Error(`Bloco ${input.blockId}: itemIds contém item repetido`);
+    }
+    if (
+      informados.size !== itensDoBloco.length ||
+      itensDoBloco.some((itemId) => !informados.has(itemId))
+    ) {
+      throw new Error(
+        `Bloco ${input.blockId}: itemIds não corresponde à composição do bloco no instrumento`,
+      );
+    }
+
+    // 4) Coerência da escolha (mais != menos, escolha dentro do bloco).
+    // Roda sobre a composição VINDA DO BANCO, não sobre o array do chamador.
     decomporBlocoEmPares({
       blockId: input.blockId,
-      itemIds: input.itemIds,
+      itemIds: itensDoBloco,
       maisId: input.maisId,
       menosId: input.menosId,
     });
 
+    // Persistimos a composição canônica do banco: o payload gravado é a
+    // fonte da escoragem, e ele não pode depender do que o cliente digitou.
     const payload = JSON.stringify({
-      itemIds: input.itemIds,
+      itemIds: itensDoBloco,
       maisId: input.maisId,
       menosId: input.menosId,
     });
@@ -141,7 +244,42 @@ export class AssessmentService {
     }
     const { tenant_id: tenantId, person_id: personId, instrument_version_id: versionId } = cabecalho.rows[0];
 
-    // Catálogo de itens do instrumento, com os parâmetros vigentes.
+    // Protocolo COMPLETO ou nada. No modo linear o instrumento tem
+    // comprimento fixo, e escorar um protocolo pela metade produz um número
+    // que parece escore e não é: uma dimensão sem comparação relevante
+    // devolve exatamente o prior (θ ≈ 0, SE ≈ 1), indistinguível de um
+    // respondente genuinamente médio, e nada na linha gravada registra
+    // quantos blocos foram respondidos. Recusar é a única saída honesta.
+    const totalBlocos = await client.query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM block WHERE instrument_version_id = $1`,
+      [versionId],
+    );
+    const esperados = totalBlocos.rows[0].n;
+    const respondidos = await client.query<{ n: number }>(
+      `SELECT count(DISTINCT block_id)::int AS n
+         FROM item_response WHERE assessment_application_id = $1`,
+      [assessmentApplicationId],
+    );
+    if (esperados === 0) {
+      throw new Error(`Instrumento ${versionId} não tem blocos -- nada a escorar`);
+    }
+    if (respondidos.rows[0].n !== esperados) {
+      throw new Error(
+        `Assessment ${assessmentApplicationId} incompleto: ${respondidos.rows[0].n} de ${esperados} blocos respondidos`,
+      );
+    }
+
+    // Catálogo de itens do instrumento com UMA versão de calibração só.
+    //
+    // `uq_ipv_item_calibracao` é UNIQUE (item_id, calibracao_versao): assim
+    // que uma calibration_run acrescentar a segunda linha de parâmetro por
+    // item, um JOIN sem critério devolve duas linhas por item e o catálogo
+    // vira "a última que o Postgres devolveu ganha", sobre um resultado sem
+    // ordem definida -- θ escorado contra uma mistura não determinística de
+    // parâmetro vigente e superado. Aqui a versão é escolhida ANTES: entre as
+    // que cobrem TODOS os itens do instrumento, prefere a já calibrada
+    // (nenhum item provisório), depois a mais recente, com o nome da versão
+    // como desempate final para a ordenação ser total.
     const catalogo = await client.query<{
       item_id: string;
       dominio: string;
@@ -149,15 +287,41 @@ export class AssessmentService {
       a: string;
       b: string;
       c: string;
+      calibracao_versao: string;
     }>(
-      `SELECT i.id AS item_id, i.dominio, i.chave_valencia, ipv.a, ipv.b, ipv.c
-         FROM block b
-         JOIN block_item bi ON bi.block_id = b.id
-         JOIN item i ON i.id = bi.item_id
-         JOIN item_parameter_version ipv ON ipv.item_id = i.id
-        WHERE b.instrument_version_id = $1`,
+      `WITH itens_instrumento AS (
+         SELECT DISTINCT i.id, i.dominio, i.chave_valencia
+           FROM block b
+           JOIN block_item bi ON bi.block_id = b.id
+           JOIN item i ON i.id = bi.item_id
+          WHERE b.instrument_version_id = $1
+       ),
+       versao_escolhida AS (
+         SELECT ipv.calibracao_versao
+           FROM item_parameter_version ipv
+           JOIN itens_instrumento ii ON ii.id = ipv.item_id
+          GROUP BY ipv.calibracao_versao
+         HAVING count(*) = (SELECT count(*) FROM itens_instrumento)
+          ORDER BY bool_or(ipv.provisorio) ASC,
+                   max(ipv.criado_em) DESC,
+                   ipv.calibracao_versao DESC
+          LIMIT 1
+       )
+       SELECT ii.id AS item_id, ii.dominio, ii.chave_valencia,
+              ipv.a, ipv.b, ipv.c, ipv.calibracao_versao
+         FROM itens_instrumento ii
+         JOIN item_parameter_version ipv ON ipv.item_id = ii.id
+        WHERE ipv.calibracao_versao = (SELECT calibracao_versao FROM versao_escolhida)`,
       [versionId],
     );
+    if (catalogo.rows.length === 0) {
+      throw new Error(
+        `Instrumento ${versionId}: nenhuma versão de calibração cobre todos os itens do instrumento`,
+      );
+    }
+    // A versão gravada em assessment_result é a das linhas REALMENTE usadas,
+    // nunca um literal no código -- procedência errada é pior que ausente.
+    const calibracaoVersao = catalogo.rows[0].calibracao_versao;
 
     const itensPorId: Record<string, ItemNoBloco> = {};
     for (const linha of catalogo.rows) {
@@ -196,12 +360,27 @@ export class AssessmentService {
       );
     }
 
+    // Nenhuma dimensão sai daqui sem evidência. Sem esta guarda o estimador
+    // devolve o prior sem reclamar e o relatório (Task 11) renderiza θ ≈ 0
+    // como se fosse medida.
+    const semEvidencia = DIMENSOES.filter(
+      (dimensao) => comparacoesRelevantes(comparacoes, dimensao, itensPorId).length === 0,
+    );
+    if (semEvidencia.length > 0) {
+      throw new Error(
+        `Assessment ${assessmentApplicationId} não pode ser escorado: sem evidência para ${semEvidencia.join(', ')}`,
+      );
+    }
+
     const theta: Record<string, number> = {};
     const seTheta: Record<string, number> = {};
+    const escoreBruto: Record<string, number> = {};
     for (const dimensao of DIMENSOES) {
       const estimativa = estimarThetaEAP(comparacoes, dimensao, itensPorId);
       theta[dimensao] = estimativa.theta;
       seTheta[dimensao] = estimativa.se;
+      // Contagem de endosso chaveada -- independente de parâmetro e de θ.
+      escoreBruto[dimensao] = escoreBrutoPorDimensao(comparacoes, dimensao, itensPorId);
     }
 
     // Índice de confiança do protocolo: 1 - SE médio, limitado a [0,1].
@@ -219,9 +398,9 @@ export class AssessmentService {
         versionId,
         JSON.stringify(theta),
         JSON.stringify(seTheta),
-        JSON.stringify(theta),
+        JSON.stringify(escoreBruto),
         protocoloConfianca.toFixed(2),
-        'literatura_v1',
+        calibracaoVersao,
       ],
     );
 
@@ -236,7 +415,13 @@ export class AssessmentService {
       person_id: personId,
     });
 
-    return { assessmentResultId: resultado.rows[0].id, theta, seTheta };
+    return {
+      assessmentResultId: resultado.rows[0].id,
+      theta,
+      seTheta,
+      escoreBruto,
+      calibracaoVersao,
+    };
   }
 
   private async emitir(

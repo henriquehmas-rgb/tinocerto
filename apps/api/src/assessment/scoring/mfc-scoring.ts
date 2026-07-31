@@ -32,6 +32,12 @@ export interface ComparacaoPar {
  *   - o item MAIS característico vence todos os outros do bloco;
  *   - o item MENOS característico perde para todos os outros;
  *   - o par (mais, menos) é gerado uma vez só, não duas.
+ *
+ * ATENÇÃO -- esta função é PURA e só conhece o que recebe. Ela NÃO sabe
+ * quais itens o bloco realmente tem no banco, e portanto NÃO é, sozinha,
+ * validação de integridade da resposta: `itemIds` mentiroso entra e sai
+ * como comparação válida. Quem grava resposta tem de conferir `itemIds`
+ * contra `block_item` ANTES de chamar aqui (ver AssessmentService.responderBloco).
  */
 export function decomporBlocoEmPares(resposta: RespostaBloco): ComparacaoPar[] {
   const { blockId, itemIds, maisId, menosId } = resposta;
@@ -40,6 +46,10 @@ export function decomporBlocoEmPares(resposta: RespostaBloco): ComparacaoPar[] {
     throw new Error(
       `Bloco ${blockId}: mais e menos característico não podem ser o mesmo item (${maisId})`,
     );
+  }
+  const repetidos = new Set(itemIds);
+  if (repetidos.size !== itemIds.length) {
+    throw new Error(`Bloco ${blockId}: itemIds contém item repetido`);
   }
   for (const escolhido of [maisId, menosId]) {
     if (!itemIds.includes(escolhido)) {
@@ -74,6 +84,63 @@ export function decomporBlocoEmPares(resposta: RespostaBloco): ComparacaoPar[] {
  */
 function aEfetivo(item: ItemNoBloco): number {
   return item.valencia === 'positivo' ? item.params.a : -item.params.a;
+}
+
+/**
+ * Comparações que de fato ENTRAM na verossimilhança de uma dimensão.
+ *
+ * Duas condições, e as duas importam:
+ *   - os dois lados do par precisam existir no catálogo (item fora do
+ *     instrumento não tem parâmetro e não pode contribuir);
+ *   - ao menos um dos lados precisa medir a dimensão pedida.
+ *
+ * Existe como função exportada, e não como filtro embutido no estimador,
+ * porque quem escora precisa CONTAR evidência antes de confiar no número:
+ * uma dimensão com zero comparação relevante devolve exatamente o prior
+ * (θ ≈ 0, SE ≈ 1) -- um valor que parece medida e não é. O contador e o
+ * estimador têm de enxergar o mesmo conjunto, senão o contador mente.
+ */
+export function comparacoesRelevantes(
+  comparacoes: ComparacaoPar[],
+  dimensao: string,
+  itensPorId: Record<string, ItemNoBloco>,
+): ComparacaoPar[] {
+  return comparacoes.filter((par) => {
+    const vencedor = itensPorId[par.vencedorId];
+    const perdedor = itensPorId[par.perdedorId];
+    if (!vencedor || !perdedor) return false;
+    return vencedor.dominio === dimensao || perdedor.dominio === dimensao;
+  });
+}
+
+/**
+ * Escore BRUTO observado da dimensão -- contagem de endosso chaveada.
+ *
+ * Não usa parâmetro nenhum: é a contagem crua de quantas vezes o
+ * respondente empurrou a dimensão para o polo alto (item de chave positiva
+ * escolhido como MAIS, ou item de chave negativa escolhido como MENOS)
+ * menos quantas vezes empurrou para o polo baixo. Serve justamente para
+ * ser INDEPENDENTE de θ: numa calibração ou numa auditoria é contra este
+ * número que o θ estimado é comparado. Gravar θ duas vezes (uma como
+ * `theta` e outra como `escore_bruto`) destruiria essa checagem.
+ */
+export function escoreBrutoPorDimensao(
+  comparacoes: ComparacaoPar[],
+  dimensao: string,
+  itensPorId: Record<string, ItemNoBloco>,
+): number {
+  let escore = 0;
+  for (const par of comparacoesRelevantes(comparacoes, dimensao, itensPorId)) {
+    const vencedor = itensPorId[par.vencedorId];
+    const perdedor = itensPorId[par.perdedorId];
+    if (vencedor.dominio === dimensao) {
+      escore += vencedor.valencia === 'positivo' ? 1 : -1;
+    }
+    if (perdedor.dominio === dimensao) {
+      escore += perdedor.valencia === 'positivo' ? -1 : 1;
+    }
+  }
+  return escore;
 }
 
 /** Grade de quadratura: θ de -4 a 4, passo 0,1 (81 pontos). */
@@ -113,18 +180,21 @@ function logPrior(theta: number): number {
  * EAP e não MLE porque MLE diverge em padrão de resposta extremo (o
  * respondente que escolhe sempre o mesmo polo): a verossimilhança não tem
  * máximo finito. O prior do EAP regulariza e sempre converge.
+ *
+ * SEM EVIDÊNCIA ESTA FUNÇÃO NÃO AVISA: se `comparacoes` não tem nenhuma
+ * comparação relevante para a dimensão, a verossimilhança fica plana, a
+ * quadratura reconstrói o prior e o retorno é θ ≈ 0 / SE ≈ 1 -- que é a
+ * resposta bayesiana correta, mas é INDISTINGUÍVEL de um respondente
+ * genuinamente médio. Cabe a quem chama contar `comparacoesRelevantes`
+ * antes e recusar escorar sem evidência (ver AssessmentService.concluir).
  */
 export function estimarThetaEAP(
   comparacoes: ComparacaoPar[],
   dimensao: string,
   itensPorId: Record<string, ItemNoBloco>,
 ): { theta: number; se: number } {
-  // Só as comparações em que ao menos um lado mede a dimensão pedida.
-  const relevantes = comparacoes.filter((par) => {
-    const v = itensPorId[par.vencedorId];
-    const p = itensPorId[par.perdedorId];
-    return v?.dominio === dimensao || p?.dominio === dimensao;
-  });
+  // Exatamente o conjunto que contribui -- mesmo critério do contador.
+  const relevantes = comparacoesRelevantes(comparacoes, dimensao, itensPorId);
 
   const grade = gradeTheta();
 
@@ -134,7 +204,6 @@ export function estimarThetaEAP(
     for (const par of relevantes) {
       const vencedor = itensPorId[par.vencedorId];
       const perdedor = itensPorId[par.perdedorId];
-      if (!vencedor || !perdedor) continue;
 
       // Utilidade de cada lado. O lado que NÃO mede esta dimensão entra com
       // θ = 0 (média do prior) -- é justamente a aproximação 1-D.
@@ -179,9 +248,7 @@ export function estimarThetaEAP(
 
   // Grade inutilizável (parâmetro NaN/Infinity vindo do banco de itens):
   // devolve o prior. É o resultado honesto -- não sabemos nada, então θ = 0
-  // com a incerteza cheia do prior, em vez de fingir precisão. Ausência de
-  // evidência NÃO passa por aqui: sem comparação relevante a verossimilhança
-  // fica plana e a quadratura reconstrói o prior sozinha.
+  // com a incerteza cheia do prior, em vez de fingir precisão.
   if (!Number.isFinite(somaPesos) || somaPesos <= 0) {
     return { theta: 0, se: 1 };
   }

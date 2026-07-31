@@ -6,6 +6,26 @@ import { AssessmentService } from '../assessment.service';
 
 const VERSION_ID = 'a55e55e0-0000-4000-8000-000000000002';
 
+const DIMENSOES = [
+  'abertura',
+  'amabilidade',
+  'conscienciosidade',
+  'estabilidade',
+  'extroversao',
+];
+
+interface ItemDoBloco {
+  itemId: string;
+  dominio: string;
+  valencia: 'positivo' | 'negativo';
+}
+
+interface BlocoDoInstrumento {
+  blockId: string;
+  itemIds: string[];
+  itens: ItemDoBloco[];
+}
+
 describe('AssessmentService', () => {
   const url = new URL(process.env.DATABASE_URL!);
   url.username = 'app_runtime';
@@ -16,6 +36,16 @@ describe('AssessmentService', () => {
   let tenantId: string;
   let applicationId: string;
   let personId: string;
+  // Pessoa REAL, existente, mas que não é titular da candidatura acima --
+  // é exatamente o caso que a conferência de titularidade tem de barrar.
+  let personOutroId: string;
+
+  // Segundo tenant, usado só para provar que a escrita no silo global
+  // (item_response) não atravessa a fronteira de tenant.
+  let tenantOutroId: string;
+  let personOutroTenantId: string;
+  let assessmentDoOutroTenantId: string;
+
   let encryption: EnvelopeEncryptionService;
 
   const service = () => new AssessmentService(new OutboxService());
@@ -47,40 +77,142 @@ describe('AssessmentService', () => {
        RETURNING id`,
     );
     personId = person.rows[0].id;
+    const outro = await adminPool.query<{ id: string }>(
+      `INSERT INTO person (cpf_hash, cpf_encriptado, nome, email_principal)
+       VALUES ('hash-assess-svc-outro','{"ciphertext":"x","iv":"y","authTag":"z","wrappedDek":"w"}','Assess Svc Outro','assesssvcoutro@example.com')
+       RETURNING id`,
+    );
+    personOutroId = outro.rows[0].id;
     const app = await adminPool.query<{ id: string }>(
       `INSERT INTO application (tenant_id, job_id, person_id) VALUES ($1,$2,$3) RETURNING id`,
       [tenantId, job.rows[0].id, personId],
     );
     applicationId = app.rows[0].id;
+
+    // --- segundo tenant, cadeia mínima até um assessment já iniciado ---
+    const t2 = await adminPool.query<{ id: string }>(
+      `INSERT INTO tenant (razao_social, cnpj, slug)
+       VALUES ('Empresa Assess Svc Vizinha','00000000000054','test-tenant-00000000000054') RETURNING id`,
+    );
+    tenantOutroId = t2.rows[0].id;
+    const org2 = await adminPool.query<{ id: string }>(
+      `INSERT INTO org_unit (tenant_id, tipo, nome, materialized_path) VALUES ($1,'empresa','Matriz','matriz') RETURNING id`,
+      [tenantOutroId],
+    );
+    const req2 = await adminPool.query<{ id: string }>(
+      `INSERT INTO requisition (tenant_id, org_unit_id, titulo, status, approved_at) VALUES ($1,$2,'Req Svc Vizinha','aprovada',now()) RETURNING id`,
+      [tenantOutroId, org2.rows[0].id],
+    );
+    const job2 = await adminPool.query<{ id: string }>(
+      `INSERT INTO job (tenant_id, requisition_id, titulo, seo_slug, canais) VALUES ($1,$2,'Vaga Svc Vizinha','vaga-assess-svc-vizinha','{}') RETURNING id`,
+      [tenantOutroId, req2.rows[0].id],
+    );
+    const person2 = await adminPool.query<{ id: string }>(
+      `INSERT INTO person (cpf_hash, cpf_encriptado, nome, email_principal)
+       VALUES ('hash-assess-svc-vizinha','{"ciphertext":"x","iv":"y","authTag":"z","wrappedDek":"w"}','Assess Svc Vizinha','assesssvcvizinha@example.com')
+       RETURNING id`,
+    );
+    personOutroTenantId = person2.rows[0].id;
+    const app2 = await adminPool.query<{ id: string }>(
+      `INSERT INTO application (tenant_id, job_id, person_id) VALUES ($1,$2,$3) RETURNING id`,
+      [tenantOutroId, job2.rows[0].id, personOutroTenantId],
+    );
+    const aa2 = await adminPool.query<{ id: string }>(
+      `INSERT INTO assessment_application (tenant_id, application_id, person_id, instrument_version_id, status, iniciado_em)
+       VALUES ($1,$2,$3,$4,'iniciado',now()) RETURNING id`,
+      [tenantOutroId, app2.rows[0].id, personOutroTenantId, VERSION_ID],
+    );
+    assessmentDoOutroTenantId = aa2.rows[0].id;
   });
 
   afterAll(async () => {
-    await adminPool.query('DELETE FROM outbox_event WHERE tenant_id = $1', [tenantId]);
-    await adminPool.query(
-      'DELETE FROM item_response WHERE assessment_application_id IN (SELECT id FROM assessment_application WHERE tenant_id = $1)',
-      [tenantId],
-    );
-    await adminPool.query('DELETE FROM assessment_result WHERE person_id = $1', [personId]);
-    await adminPool.query('DELETE FROM assessment_application WHERE tenant_id = $1', [tenantId]);
-    await adminPool.query('DELETE FROM application WHERE tenant_id = $1', [tenantId]);
-    await adminPool.query('DELETE FROM job WHERE tenant_id = $1', [tenantId]);
-    await adminPool.query('DELETE FROM requisition WHERE tenant_id = $1', [tenantId]);
-    await adminPool.query('DELETE FROM org_unit WHERE tenant_id = $1', [tenantId]);
-    await adminPool.query('DELETE FROM person WHERE id = $1', [personId]);
-    await adminPool.query('DELETE FROM tenant WHERE id = $1', [tenantId]);
-    await adminPool.end();
-    await appPool.end();
+    try {
+      for (const t of [tenantId, tenantOutroId]) {
+        await adminPool.query('DELETE FROM outbox_event WHERE tenant_id = $1', [t]);
+        await adminPool.query(
+          'DELETE FROM item_response WHERE assessment_application_id IN (SELECT id FROM assessment_application WHERE tenant_id = $1)',
+          [t],
+        );
+        await adminPool.query('DELETE FROM assessment_application WHERE tenant_id = $1', [t]);
+        await adminPool.query('DELETE FROM application WHERE tenant_id = $1', [t]);
+        await adminPool.query('DELETE FROM job WHERE tenant_id = $1', [t]);
+        await adminPool.query('DELETE FROM requisition WHERE tenant_id = $1', [t]);
+        await adminPool.query('DELETE FROM org_unit WHERE tenant_id = $1', [t]);
+      }
+      for (const p of [personId, personOutroId, personOutroTenantId]) {
+        await adminPool.query('DELETE FROM assessment_result WHERE person_id = $1', [p]);
+        await adminPool.query('DELETE FROM person WHERE id = $1', [p]);
+      }
+      for (const t of [tenantId, tenantOutroId]) {
+        await adminPool.query('DELETE FROM tenant WHERE id = $1', [t]);
+      }
+    } finally {
+      await adminPool.end();
+      await appPool.end();
+    }
   });
 
-  async function blocosDoInstrumento(): Promise<{ blockId: string; itemIds: string[] }[]> {
-    const { rows } = await adminPool.query<{ block_id: string; item_ids: string[] }>(
-      `SELECT b.id AS block_id, array_agg(bi.item_id ORDER BY bi.posicao) AS item_ids
-         FROM block b JOIN block_item bi ON bi.block_id = b.id
+  async function blocosDoInstrumento(): Promise<BlocoDoInstrumento[]> {
+    const { rows } = await adminPool.query<{
+      block_id: string;
+      item_ids: string[];
+      dominios: string[];
+      valencias: ('positivo' | 'negativo')[];
+    }>(
+      `SELECT b.id AS block_id,
+              array_agg(bi.item_id ORDER BY bi.posicao)      AS item_ids,
+              array_agg(i.dominio ORDER BY bi.posicao)       AS dominios,
+              array_agg(i.chave_valencia ORDER BY bi.posicao) AS valencias
+         FROM block b
+         JOIN block_item bi ON bi.block_id = b.id
+         JOIN item i ON i.id = bi.item_id
         WHERE b.instrument_version_id = $1
         GROUP BY b.id ORDER BY min(b.ordem)`,
       [VERSION_ID],
     );
-    return rows.map((r) => ({ blockId: r.block_id, itemIds: r.item_ids }));
+    return rows.map((r) => ({
+      blockId: r.block_id,
+      itemIds: r.item_ids,
+      itens: r.item_ids.map((itemId, i) => ({
+        itemId,
+        dominio: r.dominios[i],
+        valencia: r.valencias[i],
+      })),
+    }));
+  }
+
+  /**
+   * Escolhe MAIS/MENOS pela VALÊNCIA do item, nunca pela posição dele no
+   * bloco. Os 20 blocos do seed hoje trazem o item positivo em primeiro, e
+   * um teste que escreve `maisId: itemIds[0]` está de fato dependendo dessa
+   * coincidência de ordenação -- se o seed reordenar, o teste continua verde
+   * medindo outra coisa.
+   */
+  function endossar(bloco: BlocoDoInstrumento, polo: 'positivo' | 'negativo') {
+    const mais = bloco.itens.find((i) => i.valencia === polo);
+    const menos = bloco.itens.find((i) => i.itemId !== mais?.itemId);
+    if (!mais || !menos) throw new Error(`Bloco ${bloco.blockId} sem par de valência oposta`);
+    return { maisId: mais.itemId, menosId: menos.itemId };
+  }
+
+  async function responderTudo(
+    svc: AssessmentService,
+    ctx: TenantContext,
+    id: string,
+    polo: 'positivo' | 'negativo',
+  ): Promise<void> {
+    for (const bloco of await blocosDoInstrumento()) {
+      const { maisId, menosId } = endossar(bloco, polo);
+      await ctx.run(tenantId, (client) =>
+        svc.responderBloco(client, encryption, {
+          assessmentApplicationId: id,
+          blockId: bloco.blockId,
+          itemIds: bloco.itemIds,
+          maisId,
+          menosId,
+        }),
+      );
+    }
   }
 
   it('convidar grava assessment.invited e nasce em status convidado', async () => {
@@ -102,7 +234,32 @@ describe('AssessmentService', () => {
     expect(ev.rows).toHaveLength(1);
   });
 
-  it('fluxo completo: inicia, responde todos os blocos, conclui e grava theta das 5 dimensões', async () => {
+  it('convidar recusa person_id que não é o titular da candidatura', async () => {
+    // A FK de assessment_application.person_id aponta para a tabela GLOBAL
+    // person e não tem nenhuma relação com a candidatura referenciada -- o
+    // banco aceita a troca sem reclamar. Se o serviço também aceitar, o
+    // resultado comportamental fica atribuído à pessoa errada, numa tabela
+    // compartilhada com outros tenants via result_grant.
+    const ctx = new TenantContext(appPool);
+    await expect(
+      ctx.run(tenantId, (client) =>
+        service().convidar(client, {
+          tenantId,
+          applicationId,
+          personId: personOutroId,
+          instrumentVersionId: VERSION_ID,
+        }),
+      ),
+    ).rejects.toThrow(/não é o titular/i);
+
+    const vazou = await adminPool.query(
+      'SELECT 1 FROM assessment_application WHERE person_id = $1',
+      [personOutroId],
+    );
+    expect(vazou.rows).toHaveLength(0);
+  });
+
+  it('fluxo completo: endosso do polo alto produz theta positivo nas 5 dimensões', async () => {
     const ctx = new TenantContext(appPool);
     const svc = service();
 
@@ -111,18 +268,7 @@ describe('AssessmentService', () => {
     );
     await ctx.run(tenantId, (client) => svc.iniciar(client, id));
 
-    const blocos = await blocosDoInstrumento();
-    for (const bloco of blocos) {
-      await ctx.run(tenantId, (client) =>
-        svc.responderBloco(client, encryption, {
-          assessmentApplicationId: id,
-          blockId: bloco.blockId,
-          itemIds: bloco.itemIds,
-          maisId: bloco.itemIds[0],
-          menosId: bloco.itemIds[1],
-        }),
-      );
-    }
+    await responderTudo(svc, ctx, id, 'positivo');
 
     const inicio = Date.now();
     const resultado = await ctx.run(tenantId, (client) => svc.concluir(client, encryption, id));
@@ -131,12 +277,28 @@ describe('AssessmentService', () => {
     // SLO do roadmap: theta/se disponíveis em < 2s após a última resposta.
     expect(decorrido).toBeLessThan(2000);
 
-    expect(Object.keys(resultado.theta).sort()).toEqual(
-      ['abertura', 'amabilidade', 'conscienciosidade', 'estabilidade', 'extroversao'],
-    );
-    for (const dimensao of Object.keys(resultado.theta)) {
-      expect(Number.isFinite(resultado.theta[dimensao])).toBe(true);
+    expect(Object.keys(resultado.theta).sort()).toEqual(DIMENSOES);
+
+    for (const dimensao of DIMENSOES) {
+      // DIRECIONAL, não só finito. Quem aponta sempre o item de chave
+      // POSITIVA como o mais característico e o de chave NEGATIVA como o
+      // menos está endossando o polo alto do traço em todos os 4 blocos da
+      // dimensão -- θ tem de subir. Asserção só de `Number.isFinite` passa
+      // com estimador quebrado: apagar a inversão de sinal de `aEfetivo`
+      // (o bug de inversão silenciosa de escore que esta fase existe para
+      // impedir) achata a verossimilhança e joga θ para perto de 0 sem que
+      // nada fique NaN. Medido: θ ≈ 1,32-1,37 correto, ≈ 0,3 com o sinal
+      // apagado -- o limiar de 0,8 fica entre os dois com folga dos dois
+      // lados.
+      expect(resultado.theta[dimensao]).toBeGreaterThan(0.8);
+      // SE tem de ser MENOR que o desvio do prior (≈ 0,9996 na grade). Uma
+      // dimensão sem evidência devolve exatamente o prior, e é assim que se
+      // distingue "medido" de "não medido". Medido: ≈ 0,61.
       expect(resultado.seTheta[dimensao]).toBeGreaterThan(0);
+      expect(resultado.seTheta[dimensao]).toBeLessThan(0.85);
+      // Escore bruto é CONTAGEM, não θ: 4 blocos por dimensão, cada bloco
+      // com os dois lados empurrando para o polo alto = +8.
+      expect(resultado.escoreBruto[dimensao]).toBe(8);
     }
 
     const status = await adminPool.query<{ status: string }>(
@@ -156,6 +318,54 @@ describe('AssessmentService', () => {
     ]);
   });
 
+  it('escore_bruto gravado é a contagem observada, não uma cópia de theta', async () => {
+    const ctx = new TenantContext(appPool);
+    const svc = service();
+
+    const { id } = await ctx.run(tenantId, (client) =>
+      svc.convidar(client, { tenantId, applicationId, personId, instrumentVersionId: VERSION_ID }),
+    );
+    await ctx.run(tenantId, (client) => svc.iniciar(client, id));
+    // Padrão ESPELHADO: aponta sempre o item de chave negativa como o mais
+    // característico. θ tem de descer -- e descer é o que prova que a
+    // valência entra na conta.
+    await responderTudo(svc, ctx, id, 'negativo');
+
+    const resultado = await ctx.run(tenantId, (client) => svc.concluir(client, encryption, id));
+
+    for (const dimensao of DIMENSOES) {
+      expect(resultado.theta[dimensao]).toBeLessThan(-0.8);
+      expect(resultado.escoreBruto[dimensao]).toBe(-8);
+    }
+
+    const linha = await adminPool.query<{
+      theta: Record<string, number>;
+      escore_bruto: Record<string, number>;
+      calibracao_versao: string;
+    }>(
+      'SELECT theta, escore_bruto, calibracao_versao FROM assessment_result WHERE id = $1',
+      [resultado.assessmentResultId],
+    );
+    // escore_bruto é a quantidade OBSERVADA contra a qual uma calibração ou
+    // auditoria compara o θ estimado. Gravar θ nas duas colunas destrói
+    // exatamente essa checagem.
+    expect(linha.rows[0].escore_bruto).not.toEqual(linha.rows[0].theta);
+    expect(linha.rows[0].escore_bruto.abertura).toBe(-8);
+
+    // A procedência gravada tem de vir das linhas de parâmetro realmente
+    // usadas, não de um literal no código.
+    const versaoNoBanco = await adminPool.query<{ calibracao_versao: string }>(
+      `SELECT DISTINCT ipv.calibracao_versao
+         FROM block b
+         JOIN block_item bi ON bi.block_id = b.id
+         JOIN item_parameter_version ipv ON ipv.item_id = bi.item_id
+        WHERE b.instrument_version_id = $1`,
+      [VERSION_ID],
+    );
+    expect(versaoNoBanco.rows).toHaveLength(1);
+    expect(linha.rows[0].calibracao_versao).toBe(versaoNoBanco.rows[0].calibracao_versao);
+  });
+
   it('a resposta bruta fica criptografada — o payload em claro não aparece na coluna', async () => {
     const ctx = new TenantContext(appPool);
     const svc = service();
@@ -166,13 +376,14 @@ describe('AssessmentService', () => {
     await ctx.run(tenantId, (client) => svc.iniciar(client, id));
 
     const [bloco] = await blocosDoInstrumento();
+    const { maisId, menosId } = endossar(bloco, 'positivo');
     await ctx.run(tenantId, (client) =>
       svc.responderBloco(client, encryption, {
         assessmentApplicationId: id,
         blockId: bloco.blockId,
         itemIds: bloco.itemIds,
-        maisId: bloco.itemIds[0],
-        menosId: bloco.itemIds[1],
+        maisId,
+        menosId,
       }),
     );
 
@@ -182,7 +393,7 @@ describe('AssessmentService', () => {
     );
     const bruto = JSON.stringify(row.rows[0].resposta_criptografada);
     // O id do item escolhido não pode aparecer em claro no payload gravado.
-    expect(bruto).not.toContain(bloco.itemIds[0]);
+    expect(bruto).not.toContain(maisId);
     expect(bruto).toContain('ciphertext');
   });
 
@@ -195,6 +406,7 @@ describe('AssessmentService', () => {
     );
     await ctx.run(tenantId, (client) => svc.iniciar(client, id));
     const [bloco] = await blocosDoInstrumento();
+    const { maisId, menosId } = endossar(bloco, 'positivo');
 
     const responder = () =>
       ctx.run(tenantId, (client) =>
@@ -202,8 +414,8 @@ describe('AssessmentService', () => {
           assessmentApplicationId: id,
           blockId: bloco.blockId,
           itemIds: bloco.itemIds,
-          maisId: bloco.itemIds[0],
-          menosId: bloco.itemIds[1],
+          maisId,
+          menosId,
         }),
       );
 
@@ -232,5 +444,183 @@ describe('AssessmentService', () => {
         }),
       ),
     ).rejects.toThrow(/mesmo item/i);
+  });
+
+  it('rejeita itemIds forjados: par de outro bloco enviado no lugar do bloco pedido', async () => {
+    // O ataque concreto: mandar, no slot de um bloco de ABERTURA, o par de
+    // itens de CONSCIENCIOSIDADE e vencer a comparação -- escorando uma
+    // dimensão que o bloco não mede. `decomporBlocoEmPares` é pura e não
+    // enxerga isso; só a conferência contra `block_item` enxerga.
+    const ctx = new TenantContext(appPool);
+    const svc = service();
+
+    const { id } = await ctx.run(tenantId, (client) =>
+      svc.convidar(client, { tenantId, applicationId, personId, instrumentVersionId: VERSION_ID }),
+    );
+    await ctx.run(tenantId, (client) => svc.iniciar(client, id));
+
+    const blocos = await blocosDoInstrumento();
+    const alvo = blocos.find((b) => b.itens[0].dominio === 'abertura')!;
+    const doador = blocos.find((b) => b.itens[0].dominio === 'conscienciosidade')!;
+    expect(alvo.blockId).not.toBe(doador.blockId);
+
+    await expect(
+      ctx.run(tenantId, (client) =>
+        svc.responderBloco(client, encryption, {
+          assessmentApplicationId: id,
+          blockId: alvo.blockId,
+          itemIds: doador.itemIds,
+          maisId: doador.itemIds[0],
+          menosId: doador.itemIds[1],
+        }),
+      ),
+    ).rejects.toThrow(/não corresponde à composição do bloco/i);
+
+    const gravou = await adminPool.query(
+      'SELECT 1 FROM item_response WHERE assessment_application_id = $1',
+      [id],
+    );
+    expect(gravou.rows).toHaveLength(0);
+  });
+
+  it('rejeita itemIds com item repetido', async () => {
+    // Repetição duplica o par de comparação e conta a mesma evidência duas
+    // vezes.
+    const ctx = new TenantContext(appPool);
+    const svc = service();
+
+    const { id } = await ctx.run(tenantId, (client) =>
+      svc.convidar(client, { tenantId, applicationId, personId, instrumentVersionId: VERSION_ID }),
+    );
+    await ctx.run(tenantId, (client) => svc.iniciar(client, id));
+    const [bloco] = await blocosDoInstrumento();
+
+    await expect(
+      ctx.run(tenantId, (client) =>
+        svc.responderBloco(client, encryption, {
+          assessmentApplicationId: id,
+          blockId: bloco.blockId,
+          itemIds: [...bloco.itemIds, bloco.itemIds[0]],
+          maisId: bloco.itemIds[0],
+          menosId: bloco.itemIds[1],
+        }),
+      ),
+    ).rejects.toThrow(/repetido/i);
+  });
+
+  it('rejeita resposta antes de iniciar e depois de expirar', async () => {
+    const ctx = new TenantContext(appPool);
+    const svc = service();
+
+    const { id } = await ctx.run(tenantId, (client) =>
+      svc.convidar(client, { tenantId, applicationId, personId, instrumentVersionId: VERSION_ID }),
+    );
+    const [bloco] = await blocosDoInstrumento();
+    const { maisId, menosId } = endossar(bloco, 'positivo');
+
+    const responder = () =>
+      ctx.run(tenantId, (client) =>
+        svc.responderBloco(client, encryption, {
+          assessmentApplicationId: id,
+          blockId: bloco.blockId,
+          itemIds: bloco.itemIds,
+          maisId,
+          menosId,
+        }),
+      );
+
+    // status 'convidado' -- ainda não começou.
+    await expect(responder()).rejects.toThrow(/não aceita resposta/i);
+
+    await ctx.run(tenantId, (client) => svc.iniciar(client, id));
+    await adminPool.query(`UPDATE assessment_application SET status = 'expirado' WHERE id = $1`, [id]);
+
+    // Resposta depois do fim do prazo entraria na amostra de calibração
+    // vinda de um protocolo cujas condições de aplicação não valem mais.
+    await expect(responder()).rejects.toThrow(/não aceita resposta/i);
+
+    const gravou = await adminPool.query(
+      'SELECT 1 FROM item_response WHERE assessment_application_id = $1',
+      [id],
+    );
+    expect(gravou.rows).toHaveLength(0);
+  });
+
+  it('não grava no silo global resposta contra assessment de outro tenant', async () => {
+    // item_response não tem tenant_id, não tem RLS e tem INSERT liberado
+    // para app_runtime: escrever nele é, por construção, caminho sem
+    // isolamento. A leitura de assessment_application em responderBloco é o
+    // que devolve o isolamento -- a linha do outro tenant não aparece sob a
+    // RLS e a escrita morre antes de tocar o silo.
+    const ctx = new TenantContext(appPool);
+    const svc = service();
+    const [bloco] = await blocosDoInstrumento();
+    const { maisId, menosId } = endossar(bloco, 'positivo');
+
+    await expect(
+      ctx.run(tenantId, (client) =>
+        svc.responderBloco(client, encryption, {
+          assessmentApplicationId: assessmentDoOutroTenantId,
+          blockId: bloco.blockId,
+          itemIds: bloco.itemIds,
+          maisId,
+          menosId,
+        }),
+      ),
+    ).rejects.toThrow(/não encontrado/i);
+
+    const envenenou = await adminPool.query(
+      'SELECT 1 FROM item_response WHERE assessment_application_id = $1',
+      [assessmentDoOutroTenantId],
+    );
+    expect(envenenou.rows).toHaveLength(0);
+  });
+
+  it('recusa concluir protocolo incompleto em vez de escorar o que faltou como média', async () => {
+    // Sem esta guarda o estimador devolve o prior para a dimensão sem
+    // evidência (θ ≈ 0, SE ≈ 0,9996) e a linha gravada fica indistinguível
+    // da de um respondente genuinamente médio -- nada em assessment_result
+    // registra quantos blocos foram respondidos.
+    const ctx = new TenantContext(appPool);
+    const svc = service();
+
+    const { id } = await ctx.run(tenantId, (client) =>
+      svc.convidar(client, { tenantId, applicationId, personId, instrumentVersionId: VERSION_ID }),
+    );
+    await ctx.run(tenantId, (client) => svc.iniciar(client, id));
+
+    const [bloco] = await blocosDoInstrumento();
+    const { maisId, menosId } = endossar(bloco, 'positivo');
+    await ctx.run(tenantId, (client) =>
+      svc.responderBloco(client, encryption, {
+        assessmentApplicationId: id,
+        blockId: bloco.blockId,
+        itemIds: bloco.itemIds,
+        maisId,
+        menosId,
+      }),
+    );
+
+    const antes = await adminPool.query<{ n: string }>(
+      'SELECT count(*) AS n FROM assessment_result WHERE person_id = $1',
+      [personId],
+    );
+
+    await expect(
+      ctx.run(tenantId, (client) => svc.concluir(client, encryption, id)),
+    ).rejects.toThrow(/incompleto: 1 de 20 blocos/i);
+
+    const depois = await adminPool.query<{ n: string }>(
+      'SELECT count(*) AS n FROM assessment_result WHERE person_id = $1',
+      [personId],
+    );
+    // Nenhum resultado novo pode ter nascido desta tentativa.
+    expect(depois.rows[0].n).toBe(antes.rows[0].n);
+
+    const status = await adminPool.query<{ status: string }>(
+      'SELECT status FROM assessment_application WHERE id = $1',
+      [id],
+    );
+    expect(status.rows[0].status).toBe('iniciado');
   });
 });
