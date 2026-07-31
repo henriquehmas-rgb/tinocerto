@@ -1,8 +1,10 @@
+import { NotFoundException } from '@nestjs/common';
 import { Pool } from 'pg';
 import { TenantContext } from '../../database/tenant-context';
 import { EnvelopeEncryptionService } from '../../talent/envelope-encryption.service';
 import { OutboxService } from '../../outbox/outbox.service';
 import { AssessmentService } from '../assessment.service';
+import { ReportService, RODAPE_OBRIGATORIO } from '../report/report.service';
 
 const VERSION_ID = 'a55e55e0-0000-4000-8000-000000000002';
 
@@ -129,6 +131,13 @@ describe('AssessmentService', () => {
     try {
       for (const t of [tenantId, tenantOutroId]) {
         await adminPool.query('DELETE FROM outbox_event WHERE tenant_id = $1', [t]);
+        // result_grant antes de consent (FK) e os dois antes de
+        // assessment_result/tenant, que eles referenciam. `concluir` passou
+        // a escrever a ponte de consentimento -- sem esta limpeza o DELETE
+        // de assessment_result mais abaixo morre em violação de FK e vaza
+        // linha de tenant para os outros arquivos de spec.
+        await adminPool.query('DELETE FROM result_grant WHERE tenant_id = $1', [t]);
+        await adminPool.query('DELETE FROM consent WHERE tenant_id = $1', [t]);
         await adminPool.query(
           'DELETE FROM item_response WHERE assessment_application_id IN (SELECT id FROM assessment_application WHERE tenant_id = $1)',
           [t],
@@ -316,6 +325,70 @@ describe('AssessmentService', () => {
       'assessment.started',
       'assessment.completed',
     ]);
+  });
+
+  // A ponte de consentimento é o que separa "resultado existe" de "este
+  // tenant pode ler o resultado". Enquanto nada de produção escrevia em
+  // `result_grant`, o EXISTS de ReportService.gerar nunca era satisfeito e
+  // a rota de relatório devolvia 404 para todo tenant, sempre -- o que
+  // deixava como único caminho vivo para θ o retorno de `concluir`, sem
+  // grant e sem rodapé. Este teste amarra o caminho inteiro: o grant nasce
+  // com o resultado, é do tenant certo, tem base legal honesta, e é ele
+  // que faz o relatório existir.
+  it('concluir cria a ponte de consentimento -- e é ela que faz o relatório existir', async () => {
+    const ctx = new TenantContext(appPool);
+    const svc = service();
+
+    const { id } = await ctx.run(tenantId, (client) =>
+      svc.convidar(client, { tenantId, applicationId, personId, instrumentVersionId: VERSION_ID }),
+    );
+    await ctx.run(tenantId, (client) => svc.iniciar(client, id));
+    await responderTudo(svc, ctx, id, 'positivo');
+    const resultado = await ctx.run(tenantId, (client) => svc.concluir(client, encryption, id));
+
+    const grant = await adminPool.query<{
+      tenant_id: string;
+      application_id: string | null;
+      revoked_at: Date | null;
+      finalidade: string;
+      base_legal: string;
+    }>(
+      `SELECT g.tenant_id, g.application_id, g.revoked_at, c.finalidade, c.base_legal
+         FROM result_grant g
+         JOIN consent c ON c.id = g.consent_id
+        WHERE g.assessment_result_id = $1`,
+      [resultado.assessmentResultId],
+    );
+    expect(grant.rows).toHaveLength(1);
+    expect(grant.rows[0].tenant_id).toBe(tenantId);
+    expect(grant.rows[0].application_id).toBe(applicationId);
+    expect(grant.rows[0].revoked_at).toBeNull();
+    // Base legal REAL: o tenant lê o resultado que ele mesmo aplicou dentro
+    // do próprio processo seletivo (LGPD art. 7, V). Gravar 'consentimento'
+    // registraria como coletado um ato do titular que ninguém coletou; usar
+    // a finalidade 'reaproveitamento_resultado' contaminaria para sempre a
+    // pergunta sobre reuso entre tenants, que é o caso que de fato exige
+    // consentimento.
+    expect(grant.rows[0].finalidade).toBe('processo_seletivo');
+    expect(grant.rows[0].base_legal).not.toBe('consentimento');
+
+    // A prova que interessa: com o grant vivo, o caminho gated devolve --
+    // com rodapé obrigatório e com o aviso de calibração provisória, que é
+    // justamente o enquadramento que a resposta do POST não tinha.
+    const relatorio = await ctx.run(tenantId, (client) =>
+      new ReportService().gerar(client, resultado.assessmentResultId),
+    );
+    expect(relatorio.rodape).toBe(RODAPE_OBRIGATORIO);
+    expect(relatorio.calibracaoProvisoria).toBe(true);
+    expect(relatorio.avisoCalibracao).not.toBeNull();
+
+    // E o grant é do tenant que aplicou, só dele: o outro tenant continua
+    // sem enxergar nada, mesmo sabendo o uuid do resultado.
+    await expect(
+      ctx.run(tenantOutroId, (client) =>
+        new ReportService().gerar(client, resultado.assessmentResultId),
+      ),
+    ).rejects.toThrow(NotFoundException);
   });
 
   it('escore_bruto gravado é a contagem observada, não uma cópia de theta', async () => {

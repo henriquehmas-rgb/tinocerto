@@ -4,6 +4,29 @@ resourcePolicy:
   version: "default"
   scope: ""
   rules:
+    # ALCANCE REAL desta regra, para que ninguem a conte como camada que ela
+    # nao e: o CerbosGuard monta principal.attr.tenant_id E
+    # resource.attr.tenant_id a partir do MESMO req.tenantId. Numa chamada
+    # HTTP de verdade os dois sao sempre iguais por construcao, entao a
+    # comparacao final (principal == resource) nunca reprova -- so um
+    # chamador direto do Cerbos, informando um tenant de recurso proprio,
+    # consegue disparar o DENY por divergencia.
+    #
+    # O que a regra AINDA faz, e por isso ela fica: as clausulas has()/
+    # type()/size() sao alcancaveis pelo guard e fecham o caso do request
+    # sem tenant -- principal sem tenant_id, tenant_id ausente ou string
+    # vazia negam TUDO, para qualquer papel, em vez de cair na regra de
+    # ALLOW abaixo. E fail-closed de verdade, exercitado pelo guard.
+    #
+    # O isolamento cross-tenant nestas rotas, portanto, NAO mora aqui: mora
+    # na RLS (assessment_application, application, result_grant, todas com
+    # FORCE + policy RESTRICTIVE) e nos predicados de tenant escritos nas
+    # queries -- inclusive o EXISTS de result_grant em ReportService.gerar,
+    # que e o unico controle que sobra na conexao que ignora RLS. Este
+    # padrao e o mesmo de todos os resource_*.yaml do repositorio; mudar o
+    # guard para derivar o tenant do RECURSO (e nao do request) exigiria uma
+    # leitura de banco por rota antes da autorizacao e vale como decisao de
+    # arquitetura propria, nao como remendo local desta policy.
     - name: "bloqueio-tenant-diferente"
       actions: ["*"]
       effect: EFFECT_DENY

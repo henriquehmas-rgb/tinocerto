@@ -31,6 +31,14 @@ export interface ResponderBlocoInput {
   duracaoMs?: number;
 }
 
+/**
+ * Contrato INTERNO da escoragem -- calibração, testes e o próprio serviço
+ * precisam de θ/SE aqui dentro. Ele NÃO é payload de resposta HTTP: a
+ * única leitura de tenant autorizada sobre θ passa por `result_grant` e
+ * sai por `ReportService.gerar`, com rodapé obrigatório e aviso de
+ * calibração provisória. O corte está em `AssessmentController.concluir`,
+ * e há teste de controller prendendo isso.
+ */
 export interface ResultadoEscoragem {
   assessmentResultId: string;
   theta: Record<string, number>;
@@ -274,6 +282,7 @@ export class AssessmentService {
     const cabecalho = await client.query<{
       tenant_id: string;
       person_id: string;
+      application_id: string;
       instrument_version_id: string;
       status: string;
     }>(
@@ -290,7 +299,7 @@ export class AssessmentService {
       // escora evidência que entrou dentro do prazo. Recusar por relógio
       // neste ponto descartaria um protocolo íntegro só porque a chamada de
       // conclusão chegou segundos depois da última resposta.
-      `SELECT tenant_id, person_id, instrument_version_id, status
+      `SELECT tenant_id, person_id, application_id, instrument_version_id, status
          FROM assessment_application WHERE id = $1
          FOR UPDATE`,
       [assessmentApplicationId],
@@ -303,7 +312,12 @@ export class AssessmentService {
         `Assessment ${assessmentApplicationId} não pode ser concluído (status atual: ${cabecalho.rows[0].status})`,
       );
     }
-    const { tenant_id: tenantId, person_id: personId, instrument_version_id: versionId } = cabecalho.rows[0];
+    const {
+      tenant_id: tenantId,
+      person_id: personId,
+      application_id: applicationId,
+      instrument_version_id: versionId,
+    } = cabecalho.rows[0];
 
     // Protocolo COMPLETO ou nada. No modo linear o instrumento tem
     // comprimento fixo, e escorar um protocolo pela metade produz um número
@@ -465,6 +479,31 @@ export class AssessmentService {
       ],
     );
 
+    // A PONTE DE CONSENTIMENTO, na mesma transação do resultado.
+    //
+    // `assessment_result` é GLOBAL e sem RLS -- quem autoriza um tenant a
+    // lê-lo é `result_grant`, e até aqui NADA no produto escrevia nessa
+    // tabela (só fixtures de teste). Com a ponte vazia, o `EXISTS` de
+    // ReportService.gerar nunca era satisfeito: a rota de relatório
+    // devolvia 404 para todo tenant, sempre, e o único caminho vivo para θ
+    // acabava sendo o retorno desta função -- sem grant, sem revogação e
+    // sem o rodapé obrigatório. Escrever a ponte aqui é o que torna o
+    // caminho gated o caminho real.
+    //
+    // Mesma transação, de propósito: ou existem resultado E autorização de
+    // leitura, ou não existe nenhum dos dois. Um resultado órfão de grant
+    // seria dado sensível gravado que ninguém pode ler nem revogar.
+    //
+    // O grant é do tenant que APLICOU o instrumento, e só dele. Reuso por
+    // OUTRO tenant é ato diferente, com base legal diferente
+    // (consentimento do titular), e nenhum caminho deste serviço o cria.
+    const consentId = await this.baseLegalDoProcessoSeletivo(client, tenantId, personId);
+    await client.query(
+      `INSERT INTO result_grant (assessment_result_id, tenant_id, application_id, consent_id)
+       VALUES ($1,$2,$3,$4)`,
+      [resultado.rows[0].id, tenantId, applicationId, consentId],
+    );
+
     await client.query(
       `UPDATE assessment_application SET status = 'concluido', concluido_em = now() WHERE id = $1`,
       [assessmentApplicationId],
@@ -483,6 +522,60 @@ export class AssessmentService {
       escoreBruto,
       calibracaoVersao,
     };
+  }
+
+  /**
+   * Registro de base legal do tenant que APLICOU o instrumento --
+   * `result_grant.consent_id` é NOT NULL e precisa apontar para alguma
+   * linha de `consent`.
+   *
+   * `consent` é, apesar do nome, o registro de BASE LEGAL da plataforma
+   * (está escrito assim na trust_0003), e `base_legal` é texto livre
+   * justamente porque consentimento não é a única base possível. A base
+   * aqui NÃO é consentimento: é a execução de procedimentos preliminares
+   * relacionados a contrato (LGPD art. 7, V) -- que é o que de fato
+   * aconteceu, o candidato respondeu, dentro da própria candidatura, o
+   * instrumento que este tenant aplicou. Gravar 'consentimento' seria
+   * registrar como coletado um ato do titular que ninguém coletou, e
+   * registro de base legal forjado é pior que registro ausente: ele passa
+   * incólume por qualquer auditoria que confie na tabela.
+   *
+   * Pela mesma razão a finalidade é 'processo_seletivo' (trust_0005) e não
+   * 'reaproveitamento_resultado' -- reaproveitamento é reuso por outro
+   * tenant, o caso que depende de ato do titular.
+   *
+   * Reaproveita a linha viva do par (person, tenant) em vez de empilhar
+   * uma por assessment: a base legal é do processo seletivo, não de cada
+   * aplicação. Revogar a linha (revoked_at) tem de continuar sendo uma
+   * decisão do titular, então uma linha revogada NÃO é reutilizada nem
+   * ressuscitada aqui.
+   */
+  private async baseLegalDoProcessoSeletivo(
+    client: PoolClient,
+    tenantId: string,
+    personId: string,
+  ): Promise<string> {
+    const existente = await client.query<{ id: string }>(
+      `SELECT id FROM consent
+        WHERE person_id = $1
+          AND tenant_id = $2
+          AND finalidade = 'processo_seletivo'
+          AND revoked_at IS NULL
+        ORDER BY granted_at DESC
+        LIMIT 1`,
+      [personId, tenantId],
+    );
+    if (existente.rows.length > 0) {
+      return existente.rows[0].id;
+    }
+
+    const criado = await client.query<{ id: string }>(
+      `INSERT INTO consent (person_id, tenant_id, finalidade, base_legal)
+       VALUES ($1,$2,'processo_seletivo','execucao_procedimento_preliminar_contrato_lgpd_art_7_v')
+       RETURNING id`,
+      [personId, tenantId],
+    );
+    return criado.rows[0].id;
   }
 
   private async emitir(

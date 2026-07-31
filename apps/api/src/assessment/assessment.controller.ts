@@ -106,15 +106,50 @@ export class AssessmentController {
     );
   }
 
+  /**
+   * Conclui e escora -- e devolve APENAS o ponteiro para o resultado.
+   *
+   * θ, SE, escore bruto e versão de calibração NÃO saem por aqui.
+   * `assessment_result` é global e a única leitura de tenant autorizada
+   * sobre ele passa por `result_grant` (o `EXISTS` de
+   * `ReportService.gerar`), que é revogável, expira, e vem acompanhada do
+   * rodapé obrigatório e do aviso de calibração provisória. Devolver a
+   * escoragem no corpo do POST seria um SEGUNDO caminho de leitura --
+   * sem grant, sem revogação e sem enquadramento nenhum --, isto é,
+   * exatamente o que a ponte de consentimento existe para impedir, e ele
+   * seria o caminho mais fácil de todos. `AssessmentService.concluir`
+   * continua devolvendo a escoragem completa porque calibração e testes
+   * precisam dela; o corte é aqui, na borda HTTP.
+   */
   @Post(':id/actions/complete')
   @CerbosCheck('assessment', 'complete')
   async concluir(@Req() req: RequestWithAuthContext, @Param('id') id: string) {
-    return this.tenantContext.run(req.tenantId, (client) =>
+    const escoragem = await this.tenantContext.run(req.tenantId, (client) =>
       this.assessmentService.concluir(client, this.encryption, id),
     );
+    return {
+      id,
+      status: 'concluido',
+      assessmentResultId: escoragem.assessmentResultId,
+      // O caminho gated é o único caminho -- e vem pronto, para que ninguém
+      // precise adivinhar em qual rota o id de resultado se encaixa.
+      relatorio: `/v1/assessments/results/${escoragem.assessmentResultId}/report`,
+    };
   }
 
-  @Get(':id/report')
+  /**
+   * `results/:id` é id de `assessment_result`, NÃO de
+   * `assessment_application`.
+   *
+   * Os dois são uuid, e as outras quatro rotas deste controller usam o
+   * segundo. Com `:id/report` no mesmo nível das demais, um cliente que
+   * seguisse o fluxo documentado (create -> start -> answer -> complete) e
+   * reusasse o mesmo `:id` recebia 404 -- indistinguível de "não tenho
+   * grant", já que os dois casos respondem igual de propósito. O segmento
+   * literal `results` torna a troca impossível de fazer por engano, e o
+   * POST de conclusão devolve o link já montado.
+   */
+  @Get('results/:id/report')
   @CerbosCheck('assessment', 'read')
   async relatorio(@Req() req: RequestWithAuthContext, @Param('id') assessmentResultId: string) {
     return this.tenantContext.run(req.tenantId, (client) =>

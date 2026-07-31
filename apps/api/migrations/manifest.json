@@ -54,6 +54,7 @@
     "assessment_0006__cat_requires_calibrated_params.sql",
     "assessment_0014__cat_gate_flanking_paths.sql",
     "assessment_0015__cat_gate_ipv_repoint.sql",
-    "trust_0004__consent_retention_rls.sql"
+    "trust_0004__consent_retention_rls.sql",
+    "trust_0005__consent_finalidade_processo_seletivo.sql"
   ]
 }
