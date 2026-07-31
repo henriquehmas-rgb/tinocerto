@@ -160,4 +160,58 @@ describe('trava do CAT por parâmetro provisório', () => {
       client.release();
     }
   });
+
+  /**
+   * REGRESSÃO da assessment_0015. A 0014 resolvia o item afetado por
+   * `TG_OP = 'DELETE' ? OLD.item_id : NEW.item_id`, então um UPDATE que
+   * REAPONTA a linha de calibração para outro item só validava as versões do
+   * item NOVO -- nunca as do item de quem o parâmetro estava sendo TIRADO.
+   *
+   * Isso deixava passar exatamente o estado que o gate existe para proibir:
+   * uma versão em modo CAT com um item de ZERO parâmetros, que a seleção por
+   * informação de Fisher não consegue nem pontuar. E era o ramo alcançável
+   * pela aplicação: app_runtime tem UPDATE em item_parameter_version, mas não
+   * tem DELETE.
+   */
+  it('barra REAPONTAR a calibração vigente para outro item, zerando um item em uso pelo CAT', async () => {
+    const client = await adminPool.connect();
+    try {
+      await client.query('BEGIN');
+      await montaVersaoCatComItensDoSeed(client);
+      await client.query(
+        `UPDATE item_parameter_version SET provisorio = false
+          WHERE item_id IN (SELECT item_id FROM block_item WHERE block_id = $1)`,
+        [BLOCO_CAT],
+      );
+      // CONTROLE POSITIVO: a versão CAT montada é legítima e é aceita.
+      await expect(client.query('SET CONSTRAINTS ALL IMMEDIATE')).resolves.toBeDefined();
+
+      // Item de FORA da versão CAT, para servir de destino do reaponte. Some
+      // com a calibração dele primeiro: a unique (item_id, calibracao_versao)
+      // barraria o UPDATE por outro motivo, e o teste passaria por engano.
+      const alvoDeFora = `SELECT bi.item_id
+                            FROM block_item bi
+                            JOIN block b ON b.id = bi.block_id
+                           WHERE b.instrument_version_id = $1 AND b.ordem = 2
+                           ORDER BY bi.posicao LIMIT 1`;
+      await client.query(
+        `DELETE FROM item_parameter_version WHERE item_id = (${alvoDeFora})`,
+        [VERSION_ID],
+      );
+
+      // O reaponte: a única linha de parâmetro de um item DE DENTRO passa a
+      // pertencer ao item DE FORA. O item de dentro fica sem parâmetro nenhum.
+      await expect(
+        client.query(
+          `UPDATE item_parameter_version
+              SET item_id = (${alvoDeFora})
+            WHERE item_id = (SELECT item_id FROM block_item WHERE block_id = $2 ORDER BY posicao LIMIT 1)`,
+          [VERSION_ID, BLOCO_CAT],
+        ),
+      ).rejects.toThrow(/sem parametro calibrado vigente/i);
+    } finally {
+      await client.query('ROLLBACK').catch(() => undefined);
+      client.release();
+    }
+  });
 });

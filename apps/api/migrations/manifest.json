@@ -52,6 +52,7 @@
     "assessment_0012__seed_threshold_spread.sql",
     "assessment_0013__deconfound_order_and_seed_bank.sql",
     "assessment_0006__cat_requires_calibrated_params.sql",
-    "assessment_0014__cat_gate_flanking_paths.sql"
+    "assessment_0014__cat_gate_flanking_paths.sql",
+    "assessment_0015__cat_gate_ipv_repoint.sql"
   ]
 }

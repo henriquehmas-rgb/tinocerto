@@ -98,4 +98,45 @@ describe('motor CAT', () => {
     const soloForte: BlocoCandidato = { ...blocoSolo, blockId: 'soloForte', itemParams: [p(2.0, 0)] };
     expect(selecionarProximoBloco(0, [blocoTrio, soloForte], [])?.blockId).toBe('soloForte');
   });
+
+  /**
+   * Os dois casos abaixo fecham o único ramo do módulo que a suíte ainda não
+   * prendia: o controle de exposição de Sympson-Hetter. Confirmado por
+   * mutação -- com os 11 casos anteriores, tanto `rMax ?? 0` quanto
+   * `taxaExposicao < rMax` ficavam VERDES.
+   *
+   * Todos os blocos daqui têm b = 0 e são avaliados em theta = 0, onde
+   * P = Q = 0.5 e portanto I = a² · 0.25 exatamente: a = 2.0 dá 1.0 e
+   * a = 1.0 dá 0.25. Assim a informação e a exposição apontam para blocos
+   * DIFERENTES, que é o que torna o critério observável.
+   */
+  const forteEUsado: BlocoCandidato = {
+    blockId: 'forteEUsado',
+    itemParams: [p(2.0, 0)],
+    taxaExposicao: 0.4,
+  };
+  const fracoENovo: BlocoCandidato = {
+    blockId: 'fracoENovo',
+    itemParams: [p(1.0, 0)],
+    taxaExposicao: 0,
+  };
+
+  it('sem opções, NÃO impõe teto de exposição: quem não pede teto não ganha um', () => {
+    // O default `rMax = 1` é uma decisão semântica -- "sem teto quando o
+    // chamador não pede" -- e não uma constante qualquer. Com `?? 0` o motor
+    // passaria a exigir exposição exatamente zero de toda chamada sem opções,
+    // devolvendo 'fracoENovo' aqui e degradando a seleção em silêncio assim
+    // que as exposições deixarem de ser todas nulas.
+    expect(selecionarProximoBloco(0, [forteEUsado, fracoENovo], [])?.blockId).toBe('forteEUsado');
+  });
+
+  it('o teto de exposição é INCLUSIVO: bloco exatamente no teto continua elegível', () => {
+    // r_max é um teto de exposição aceitável, não um limite a ser evitado por
+    // uma margem. Com `<` no lugar de `<=`, o bloco que está exatamente na
+    // cota permitida seria descartado e venceria 'fracoENovo'.
+    const exatamenteNoTeto: BlocoCandidato = { ...forteEUsado, blockId: 'exatamenteNoTeto', taxaExposicao: 0.4 };
+    expect(selecionarProximoBloco(0, [exatamenteNoTeto, fracoENovo], [], { rMax: 0.4 })?.blockId).toBe(
+      'exatamenteNoTeto',
+    );
+  });
 });
