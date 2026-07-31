@@ -213,6 +213,107 @@ describe('Gate consolidado — Fase 2a (Motor de Assessment)', () => {
     }
   });
 
+  it('consent que já é base legal de um grant não pode mudar de tenant (nem virar de plataforma)', async () => {
+    // O OUTRO LADO da invariante do caso acima. O trigger da assessment_0017
+    // é `BEFORE INSERT OR UPDATE ON result_grant` -- ele não vê UPDATE em
+    // `consent`. Reproduzido ao vivo antes da correção: bastava criar o grant
+    // com um consent de plataforma e depois mover esse consent para outro
+    // tenant para chegar, pela ordem inversa, ao mesmíssimo estado
+    // cross-tenant. A assessment_0018 fecha isso pelo lado do consent.
+    //
+    // A regra é imutabilidade TOTAL de `consent.tenant_id`, e não "rejeitar só
+    // a mudança que órfã um grant", porque a versão estreita precisaria de um
+    // `EXISTS ... FROM result_grant` -- que dentro de um trigger comum roda
+    // sob a RLS do papel INVOCADOR e por isso falharia ABERTO exatamente sob
+    // app_runtime (o tenant que faz o UPDATE não enxerga o grant do outro
+    // tenant, o EXISTS não casa nada e o trigger aprova). Ver a migration.
+    let tenantA: string | undefined;
+    let tenantB: string | undefined;
+    let personId: string | undefined;
+    let resultId: string | undefined;
+    let consentPlataforma: string | undefined;
+    let consentDeA: string | undefined;
+    try {
+      tenantA = (
+        await adminPool.query<{ id: string }>(
+          `INSERT INTO tenant (razao_social, cnpj, slug)
+           VALUES ('Gate 2a Consent A Ltda','00000000000060','test-tenant-00000000000060') RETURNING id`,
+        )
+      ).rows[0].id;
+      tenantB = (
+        await adminPool.query<{ id: string }>(
+          `INSERT INTO tenant (razao_social, cnpj, slug)
+           VALUES ('Gate 2a Consent B Ltda','00000000000061','test-tenant-00000000000061') RETURNING id`,
+        )
+      ).rows[0].id;
+      personId = (
+        await adminPool.query<{ id: string }>(
+          `INSERT INTO person (cpf_hash, cpf_encriptado, nome, email_principal)
+           VALUES ('hash-gate-2a-consent','{"ciphertext":"x","iv":"y","authTag":"z","wrappedDek":"w"}','Gate 2a Consent','gate2aconsent@example.com')
+           RETURNING id`,
+        )
+      ).rows[0].id;
+      resultId = (
+        await adminPool.query<{ id: string }>(
+          `INSERT INTO assessment_result (person_id, instrument_version_id) VALUES ($1,$2) RETURNING id`,
+          [personId, VERSION_ID],
+        )
+      ).rows[0].id;
+      consentPlataforma = (
+        await adminPool.query<{ id: string }>(
+          `INSERT INTO consent (person_id, finalidade, base_legal)
+           VALUES ($1,'reaproveitamento_resultado','consentimento') RETURNING id`,
+          [personId],
+        )
+      ).rows[0].id;
+      consentDeA = (
+        await adminPool.query<{ id: string }>(
+          `INSERT INTO consent (person_id, tenant_id, finalidade, base_legal)
+           VALUES ($1,$2,'reaproveitamento_resultado','consentimento') RETURNING id`,
+          [personId, tenantA],
+        )
+      ).rows[0].id;
+
+      // Estado inicial legítimo: o tenant A concede sobre base legal de
+      // PLATAFORMA. Se este INSERT falhar, o resto do caso não significa nada.
+      await adminPool.query(
+        `INSERT INTO result_grant (assessment_result_id, tenant_id, consent_id) VALUES ($1,$2,$3)`,
+        [resultId, tenantA, consentPlataforma],
+      );
+
+      // (1) Mover a base legal para o tenant B orfanaria o grant de A.
+      await expect(
+        adminPool.query('UPDATE consent SET tenant_id = $1 WHERE id = $2', [tenantB, consentPlataforma]),
+      ).rejects.toThrow(/imutavel/i);
+
+      // (2) E a PROMOÇÃO a escopo de plataforma também é barrada -- ela não
+      // orfana grant nenhum, mas transforma unilateralmente a base legal de um
+      // tenant em base legal válida para o mercado inteiro. Um guard escrito
+      // só como "não orfane grant" deixaria este caso passar.
+      await expect(
+        adminPool.query('UPDATE consent SET tenant_id = NULL WHERE id = $1', [consentDeA]),
+      ).rejects.toThrow(/imutavel/i);
+
+      // (3) Controle positivo: o trigger é `BEFORE UPDATE OF tenant_id`, então
+      // revogar continua possível. Sem isto, um trigger que barrasse QUALQUER
+      // update em consent passaria em (1) e (2) pelo motivo errado.
+      await adminPool.query('UPDATE consent SET revoked_at = now() WHERE id = $1', [consentDeA]);
+      const revogado = await adminPool.query<{ revoked_at: Date | null }>(
+        'SELECT revoked_at FROM consent WHERE id = $1',
+        [consentDeA],
+      );
+      expect(revogado.rows[0].revoked_at).not.toBeNull();
+    } finally {
+      if (resultId) await adminPool.query('DELETE FROM result_grant WHERE assessment_result_id = $1', [resultId]);
+      if (consentPlataforma) await adminPool.query('DELETE FROM consent WHERE id = $1', [consentPlataforma]);
+      if (consentDeA) await adminPool.query('DELETE FROM consent WHERE id = $1', [consentDeA]);
+      if (resultId) await adminPool.query('DELETE FROM assessment_result WHERE id = $1', [resultId]);
+      if (personId) await adminPool.query('DELETE FROM person WHERE id = $1', [personId]);
+      if (tenantA) await adminPool.query('DELETE FROM tenant WHERE id = $1', [tenantA]);
+      if (tenantB) await adminPool.query('DELETE FROM tenant WHERE id = $1', [tenantB]);
+    }
+  });
+
   // As duas metades deste gate têm escopos OPOSTOS e por isso são dois testes.
   // Importe os fragmentos de `src/assessment/__tests__/seed-scope.ts`; NÃO
   // escreva `WHERE banco_id = 'ipip_contextualizado'` (esse é o DEFAULT da

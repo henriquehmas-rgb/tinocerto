@@ -446,26 +446,69 @@ describe('ReportService (trilho A)', () => {
     }
   });
 
+  it('o schema não deixa um consent já usado como base legal trocar de tenant', async () => {
+    // O outro lado da invariante da assessment_0017. Aquele trigger só olha
+    // result_grant; este fixture tem grants apontando para `consentId`, e
+    // mexer no `consent.tenant_id` produzia, pela ordem inversa, exatamente o
+    // estado cross-tenant que a 0017 existe para proibir. A assessment_0018
+    // fechou isso tornando `consent.tenant_id` imutável -- inclusive a
+    // PROMOÇÃO a escopo de plataforma (NULL), que não órfã grant nenhum mas
+    // alarga unilateralmente a base legal para qualquer tenant.
+    await expect(
+      adminPool.query('UPDATE consent SET tenant_id = $1 WHERE id = $2', [tenantSemGrant, consentId]),
+    ).rejects.toThrow(/imutavel/i);
+    await expect(
+      adminPool.query('UPDATE consent SET tenant_id = $1 WHERE id = $2', [tenantComGrant, consentId]),
+    ).rejects.toThrow(/imutavel/i);
+
+    // Controle positivo: o trigger é `BEFORE UPDATE OF tenant_id`, então o que
+    // a LGPD de fato manda fazer -- revogar -- continua funcionando. Sem este
+    // caso, um trigger que barrasse TODO update em consent passaria acima.
+    await adminPool.query('UPDATE consent SET revoked_at = now() WHERE id = $1', [consentId]);
+    await adminPool.query('UPDATE consent SET revoked_at = NULL WHERE id = $1', [consentId]);
+
+    // E o escopo continua sendo o que o fixture nasceu: plataforma.
+    const { rows } = await adminPool.query<{ tenant_id: string | null }>(
+      'SELECT tenant_id FROM consent WHERE id = $1',
+      [consentId],
+    );
+    expect(rows[0].tenant_id).toBeNull();
+  });
+
   it('conexão que ignora RLS não aceita base legal de OUTRO tenant', async () => {
     // Na conexão de app_runtime a RLS da trust_0004 já esconderia a linha
     // de `consent` do outro tenant, então este caso só é de verdade aqui,
     // onde as policies não rodam e o predicado escrito na query é tudo.
+    //
+    // Desde a assessment_0018 esse estado não é mais alcançável por escrita
+    // normal (ver o caso acima). Este continua valendo como defesa em
+    // PROFUNDIDADE: prova que, se o trigger cair -- restore de dump sem
+    // triggers, migration que o derrube, janela de manutenção com DISABLE --,
+    // o predicado escrito na query do ReportService ainda segura sozinho.
+    // Para exercitar isso é preciso fabricar um estado que o schema proíbe, e
+    // o único jeito honesto é desligar o trigger explicitamente.
+    //
+    // ALTER TABLE ... DISABLE TRIGGER é DDL TRANSACIONAL no Postgres, então o
+    // ROLLBACK do finally reverte o desligamento E o UPDATE juntos, na mesma
+    // conexão. É mais seguro que a versão anterior deste caso, que fazia o
+    // UPDATE por FORA da transação (`adminPool.query`, outra conexão, já
+    // commitado) e contava com um segundo UPDATE no finally para desfazer:
+    // uma asserção falhando entre os dois deixava o fixture com o tenant
+    // errado para os testes seguintes.
     const client = await adminPool.connect();
     try {
-      await adminPool.query('UPDATE consent SET tenant_id = $1 WHERE id = $2', [
+      await client.query('BEGIN');
+      await client.query('ALTER TABLE consent DISABLE TRIGGER trg_consent_tenant_imutavel');
+      await client.query('UPDATE consent SET tenant_id = $1 WHERE id = $2', [
         tenantSemGrant,
         consentId,
       ]);
 
-      await client.query('BEGIN');
       await client.query(`SELECT set_config('app.tenant_id', $1, true)`, [tenantComGrant]);
       await expect(new ReportService().gerar(client, resultId)).rejects.toThrow(/não encontrado/i);
     } finally {
       await client.query('ROLLBACK').catch(() => undefined);
       client.release();
-      // Volta ao escopo de plataforma (tenant_id NULL), que é como o
-      // fixture nasce e é o que os outros casos assumem.
-      await adminPool.query('UPDATE consent SET tenant_id = NULL WHERE id = $1', [consentId]);
     }
   });
 
