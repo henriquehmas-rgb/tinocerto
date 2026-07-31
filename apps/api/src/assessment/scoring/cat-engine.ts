@@ -25,8 +25,15 @@ export interface OpcoesExposicao {
 }
 
 /**
- * Informação total do bloco em θ -- a soma das informações de Fisher dos
- * itens que o compõem.
+ * Informação total do bloco em θ -- a SOMA das informações de Fisher de
+ * TODOS os itens que o compõem, não a do primeiro nem a média.
+ *
+ * A soma é o critério: um bloco de três itens moderados pode carregar mais
+ * informação que um bloco de um item muito discriminativo, e é isso que o
+ * CAT precisa enxergar para escolher bem. Coberto por
+ * `__tests__/cat-engine.spec.ts` com um par de blocos em que a soma e o
+ * primeiro item DISCORDAM -- sem esse par, trocar esta linha por
+ * `itemParams[0]` passava despercebido pela suíte inteira.
  */
 function informacaoDoBloco(theta: number, bloco: BlocoCandidato): number {
   return bloco.itemParams.reduce((acc, params) => acc + informacaoFisher(theta, params), 0);
@@ -38,8 +45,38 @@ function informacaoDoBloco(theta: number, bloco: BlocoCandidato): number {
  *
  * NOTA: só é chamado quando instrument_version.modo_administracao = 'cat',
  * que por sua vez é bloqueado no banco enquanto houver parâmetro provisório
- * (assessment_0006). Selecionar por informação sobre parâmetros de
+ * (assessment_0006, com os caminhos de flanco fechados pela
+ * assessment_0014). Selecionar por informação sobre parâmetros de
  * literatura escolheria itens errados e contaminaria a calibração futura.
+ *
+ * ---------------------------------------------------------------------------
+ * LIMITE CONHECIDO -- RESOLVER ANTES DE LIGAR O CAT.
+ *
+ * O critério de seleção daqui e o modelo de escoragem de `mfc-scoring.ts`
+ * não são o mesmo modelo:
+ *
+ *   - a ESCORAGEM estima um θ POR DIMENSÃO, por EAP sobre a verossimilhança
+ *     par-a-par (Bradley-Terry-Luce), em que um item de chave negativa entra
+ *     com -a (`aEfetivo`) e a probabilidade depende da DIFERENÇA das
+ *     utilidades dos dois itens comparados;
+ *
+ *   - a SELEÇÃO daqui recebe UM θ escalar e ranqueia blocos pela soma das
+ *     informações de Fisher DICOTÔMICAS de cada item isoladamente. Ela não
+ *     sabe a que dimensão aquele θ pertence -- e um bloco MFC mistura
+ *     domínios por construção -- e, como `a` entra ao quadrado, a valência do
+ *     item é invisível para ela.
+ *
+ * A informação de fato relevante para um bloco MFC é a da COMPARAÇÃO
+ * par-a-par, função da diferença das utilidades efetivas, não de cada item
+ * sozinho. As duas peças estão corretas isoladamente; o que falta é coerência
+ * entre elas.
+ *
+ * Sem impacto hoje: o CAT está travado no banco e nada fora dos testes
+ * importa este módulo. Mas ligar o CAT é `UPDATE instrument_version SET
+ * modo_administracao = 'cat'` -- um comando -- então este parágrafo é a única
+ * coisa entre aquele comando e um critério de seleção incoerente com o
+ * escore. Rever com os dados da calibração real em mãos.
+ * ---------------------------------------------------------------------------
  */
 export function selecionarProximoBloco(
   theta: number,

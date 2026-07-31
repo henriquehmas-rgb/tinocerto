@@ -57,4 +57,45 @@ describe('motor CAT', () => {
     expect(deveParar({ se: 0.5, itensAplicados: 10, segundosDecorridos: 100 },
       { seAlvo: 0.3, tetoItens: 60, tetoSegundos: 3600 })).toBe(false);
   });
+
+  /**
+   * A agregação da informação dos itens em informação DO BLOCO é o critério
+   * de seleção do CAT para um bloco MFC -- e os três blocos acima ranqueiam
+   * IGUAL sob "soma de todos os itens" e sob "só o primeiro item", então
+   * nenhum caso acima a discrimina. Confirmado por mutação: trocar a soma
+   * por `informacaoFisher(theta, bloco.itemParams[0])` deixava os 9 casos
+   * verdes.
+   *
+   * Os dois blocos abaixo são construídos para que as agregações DISCORDEM,
+   * todos os itens em b = 0 e theta = 0 (onde P = Q = 0.5, logo
+   * I = a² · 0.25 exatamente):
+   *
+   *   solo: 1 item, a = 1.7  ->  soma = média = primeiro = 0.7225
+   *   trio: 3 itens, a = 1.0 ->  soma = 0.75 | média = primeiro = 0.25
+   *
+   * Sob a regra correta (soma) vence 'trio'. Sob "só o primeiro", sob "média"
+   * e sob "esqueci um item do bloco" (0.5) vence 'solo'. Um só caso mata as
+   * quatro degenerações.
+   */
+  const blocoSolo: BlocoCandidato = {
+    blockId: 'solo',
+    itemParams: [p(1.7, 0)],
+    taxaExposicao: 0.1,
+  };
+  const blocoTrio: BlocoCandidato = {
+    blockId: 'trio',
+    itemParams: [p(1.0, 0), p(1.0, 0), p(1.0, 0)],
+    taxaExposicao: 0.1,
+  };
+
+  it('agrega a informação do bloco somando TODOS os itens, não só o primeiro', () => {
+    expect(selecionarProximoBloco(0, [blocoSolo, blocoTrio], [])?.blockId).toBe('trio');
+  });
+
+  it('não confunde soma com contagem de itens: um item forte o bastante vence três fracos', () => {
+    // soloForte: 2.0² · 0.25 = 1.0 contra os mesmos 0.75 do trio. Sem este
+    // caso, "escolha o bloco com mais itens" também passaria no caso acima.
+    const soloForte: BlocoCandidato = { ...blocoSolo, blockId: 'soloForte', itemParams: [p(2.0, 0)] };
+    expect(selecionarProximoBloco(0, [blocoTrio, soloForte], [])?.blockId).toBe('soloForte');
+  });
 });
