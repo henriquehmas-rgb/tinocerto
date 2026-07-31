@@ -71,11 +71,22 @@ function informacaoDoBloco(theta: number, bloco: BlocoCandidato): number {
  * sozinho. As duas peças estão corretas isoladamente; o que falta é coerência
  * entre elas.
  *
- * Sem impacto hoje: o CAT está travado no banco e nada fora dos testes
- * importa este módulo. Mas ligar o CAT é `UPDATE instrument_version SET
- * modo_administracao = 'cat'` -- um comando -- então este parágrafo é a única
- * coisa entre aquele comando e um critério de seleção incoerente com o
- * escore. Rever com os dados da calibração real em mãos.
+ * Sem impacto hoje, e a garantia é mais forte que um comentário. Nada fora
+ * dos testes importa este módulo, e ligar o CAT NÃO é um UPDATE solto: o
+ * trigger da assessment_0006 recusa `modo_administracao = 'cat'` enquanto
+ * qualquer item do instrumento estiver sem parâmetro calibrado vigente.
+ * Verificado rodando o comando de verdade contra o banco:
+ *
+ *   ERROR: instrument_version a55e55e0-...-000000000002 nao pode usar modo
+ *   CAT: 40 item(ns) sem parametro calibrado vigente (ausente ou provisorio).
+ *
+ * Os 40 itens do seed são provisórios, então hoje o CAT é inalcançável.
+ * O acoplamento é conveniente: a trava só cede depois de uma calibration_run
+ * real, que é exatamente quando existem os dados necessários para rever este
+ * critério. Ou seja, a ordem correta é imposta pelo banco, não pela memória
+ * de quem lê. Ainda assim é DÍVIDA, não questão resolvida -- quem destravar
+ * o CAT tem de reprojetar a seleção para a informação da COMPARAÇÃO par-a-par
+ * antes de servir o primeiro bloco adaptativo.
  * ---------------------------------------------------------------------------
  */
 export function selecionarProximoBloco(
@@ -108,7 +119,13 @@ export function selecionarProximoBloco(
  */
 export function deveParar(estado: EstadoParada, criterios: CriteriosParada): boolean {
   return (
-    estado.se < criterios.seAlvo ||
+    // INCLUSIVO, igual aos dois tetos abaixo. SE é medida de imprecisão e
+    // seAlvo é o teto que se aceita: pousar exatamente nele É atingir o
+    // alvo, então parar é o certo -- e é o que o nome do critério promete.
+    // Estava `<` (estrito), inconsistente com os `>=` dos tetos e com o
+    // próprio nome do teste que o cobre; nenhum caso fixava o limite, então
+    // a divergência passou despercebida.
+    estado.se <= criterios.seAlvo ||
     estado.itensAplicados >= criterios.tetoItens ||
     estado.segundosDecorridos >= criterios.tetoSegundos
   );

@@ -130,6 +130,52 @@ describe('motor CAT', () => {
     expect(selecionarProximoBloco(0, [forteEUsado, fracoENovo], [])?.blockId).toBe('forteEUsado');
   });
 
+  it('degrada em vez de quebrar: com TODO bloco acima do teto, ainda devolve o mais informativo', () => {
+    // O braço de fallback (`dentroDoTeto.length > 0 ? dentroDoTeto : elegiveis`)
+    // não tinha nenhum caso. Não é detalhe cosmético: `pool.reduce(...)` é
+    // chamado SEM valor inicial, então sem o fallback esta entrada não devolve
+    // um bloco pior -- estoura `TypeError: Reduce of empty array with no
+    // initial value` e derruba a aplicação do candidato no meio.
+    //
+    // E o estado não é exótico: sob Sympson-Hetter com r_max dimensionado com
+    // dado real de exposição, "todo bloco restante já passou do teto" é o
+    // estado NORMAL do fim da aplicação -- exatamente quando este módulo
+    // entra em uso. A decisão documentada é aplicar um bloco super-exposto
+    // em vez de interromper; este teste é o que prende essa decisão.
+    const facil = { blockId: 'facil', itemParams: [{ a: 1.0, b: 0, c: 0 }], taxaExposicao: 0.9 };
+    const forte = { blockId: 'forte', itemParams: [{ a: 2.0, b: 0, c: 0 }], taxaExposicao: 0.95 };
+
+    // Ambos acima do teto: o conjunto que respeita o teto fica VAZIO.
+    const escolhido = selecionarProximoBloco(0, [facil, forte], [], { rMax: 0.3 });
+
+    // Em θ=0 com b=0: P=Q=0.5, logo I = a²·0.25 -- 1.0 para o forte contra
+    // 0.25 para o fácil. Se degradar significasse "devolve qualquer um", este
+    // expect não distinguiria nada; ele exige que a ordenação por informação
+    // continue valendo dentro do conjunto degradado.
+    expect(escolhido).not.toBeNull();
+    expect(escolhido?.blockId).toBe('forte');
+  });
+
+  it('para quando SE pousa EXATAMENTE no alvo (critério inclusivo)', () => {
+    // Fixa o limite que o mutante `<` -> `<=` atravessava sem matar nenhum
+    // caso: o teste vizinho usa se=0.28 contra alvo=0.3, que passa nos dois.
+    expect(
+      deveParar(
+        { se: 0.3, itensAplicados: 5, segundosDecorridos: 60 },
+        { seAlvo: 0.3, tetoItens: 20, tetoSegundos: 1800 },
+      ),
+    ).toBe(true);
+
+    // E o outro lado do limite continua NÃO parando -- senão "inclusivo"
+    // viraria "para sempre".
+    expect(
+      deveParar(
+        { se: 0.31, itensAplicados: 5, segundosDecorridos: 60 },
+        { seAlvo: 0.3, tetoItens: 20, tetoSegundos: 1800 },
+      ),
+    ).toBe(false);
+  });
+
   it('o teto de exposição é INCLUSIVO: bloco exatamente no teto continua elegível', () => {
     // r_max é um teto de exposição aceitável, não um limite a ser evitado por
     // uma margem. Com `<` no lugar de `<=`, o bloco que está exatamente na
