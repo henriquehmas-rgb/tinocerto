@@ -1,40 +1,10 @@
 import { Pool } from 'pg';
 import { decomporBlocoEmPares, estimarThetaEAP, ItemNoBloco } from '../scoring/mfc-scoring';
-
-const TERMOS_CLINICOS = [
-  'transtorno', 'patologia', 'sintoma', 'diagnostico', 'diagnóstico',
-  'depressao', 'depressão', 'ansiedade', 'neurose', 'psicologico', 'psicológico',
-  'tratamento', 'terapia', 'doenca', 'doença',
-];
-
-const INSTRUMENT_VERSION_SEMEADA = 'a55e55e0-0000-4000-8000-000000000002';
-
-/**
- * ESCOPO DO SEED -- não use `banco_id` para isso.
- *
- * `item` é tabela GLOBAL, sem tenant_id, compartilhada por todos os specs, e
- * `banco_id` tem DEFAULT 'ipip_contextualizado' (assessment_0001). Toda
- * fixture ad hoc da suíte (item-bank-schema, instrument-schema,
- * structural-gates) insere em `item` SEM informar banco_id e portanto cai no
- * mesmo balde do seed -- uma delas usa até o enunciado literal do item #1
- * daqui. Identificar o seed por `banco_id = 'ipip_contextualizado'` fazia
- * este arquivo depender do teardown dos OUTROS: um `finally` que estourasse,
- * um DELETE barrado por FK ou uma execução interrompida deixava uma linha
- * solta e reprovava 3 casos daqui por um motivo que nada tem a ver com o
- * seed. Reproduzido ao vivo inserindo UMA linha do tipo que
- * item-bank-schema.spec.ts legitimamente cria: 3 de 7 casos ficavam
- * vermelhos.
- *
- * O identificador robusto é a pertinência ao instrumento conhecido: só o
- * seed monta blocos sob INSTRUMENT_VERSION_SEMEADA.
- */
-const ITENS_SEMEADOS = `
-  SELECT DISTINCT i.*
-    FROM item i
-    JOIN block_item bi ON bi.item_id = i.id
-    JOIN block b ON b.id = bi.block_id
-   WHERE b.instrument_version_id = '${INSTRUMENT_VERSION_SEMEADA}'
-`;
+import {
+  INSTRUMENT_VERSION_SEMEADA,
+  ITENS_SEMEADOS,
+  TERMOS_CLINICOS,
+} from './seed-scope';
 
 describe('banco de itens semeado', () => {
   const adminPool = new Pool({ connectionString: process.env.DATABASE_URL });

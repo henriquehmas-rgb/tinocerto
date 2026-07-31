@@ -57,6 +57,40 @@
 -- 0012) e banco que já tinha a 0005 aplicada terminam idênticos. Ela é
 -- escopada pelo instrument_version conhecido e nunca varre `item` inteira.
 
+--
+-- SOBRESCRITA NUMA TABELA DECLARADA APPEND-ONLY -- por que é seguro AQUI e
+-- por que não pode virar precedente.
+--
+-- A assessment_0001 declara, logo acima de item_parameter_version:
+-- "Parâmetros VERSIONADOS: recalibrar cria linha nova, nunca sobrescreve."
+-- O UPDATE de `b` abaixo viola essa regra ao pé da letra: a linha rotulada
+-- `literatura_v1` passa a valer um `b` diferente do que `literatura_v1`
+-- significava quando a 0005 a gravou, e não sobra rastro do valor antigo.
+--
+-- É seguro exatamente porque NADA foi escorado ainda: item_response e
+-- assessment_result estão vazias (0 linhas, conferido no banco antes de
+-- escrever esta migration). Não existe theta cujo
+-- assessment_result.calibracao_versao = 'literatura_v1' deixasse de
+-- identificar os parâmetros que o produziram. Também não há histórico a
+-- preservar: `literatura_v1` nunca foi calibração -- é chute de literatura,
+-- provisorio = true -- e a 0005 que o gravou e esta que o corrige são a MESMA
+-- intenção de seed, entregue em duas migrations.
+--
+-- E o caminho append seria PIOR hoje: uq_ipv_item_calibracao UNIQUE
+-- (item_id, calibracao_versao) obriga um rótulo novo para uma linha nova, e
+-- não existe coluna `vigente` nem regra nenhuma de seleção de versão no
+-- repositório -- todo leitor de parâmetro é um `JOIN item_parameter_version p
+-- ... AND p.calibracao_versao = 'literatura_v1'` literal. Uma segunda linha
+-- por item duplicaria silenciosamente cada item em todos esses consumidores.
+--
+-- REGRA A PARTIR DA PRIMEIRA item_response: esta é a ÚLTIMA migration
+-- autorizada a reescrever parâmetro no lugar. Depois que existir resposta
+-- gravada, mudar `a`/`b` exige (1) INSERT de uma calibracao_versao NOVA,
+-- (2) uma regra explícita de qual versão é a vigente, e (3) que
+-- assessment_result.calibracao_versao continue apontando para a versão que de
+-- fato gerou aquele theta. Reescrever no lugar dali em diante invalida em
+-- silêncio resultado já entregue a tenant.
+
 -- Estado-alvo: enunciado -> (domínio, valência, slot do bloco, b).
 CREATE TEMP TABLE seed_alvo (
   enunciado text PRIMARY KEY,
