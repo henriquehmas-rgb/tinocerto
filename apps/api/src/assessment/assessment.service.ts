@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PoolClient } from 'pg';
 import { OutboxService } from '../outbox/outbox.service';
 import { nextOutboxSequence } from '../outbox/next-outbox-sequence';
@@ -67,13 +67,13 @@ export class AssessmentService {
       [input.tenantId, input.applicationId],
     );
     if (candidatura.rows.length === 0) {
-      throw new Error(
+      throw new NotFoundException(
         `Candidatura ${input.applicationId} não encontrada no tenant ${input.tenantId}`,
       );
     }
     const titular = candidatura.rows[0].person_id;
     if (titular !== input.personId) {
-      throw new Error(
+      throw new ForbiddenException(
         `Candidatura ${input.applicationId}: person_id ${input.personId} não é o titular da candidatura`,
       );
     }
@@ -119,17 +119,17 @@ export class AssessmentService {
       [assessmentApplicationId],
     );
     if (atual.rows.length === 0) {
-      throw new Error(`Assessment ${assessmentApplicationId} não encontrado`);
+      throw new NotFoundException(`Assessment ${assessmentApplicationId} não encontrado`);
     }
     if (atual.rows[0].status !== 'convidado') {
-      throw new Error(
+      throw new ConflictException(
         `Assessment ${assessmentApplicationId} não pode ser iniciado (status atual: ${atual.rows[0].status})`,
       );
     }
     // Prazo do convite. Ver o comentário em `responderBloco` sobre por que a
     // checagem é de RELÓGIO e não de status.
     if (atual.rows[0].expirado) {
-      throw new Error(
+      throw new ConflictException(
         `Assessment ${assessmentApplicationId} não pode ser iniciado: prazo expirado (expira_em)`,
       );
     }
@@ -182,7 +182,7 @@ export class AssessmentService {
       [input.assessmentApplicationId],
     );
     if (cabecalho.rows.length === 0) {
-      throw new Error(`Assessment ${input.assessmentApplicationId} não encontrado`);
+      throw new NotFoundException(`Assessment ${input.assessmentApplicationId} não encontrado`);
     }
 
     // 2) Só responde quem está em andamento. Resposta gravada depois de
@@ -191,7 +191,7 @@ export class AssessmentService {
     // protocolo cujas condições de aplicação não valem mais. Antes de
     // 'iniciado', mesma coisa.
     if (cabecalho.rows[0].status !== 'iniciado') {
-      throw new Error(
+      throw new ConflictException(
         `Assessment ${input.assessmentApplicationId} não aceita resposta (status atual: ${cabecalho.rows[0].status})`,
       );
     }
@@ -205,7 +205,7 @@ export class AssessmentService {
     // do BANCO (e não Date.now() do processo) porque é o mesmo relógio que
     // gravou `expira_em`: sem depender de sincronia entre app e banco.
     if (cabecalho.rows[0].expirado) {
-      throw new Error(
+      throw new ConflictException(
         `Assessment ${input.assessmentApplicationId} não aceita resposta: prazo expirado (expira_em)`,
       );
     }
@@ -229,7 +229,7 @@ export class AssessmentService {
       [input.blockId, cabecalho.rows[0].instrument_version_id],
     );
     if (composicao.rows.length === 0) {
-      throw new Error(
+      throw new BadRequestException(
         `Bloco ${input.blockId} não pertence ao instrumento deste assessment (${input.assessmentApplicationId})`,
       );
     }
@@ -237,13 +237,13 @@ export class AssessmentService {
 
     const informados = new Set(input.itemIds);
     if (informados.size !== input.itemIds.length) {
-      throw new Error(`Bloco ${input.blockId}: itemIds contém item repetido`);
+      throw new BadRequestException(`Bloco ${input.blockId}: itemIds contém item repetido`);
     }
     if (
       informados.size !== itensDoBloco.length ||
       itensDoBloco.some((itemId) => !informados.has(itemId))
     ) {
-      throw new Error(
+      throw new BadRequestException(
         `Bloco ${input.blockId}: itemIds não corresponde à composição do bloco no instrumento`,
       );
     }
@@ -305,10 +305,10 @@ export class AssessmentService {
       [assessmentApplicationId],
     );
     if (cabecalho.rows.length === 0) {
-      throw new Error(`Assessment ${assessmentApplicationId} não encontrado`);
+      throw new NotFoundException(`Assessment ${assessmentApplicationId} não encontrado`);
     }
     if (cabecalho.rows[0].status !== 'iniciado') {
-      throw new Error(
+      throw new ConflictException(
         `Assessment ${assessmentApplicationId} não pode ser concluído (status atual: ${cabecalho.rows[0].status})`,
       );
     }
@@ -339,7 +339,7 @@ export class AssessmentService {
       throw new Error(`Instrumento ${versionId} não tem blocos -- nada a escorar`);
     }
     if (respondidos.rows[0].n !== esperados) {
-      throw new Error(
+      throw new ConflictException(
         `Assessment ${assessmentApplicationId} incompleto: ${respondidos.rows[0].n} de ${esperados} blocos respondidos`,
       );
     }

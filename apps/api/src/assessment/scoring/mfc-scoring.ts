@@ -1,5 +1,56 @@
 import { ItemParams } from './irt-primitives';
 
+/**
+ * ---------------------------------------------------------------------------
+ * LIMITE CONHECIDO -- ESTE INSTRUMENTO NÃO RESISTE A FAKING-GOOD.
+ *
+ * Registrado aqui porque DUAS migrations aplicadas afirmam o contrário, e
+ * migration aplicada é imutável -- não dá para corrigir o texto na origem:
+ *
+ *   assessment_0013: "o MFC de chaveamento oposto foi escolhido justamente
+ *                     para dificultar distorção"
+ *   assessment_0016: "...oposto foi escolhido justamente para DIFICULTAR
+ *                     distorção"
+ *
+ * As duas frases estão ERRADAS, e uma delas foi escrita ao corrigir um
+ * problema de ordem que de fato existia. O que dá resistência a faking num
+ * formato de escolha forçada é o bloco misturar DIMENSÕES DIFERENTES com
+ * desejabilidade social equivalente: aí escolher uma afirmação implica NÃO
+ * escolher a outra, e o respondente é obrigado a trocar um traço por outro.
+ *
+ * Não é o caso aqui. Os 20 blocos do instrumento semeado têm UM domínio só
+ * (verificado no banco: `count(DISTINCT i.dominio) = 1` nos 20), pareando um
+ * item de chave positiva com um de chave negativa DA MESMA dimensão -- por
+ * exemplo "planejo minhas tarefas com antecedência" contra "perco prazos por
+ * me organizar mal". Escolher a afirmação lisonjeira não custa nada: não há
+ * troca. Quem lê os enunciados e sempre marca a positiva como MAIS obtém
+ * θ ≈ +1.35 nas CINCO dimensões ao mesmo tempo -- o mesmo perfil máximo que
+ * a estratégia por POSIÇÃO produzia antes da assessment_0016.
+ *
+ * A 0016 fechou o respondente CEGO A CONTEÚDO (quem marca sempre a primeira
+ * alternativa hoje tira ~0 em tudo, e isso está testado). Ela não fecha --
+ * nem podia -- o respondente que LÊ. Isso é propriedade da composição dos
+ * blocos, decidida na Task 8, não da contrabalança de posição.
+ *
+ * O que o instrumento entrega de fato, e é o que a spec promete, é escore
+ * NORMATIVO (θ comparável entre pessoas), não ipsativo. A spec justifica o
+ * MFC por isso, não por resistência a faking; quem passou a prometer
+ * resistência foram os comentários das migrations.
+ *
+ * `protocolo_confianca` NÃO detecta o faker: é 1 - SE médio, um índice de
+ * PRECISÃO. Medido no padrão fake-good ele até CAI (SE ≈ 0.61, confiança
+ * ≈ 0.39, contra SE ≈ 0.49 do padrão cego). Não é índice de integridade e
+ * nada no relatório o interpreta como tal.
+ *
+ * Consequência prática, para quem for decidir: em seleção real, este
+ * instrumento não deve ser usado como filtro isolado, e nenhum material de
+ * produto pode alegar resistência a distorção. Fechar isso de verdade exige
+ * blocos multidimensionais pareados por desejabilidade -- o que puxa junto o
+ * modelo de escoragem, porque comparação entre dimensões precisa do TIRT
+ * multidimensional completo que esta fase deliberadamente aproximou por EAP
+ * 1-D por dimensão (ver o bloco de aproximação mais abaixo).
+ * ---------------------------------------------------------------------------
+ */
 export interface ItemNoBloco {
   itemId: string;
   dominio: string;
