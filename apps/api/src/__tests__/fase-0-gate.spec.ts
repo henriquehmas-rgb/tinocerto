@@ -75,7 +75,18 @@ const MIGRATIONS_DIR = join(__dirname, '../../migrations');
 // ... column_name = 'tenant_id'`, e como a coluna não existe mais essa
 // tabela simplesmente não aparece no resultado; a entrada no Set fica
 // inerte ali, não incorreta.
-const RLS_EXCEPTION_TABLES = new Set(['consent', 'retention_policy', 'candidate_application_summary']);
+// consent e retention_policy SAÍRAM desta lista na trust_0004. A exceção
+// partia de uma premissa verdadeira ("tenant_id é nullable porque existe
+// consentimento de escopo de plataforma") e tirava dela uma conclusão que não
+// decorre: que EXISTA linha de plataforma justifica a linha NULL ser visível a
+// todos, não que o tenant B leia a linha do tenant A. E "isolamento por
+// person_id na camada de aplicação" cobre o lado do titular, não o lado do
+// tenant -- `SELECT * FROM consent` numa sessão de tenant devolvia o
+// consentimento LGPD de todos. O predicado `tenant_id IS NULL OR tenant_id =
+// <atual>`, o mesmo que identity_0007 deu a `role` (que estava exatamente
+// nesta situação e foi resolvida com policy, não com exceção), entrega o que a
+// justificativa queria sem o vazamento.
+const RLS_EXCEPTION_TABLES = new Set(['candidate_application_summary']);
 
 // Reforço do portão pedido pela revisão final consolidada (achado
 // CRITICAL 2): toda tabela com uma FK para user_account ou para tenant

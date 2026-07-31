@@ -21,6 +21,7 @@ describe('ReportService (trilho A)', () => {
   let resultExtremosId: string;
   let resultSemConfiancaId: string;
   let resultSeIncompletoId: string;
+  let resultCalibradoId: string;
 
   /**
    * `escore_bruto` NÃO é uma cópia de theta -- é a contagem de endosso
@@ -33,6 +34,7 @@ describe('ReportService (trilho A)', () => {
     seTheta: Record<string, number>,
     confianca: number | null,
     escoreBrutoObservado?: Record<string, number>,
+    calibracaoVersao = 'literatura_v1',
   ): Promise<string> {
     const contagens =
       escoreBrutoObservado ??
@@ -40,7 +42,7 @@ describe('ReportService (trilho A)', () => {
     const r = await adminPool.query<{ id: string }>(
       `INSERT INTO assessment_result
          (person_id, instrument_version_id, theta, se_theta, escore_bruto, protocolo_confianca, respondido_em, calibracao_versao)
-       VALUES ($1,$2,$3,$4,$5,$6,now(),'literatura_v1') RETURNING id`,
+       VALUES ($1,$2,$3,$4,$5,$6,now(),$7) RETURNING id`,
       [
         personId,
         VERSION_ID,
@@ -48,6 +50,7 @@ describe('ReportService (trilho A)', () => {
         JSON.stringify(seTheta),
         JSON.stringify(contagens),
         confianca,
+        calibracaoVersao,
       ],
     );
     return r.rows[0].id;
@@ -127,7 +130,24 @@ describe('ReportService (trilho A)', () => {
       0.5,
     );
 
-    for (const id of [resultId, resultExtremosId, resultSemConfiancaId, resultSeIncompletoId]) {
+    // Único fixture com calibração NÃO-provisória. Sem ele, todo resultado da
+    // suíte nasce 'literatura_v1' e o discriminador de provisoriedade fica
+    // meio coberto: trocá-lo por `true` fixo passava nos 16 casos.
+    resultCalibradoId = await inserirResultado(
+      { conscienciosidade: 0.4, extroversao: 0.1, amabilidade: 0.2, estabilidade: 0.3, abertura: 0.1 },
+      { conscienciosidade: 0.28, extroversao: 0.29, amabilidade: 0.3, estabilidade: 0.31, abertura: 0.32 },
+      0.8,
+      undefined,
+      'calib_2027_01',
+    );
+
+    for (const id of [
+      resultId,
+      resultExtremosId,
+      resultSemConfiancaId,
+      resultSeIncompletoId,
+      resultCalibradoId,
+    ]) {
       await conceder(id, tenantComGrant);
     }
   });
@@ -216,6 +236,49 @@ describe('ReportService (trilho A)', () => {
     // theta -0.51 -> BAIXA; -0.5 exato -> MÉDIA
     expect(secao(relatorio, 'abertura').texto).toBe(ROTULOS.abertura.baixo);
     expect(secao(relatorio, 'amabilidade').texto).toBe(ROTULOS.amabilidade.medio);
+  });
+
+  it('RECUSA publicar quando o texto gerado contém termo clínico', async () => {
+    // Este é o gate regulatório da Res. CFP 31/2022 -- o entregável de
+    // cabeçalho da task -- e não tinha NENHUM teste: apagar o bloco inteiro
+    // (corpo + classificarTermosClinicos + throw) de report.service.ts
+    // deixava os 16 casos verdes.
+    //
+    // O teste vizinho ('o corpo não contém termo clínico') NÃO cobre isto:
+    // ele re-roda o linter sobre o corpo aqui no processo de teste, então
+    // prende só o conteúdo das constantes ROTULOS -- que são limpas por
+    // construção. A verificação em RUNTIME podia ser removida inteira e ele
+    // continuava passando. Ou seja: o controle que decide se um relatório
+    // publica ou não estava sustentado por um comentário.
+    //
+    // ROTULOS é exportado e mutável, então dá para sujar um rótulo de
+    // propósito, exercitar o caminho de verdade e restaurar no finally.
+    const original = ROTULOS.abertura.medio;
+    try {
+      ROTULOS.abertura.medio = 'Sugere transtorno de adaptação a mudanças.';
+
+      await expect(
+        gerarComo(tenantComGrant, resultId),
+      ).rejects.toThrow(/vocabulário clínico/i);
+    } finally {
+      ROTULOS.abertura.medio = original;
+    }
+
+    // O mesmo relatório volta a publicar depois de restaurado -- senão este
+    // teste poderia estar passando por qualquer outra falha.
+    const relatorio = await gerarComo(tenantComGrant, resultId);
+    expect(relatorio.secoes.length).toBeGreaterThan(0);
+  });
+
+  it('calibração real desliga o aviso de provisoriedade', async () => {
+    // A direção perigosa (perder o aviso) já era coberta; esta é a outra:
+    // com `calibracaoProvisoria = true` fixo os 16 casos passavam, e no dia
+    // em que a calibração real subir o relatório seguiria avisando recrutador
+    // de que o escore é provisório para sempre.
+    const relatorio = await gerarComo(tenantComGrant, resultCalibradoId);
+
+    expect(relatorio.calibracaoProvisoria).toBe(false);
+    expect(relatorio.avisoCalibracao).toBeNull();
   });
 
   it('o corpo do relatório não contém nenhum termo clínico', async () => {

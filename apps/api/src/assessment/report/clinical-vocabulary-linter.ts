@@ -12,13 +12,26 @@
  * precisa ser auditável termo a termo -- não um modelo probabilístico que
  * pode "discordar" num caso já normatizado.
  */
-const TERMOS_CLINICOS = [
+/**
+ * Raízes truncadas, não palavras inteiras: o objetivo é pegar a FLEXÃO toda
+ * com uma entrada só. Exportada para o spec conseguir exigir que cada entrada
+ * tenha uma sonda -- sem isso uma entrada podia ser truncada errado, ou
+ * sumir, e a suíte seguir verde.
+ *
+ * Quatro entradas foram corrigidas depois de a revisão da Task 11 mostrar que
+ * a lista traía a própria convenção: `clinico` pegava "perfil clínico" e
+ * deixava passar "avaliação clínica" -- a forma feminina do MESMO termo que
+ * já estava na lista. Mesma classe em depressao/ansiedade, que não pegavam
+ * "depressivo" nem "ansioso", e trauma/medicação faltavam por completo.
+ */
+export const TERMOS_CLINICOS = [
   'transtorno',
   'patolog',       // patologia, patológico
   'sintoma',
   'diagnostic',    // diagnóstico, diagnosticar
-  'depressao',
+  'depress',       // depressão, depressivo, depressiva
   'ansiedade',
+  'ansios',        // ansioso, ansiosa -- 'ansiedade' não cobre a flexão
   'neuro',         // neurose, neurótico
   'psicolog',      // psicológico, psicologia
   'psiquiatr',
@@ -28,7 +41,9 @@ const TERMOS_CLINICOS = [
   'sindrome',
   'compulsi',
   'fobia',
-  'clinico',
+  'clinic',        // clínico, clínica, clínicas
+  'trauma',        // trauma, traumático, traumatizado
+  'medic',         // medicação, medicamento, médico, médica
 ];
 
 /** Remove acentos para casar 'diagnóstico' e 'diagnostico' na mesma regra. */
