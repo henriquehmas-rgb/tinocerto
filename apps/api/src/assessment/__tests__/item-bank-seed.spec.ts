@@ -3,6 +3,7 @@ import { decomporBlocoEmPares, estimarThetaEAP, ItemNoBloco } from '../scoring/m
 import {
   INSTRUMENT_VERSION_SEMEADA,
   ITENS_SEMEADOS,
+  TODOS_OS_ITENS,
   TERMOS_CLINICOS,
 } from './seed-scope';
 
@@ -57,11 +58,18 @@ describe('banco de itens semeado', () => {
     expect(naoProvisorio.rows).toHaveLength(0);
   });
 
-  it('nenhum enunciado usa vocabulário clínico', async () => {
+  it('nenhum enunciado usa vocabulário clínico -- BANCO INTEIRO, não só o seed', async () => {
+    // Escopo deliberadamente ABERTO (TODOS_OS_ITENS, não ITENS_SEMEADOS):
+    // a Res. CFP 31/2022 fala de todo enunciado que um candidato pode ler, e
+    // o instrumento semeado deixará de ser o único quando a Task 10 criar o
+    // instrument_version do modo CAT. Ver seed-scope.ts.
     const { rows } = await adminPool.query<{ enunciado: string }>(
-      `WITH semeados AS (${ITENS_SEMEADOS}) SELECT enunciado FROM semeados`,
+      `WITH todos AS (${TODOS_OS_ITENS}) SELECT enunciado FROM todos`,
     );
-    expect(rows).toHaveLength(40);
+    // Cobertura mínima, não exata: o banco tem PELO MENOS os 40 semeados.
+    // Igualdade aqui reintroduziria a fragilidade de cardinalidade que este
+    // escopo existe para evitar.
+    expect(rows.length).toBeGreaterThanOrEqual(40);
 
     const ofensores = rows
       .filter((r) => TERMOS_CLINICOS.some((t) => r.enunciado.toLowerCase().includes(t)))

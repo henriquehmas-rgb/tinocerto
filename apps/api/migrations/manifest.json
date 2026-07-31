@@ -49,6 +49,7 @@
     "assessment_0004__application_and_response.sql",
     "assessment_0011__assessment_index_alignment.sql",
     "assessment_0005__seed_ipip_items.sql",
-    "assessment_0012__seed_threshold_spread.sql"
+    "assessment_0012__seed_threshold_spread.sql",
+    "assessment_0013__deconfound_order_and_seed_bank.sql"
   ]
 }

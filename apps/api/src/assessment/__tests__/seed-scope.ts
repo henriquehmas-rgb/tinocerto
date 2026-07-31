@@ -20,10 +20,33 @@
  * (assessment_0005 + assessment_0012) monta blocos sob
  * INSTRUMENT_VERSION_SEMEADA.
  *
- * ATENÇÃO AO GATE CONSOLIDADO DA FASE 2a (Task 13): o linter de vocabulário
- * clínico deve importar TERMOS_CLINICOS e ITENS_SEMEADOS daqui. O plano
- * escreve aquele passo como `SELECT enunciado FROM item WHERE banco_id =
- * 'ipip_contextualizado'` -- é exatamente o predicado desmontado acima.
+ * SÃO DOIS ESCOPOS, NÃO UM. O raciocínio acima está certo para asserções
+ * ESTRUTURAIS ("exatamente 40 itens", "8 por domínio", "todo parâmetro é
+ * provisório"): elas afirmam uma cardinalidade, então precisam de um conjunto
+ * fechado, e qualquer linha estranha as reprova por um motivo alheio ao seed.
+ * Mas o linter de vocabulário clínico tem o requisito OPOSTO. Ele não conta
+ * nada -- afirma que NENHUM enunciado legível por candidato usa vocabulário
+ * clínico (Res. CFP 31/2022). Escopá-lo ao instrumento semeado abre um buraco
+ * permanente: item que exista no banco mas ainda não esteja blocado escapa, e
+ * -- concretamente -- todo item do SEGUNDO instrument_version que a Task 10
+ * (modo CAT) cria escapa. Um linter de conformidade que não enxerga metade do
+ * banco dá uma garantia falsa, que é pior que garantia nenhuma.
+ *
+ * Por isso o linter usa TODOS_OS_ITENS: `item` inteira, sem predicado. É
+ * seguro porque a direção do erro se inverte -- uma fixture vazada só pode
+ * causar FALSO POSITIVO (um enunciado a mais para inspecionar), nunca falso
+ * negativo, e os enunciados de fixture da suíte são benignos ('x', 'No
+ * trabalho, eu planejo minhas tarefas com antecedência.'). E `maxWorkers: 1`
+ * (jest.config.js) garante que não há spec concorrente com linha em voo.
+ * Se algum dia uma fixture precisar de vocabulário clínico de propósito, o
+ * linter reprovar é o comportamento CORRETO: quem escreve o teste declara a
+ * exceção explicitamente, em vez de a exceção existir por omissão.
+ *
+ * ATENÇÃO AO GATE CONSOLIDADO DA FASE 2a (Task 13): o linter deve importar
+ * TERMOS_CLINICOS e TODOS_OS_ITENS daqui. O plano escreve aquele passo como
+ * `SELECT enunciado FROM item WHERE banco_id = 'ipip_contextualizado'` -- é
+ * exatamente o predicado desmontado acima, e ainda por cima escaparia dos
+ * itens que a assessment_0013 moveu para o banco 'seed_ipip_v1'.
  */
 
 /** instrument_version criado pela assessment_0005. */
@@ -39,6 +62,23 @@ export const ITENS_SEMEADOS = `
     JOIN block_item bi ON bi.item_id = i.id
     JOIN block b ON b.id = bi.block_id
    WHERE b.instrument_version_id = '${INSTRUMENT_VERSION_SEMEADA}'
+`;
+
+/**
+ * Banco a que os 40 itens semeados pertencem, atribuído pela assessment_0013.
+ * NÃO é o DEFAULT da coluna (que continua 'ipip_contextualizado'), então
+ * nenhuma fixture o herda por omissão -- é um marcador de conteúdo de
+ * produção de verdade, não um balde compartilhado.
+ */
+export const BANCO_SEMEADO = 'seed_ipip_v1';
+
+/**
+ * Fragmento SQL: TODO item do banco, sem predicado. Escopo do linter de
+ * vocabulário clínico -- veja o bloco "SÃO DOIS ESCOPOS" no topo do arquivo
+ * para por que este caso quer o conjunto aberto e os demais querem o fechado.
+ */
+export const TODOS_OS_ITENS = `
+  SELECT i.* FROM item i
 `;
 
 /**
