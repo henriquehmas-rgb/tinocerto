@@ -130,15 +130,36 @@ export class CandidateApplicationSummaryConsumer implements OnModuleInit, OnModu
     for (const [messageId, fields] of messages) {
       const raw: Record<string, string> = {};
       for (let i = 0; i < fields.length; i += 2) raw[fields[i]] = fields[i + 1];
-      const event = JSON.parse(raw.payload ?? '{}');
 
-      if (!RELEVANT_EVENT_TYPES.includes(event.event_type)) {
+      // [Achado CRITICAL de revisão adversarial, mesmo bug corrigido em
+      // insights/adverse-impact.consumer.ts commit 1d8816e] `raw.payload` é
+      // só o payload de DOMÍNIO (ex.: {application_id, job_id, ...}) -- é o
+      // que OutboxPublisher.publishPending grava no campo `payload` do
+      // XADD, separado dos campos irmãos `event_type`/`aggregate_id`/etc.
+      // no MESMO NÍVEL do registro Redis. `event_type` e `tenant_id` nunca
+      // estiveram dentro do payload de domínio -- `tenant_id` nem é gravado
+      // no Redis (só existe embutido na CHAVE do stream,
+      // `outbox:{tenant_id}`, e chega aqui via o parâmetro `tenantId` do
+      // laço, que já sabe de qual tenant está lendo). A versão anterior
+      // fazia `JSON.parse(raw.payload)` e tratava o resultado (que É o
+      // payload de domínio) como se fosse o envelope inteiro, lendo
+      // `.event_type`/`.tenant_id`/`.payload` dele -- todos sempre
+      // `undefined`. Consequência: `RELEVANT_EVENT_TYPES.includes(undefined)`
+      // era sempre `false`, então TODA mensagem real era ACKed e descartada
+      // como "irrelevante" antes de chegar em handleEvent, silenciosamente
+      // -- o consumidor "rodava" sem nunca processar nada.
+      if (!RELEVANT_EVENT_TYPES.includes(raw.event_type as (typeof RELEVANT_EVENT_TYPES)[number])) {
         await this.redis.xack(streamKey, CONSUMER_GROUP, messageId);
         continue;
       }
 
       try {
-        await this.handleEvent({ eventType: event.event_type, tenantId: event.tenant_id, payload: event.payload });
+        const payload = JSON.parse(raw.payload ?? '{}');
+        await this.handleEvent({
+          eventType: raw.event_type as (typeof RELEVANT_EVENT_TYPES)[number],
+          tenantId,
+          payload,
+        });
         await this.redis.xack(streamKey, CONSUMER_GROUP, messageId);
         processed++;
       } catch (err) {

@@ -152,17 +152,29 @@ export class ResumeParsingConsumer implements OnModuleInit, OnModuleDestroy {
     for (const [messageId, fields] of messages) {
       const raw: Record<string, string> = {};
       for (let i = 0; i < fields.length; i += 2) raw[fields[i]] = fields[i + 1];
-      const event = JSON.parse(raw.payload ?? '{}');
 
-      if (event.event_type !== 'resume.uploaded') {
+      // [Achado CRITICAL de revisão adversarial, mesmo bug corrigido em
+      // insights/adverse-impact.consumer.ts commit 1d8816e] `raw.payload` é
+      // só o payload de DOMÍNIO (ex.: {resume_upload_id, storage_key}) -- é
+      // o que OutboxPublisher.publishPending grava no campo `payload` do
+      // XADD, separado do campo irmão `event_type` no MESMO NÍVEL do
+      // registro Redis. A versão anterior fazia `JSON.parse(raw.payload)` e
+      // lia `.event_type` do resultado (que É o payload de domínio),
+      // sempre `undefined` -- `undefined !== 'resume.uploaded'` é sempre
+      // `true`, então TODA mensagem real era ACKed e descartada como
+      // "irrelevante" antes de chegar em handleResumeUploaded,
+      // silenciosamente -- o consumidor "rodava" sem nunca processar um
+      // currículo de verdade.
+      if (raw.event_type !== 'resume.uploaded') {
         await this.redis.xack(streamKey, CONSUMER_GROUP, messageId);
         continue;
       }
 
       try {
+        const payload = JSON.parse(raw.payload ?? '{}');
         await this.handleResumeUploaded({
-          resumeUploadId: event.payload.resume_upload_id,
-          storageKey: event.payload.storage_key,
+          resumeUploadId: payload.resume_upload_id,
+          storageKey: payload.storage_key,
         });
         await this.redis.xack(streamKey, CONSUMER_GROUP, messageId);
         processed++;
