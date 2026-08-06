@@ -45,4 +45,22 @@ describe('calcularRazoes4Quintos', () => {
     expect(resultado.every((r) => r.taxaSelecao === 0 && r.razao4Quintos === 0)).toBe(true);
     expect(resultado.some((r) => Number.isNaN(r.razao4Quintos))).toBe(false);
   });
+
+  it('grupos mistos: um com taxa zero, outro não -- não é tratado como caso especial "ninguém alcançou"', () => {
+    // Achado de revisão adversarial: o branch `maxTaxa === 0` só existe
+    // para o caso de TODOS os grupos zerados. Este teste prova que um
+    // grupo zerado ao lado de um grupo não-zerado usa a divisão normal
+    // (0/maxTaxa = 0), não o branch especial -- e que o grupo não-zerado
+    // não é afetado pela presença do grupo zerado.
+    const resultado = calcularRazoes4Quintos([
+      { categoria: 'zerado', alcancaram: 0, totalGrupo: 10 },
+      { categoria: 'nao_zerado', alcancaram: 5, totalGrupo: 10 },
+    ]);
+    const zerado = resultado.find((r) => r.categoria === 'zerado')!;
+    const naoZerado = resultado.find((r) => r.categoria === 'nao_zerado')!;
+    expect(zerado.taxaSelecao).toBe(0);
+    expect(zerado.razao4Quintos).toBe(0);
+    expect(naoZerado.taxaSelecao).toBe(0.5);
+    expect(naoZerado.razao4Quintos).toBe(1); // é o maior (único não-zero), referência de si mesmo
+  });
 });

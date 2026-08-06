@@ -23,6 +23,17 @@ export const LIMIAR_MINIMO_GRUPO = 5;
  * misturar dimensões diferentes), a razão é a taxa do grupo dividida pela
  * MAIOR taxa entre os grupos. Abaixo de 0.8 sinaliza impacto adverso
  * potencial. O grupo de maior taxa recebe razão 1.0 por definição.
+ *
+ * LIMITE CONHECIDO (achado de revisão adversarial): o arredondamento em 4
+ * casas decimais -- escolhido para bater com a coluna `numeric(6,4)` de
+ * `adverse_impact_snapshot` (Task 2) -- pode levar uma razão real no
+ * intervalo [0.79995, 0.8) a ser exibida como exatamente 0.8000,
+ * mascarando um caso técnico de impacto adverso bem na borda do limiar
+ * legal. Nenhum código deste projeto ainda faz o corte booleano `< 0.8`
+ * (fica para uma UI/alerta futuro, fora de escopo desta fase) -- quem
+ * implementar isso deve comparar contra o valor bruto antes do
+ * arredondamento, ou usar tolerância, em vez de confiar cegamente em 4
+ * casas decimais para decisão de fronteira.
  */
 export function calcularRazoes4Quintos(categorias: ContagemCategoria[]): RazaoCategoria[] {
   const validas = categorias.filter((c) => c.totalGrupo >= LIMIAR_MINIMO_GRUPO);
