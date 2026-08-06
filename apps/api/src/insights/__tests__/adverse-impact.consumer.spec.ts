@@ -1,4 +1,5 @@
 import { Pool } from 'pg';
+import Redis from 'ioredis';
 import { DatabaseService } from '../../database/database.service';
 import { AdverseImpactConsumer } from '../adverse-impact.consumer';
 import { AdverseImpactSnapshotService } from '../adverse-impact-snapshot.service';
@@ -165,5 +166,105 @@ describe('AdverseImpactConsumer', () => {
         payload: { application_id: '00000000-0000-0000-0000-000000000000', reason_code: null, review_requestable: true },
       }),
     ).resolves.not.toThrow();
+  });
+
+  describe('caminho real do Redis (processBatch, não handleEvent direto)', () => {
+    // Achado CRITICAL de revisão adversarial: os três testes acima chamam
+    // handleEvent() diretamente, então nunca exercitam o parsing real de
+    // uma mensagem do Redis Stream -- foi exatamente esse caminho
+    // (processBatch) que tinha o bug: tratava o payload de domínio já
+    // parseado como se fosse o envelope inteiro, lendo campos que nunca
+    // existiam ali (.event_type/.tenant_id/.payload), e por isso descartava
+    // TODA mensagem real como "irrelevante" antes mesmo de chegar em
+    // handleEvent. Este bloco publica um evento via XADD no MESMO FORMATO
+    // que OutboxPublisher.publishPending grava de verdade (campos irmãos no
+    // nível superior: id/aggregate_type/aggregate_id/event_type/sequence/
+    // payload/occurred_at) e chama processBatch (método privado, acessado
+    // via cast -- é exatamente o método que o laço real usa).
+    const redis = new Redis(process.env.REDIS_URL!);
+
+    afterAll(async () => {
+      await redis.quit();
+    });
+
+    it('publica um evento real via XADD (mesmo formato do OutboxPublisher) e processBatch recalcula o snapshot', async () => {
+      // Limpa QUALQUER linha residual de testes anteriores deste arquivo
+      // (os três primeiros testes chamam handleEvent() direto e já
+      // gravaram snapshot para este mesmo tenant+vaga) -- sem isto, a
+      // asserção abaixo passaria mesmo se processBatch não fizesse nada,
+      // só lendo linha antiga. Achado ao rodar este teste contra uma
+      // mutação deliberada do bug original: sem este DELETE, os 2 testes
+      // deste describe passavam MESMO com o bug reintroduzido -- a
+      // asserção não provava o que dizia provar.
+      await adminPool.query('DELETE FROM adverse_impact_snapshot WHERE tenant_id = $1 AND job_id = $2', [
+        tenantId,
+        jobId,
+      ]);
+
+      const realStreamKey = `outbox:${tenantId}`;
+      const groupName = 'adverse_impact_consumer_group';
+      try {
+        await redis.xgroup('CREATE', realStreamKey, groupName, '0', 'MKSTREAM');
+      } catch (err) {
+        if (!(err instanceof Error) || !err.message.includes('BUSYGROUP')) throw err;
+      }
+
+      await redis.xadd(
+        realStreamKey,
+        '*',
+        'id', '00000000-0000-0000-0000-000000000001',
+        'aggregate_type', 'application',
+        'aggregate_id', applicationId,
+        'event_type', 'application.created',
+        'sequence', '1',
+        'payload', JSON.stringify({ application_id: applicationId, job_id: jobId, person_id: personId }),
+        'occurred_at', new Date().toISOString(),
+      );
+
+      consumer = new AdverseImpactConsumer(new AdverseImpactSnapshotService(), fakeDatabaseService(appPool));
+      // processBatch é privado -- acessado via cast de propósito, é o
+      // método real que o laço de consumo chama, não uma reimplementação
+      // paralela do teste.
+      await (consumer as unknown as { processBatch: (t: string, id: '0' | '>') => Promise<void> }).processBatch(
+        tenantId,
+        '>',
+      );
+
+      const linhas = await adminPool.query(
+        `SELECT * FROM adverse_impact_snapshot WHERE tenant_id = $1 AND job_id = $2 AND etapa = 'triagem'`,
+        [tenantId, jobId],
+      );
+      expect(linhas.rows.length).toBeGreaterThan(0);
+
+      // Controle: a mensagem foi ACKed (não fica pendente pra sempre).
+      const pendentes = await redis.xpending(realStreamKey, groupName);
+      expect(Number((pendentes as unknown[])[0])).toBe(0);
+    });
+
+    it('mensagem de evento IRRELEVANTE (fora de RELEVANT_EVENT_TYPES) é ACKed e ignorada, não processada', async () => {
+      const realStreamKey = `outbox:${tenantId}`;
+      const groupName = 'adverse_impact_consumer_group';
+
+      await redis.xadd(
+        realStreamKey,
+        '*',
+        'id', '00000000-0000-0000-0000-000000000002',
+        'aggregate_type', 'application',
+        'aggregate_id', applicationId,
+        'event_type', 'application.first_response_sent', // fora de RELEVANT_EVENT_TYPES
+        'sequence', '2',
+        'payload', JSON.stringify({ application_id: applicationId }),
+        'occurred_at', new Date().toISOString(),
+      );
+
+      consumer = new AdverseImpactConsumer(new AdverseImpactSnapshotService(), fakeDatabaseService(appPool));
+      await (consumer as unknown as { processBatch: (t: string, id: '0' | '>') => Promise<void> }).processBatch(
+        tenantId,
+        '>',
+      );
+
+      const pendentes = await redis.xpending(realStreamKey, groupName);
+      expect(Number((pendentes as unknown[])[0])).toBe(0); // ACKed, não preso como pendente
+    });
   });
 });
