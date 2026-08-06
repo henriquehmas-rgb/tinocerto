@@ -65,6 +65,12 @@
     "trust_0008__demographic_self_report_consent_tenant_coerencia.sql",
     "insights_0001__adverse_impact_snapshot.sql",
     "insights_0002__adverse_impact_snapshot_grant_delete.sql",
-    "llm_router_0001__llm_call_log.sql"
+    "llm_router_0001__llm_call_log.sql",
+    "interview_0001__competency.sql",
+    "interview_0002__interview_guide.sql",
+    "interview_0003__interview_guide_version.sql",
+    "interview_0004__interview_schedule.sql",
+    "interview_0005__interview_evaluator.sql",
+    "interview_0006__scorecard.sql"
   ]
 }

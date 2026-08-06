@@ -1,0 +1,44 @@
+# Não é chamado pelo CerbosGuard genérico (que só monta resource.attr.tenant_id
+# -- ver comentário em application.controller.ts sobre a mesma limitação
+# estrutural). Um serviço numa task futura chama CerbosService.check
+# diretamente, uma vez por linha, montando os atributos completos.
+# submetido_por precisa ser um mapa COMPLETO (uma entrada por avaliador da
+# entrevista, nunca esparso) -- indexar uma chave ausente de um mapa em CEL
+# lança erro em runtime em vez de devolver falso.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  resource: "scorecard"
+  version: "default"
+  scope: ""
+  rules:
+    - name: "bloqueio-tenant-diferente"
+      actions: ["*"]
+      effect: EFFECT_DENY
+      roles: ["*"]
+      condition:
+        match:
+          expr: >
+            !(has(request.principal.attr.tenant_id) &&
+              has(request.resource.attr.tenant_id) &&
+              type(request.principal.attr.tenant_id) == string &&
+              type(request.resource.attr.tenant_id) == string &&
+              size(request.principal.attr.tenant_id) > 0 &&
+              size(request.resource.attr.tenant_id) > 0 &&
+              request.principal.attr.tenant_id == request.resource.attr.tenant_id)
+
+    - name: "ve-a-propria-nota-sempre"
+      actions: ["read"]
+      effect: EFFECT_ALLOW
+      roles: ["admin_tenant", "recrutador", "gestor_vaga", "entrevistador"]
+      condition:
+        match: { expr: "request.resource.attr.avaliador_id == request.principal.id" }
+
+    - name: "ve-nota-alheia-so-apos-submeter-a-propria-e-so-se-ja-submetida"
+      actions: ["read"]
+      effect: EFFECT_ALLOW
+      roles: ["admin_tenant", "recrutador", "gestor_vaga", "entrevistador"]
+      condition:
+        match:
+          expr: >
+            request.resource.attr.submetido_em != null &&
+            request.resource.attr.submetido_por[request.principal.id] == true
