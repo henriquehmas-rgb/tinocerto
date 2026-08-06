@@ -7,6 +7,7 @@ import { CandidateAuthModule } from './candidate-auth/candidate-auth.module';
 import { PublicModule } from './public/public.module';
 import { ResumeModule } from './resume/resume.module';
 import { AssessmentModule } from './assessment/assessment.module';
+import { MatchingModule } from './matching/matching.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { AssessmentModule } from './assessment/assessment.module';
     PublicModule,
     ResumeModule,
     AssessmentModule,
+    MatchingModule,
   ],
 })
 export class AppModule implements NestModule {
