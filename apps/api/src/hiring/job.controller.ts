@@ -18,6 +18,7 @@ class CreateJobDto {
   @IsOptional()
   @IsArray()
   @IsString({ each: true })
+  @IsNotEmpty({ each: true })
   habilidadesExigidas?: string[];
 }
 
@@ -31,6 +32,11 @@ class PublishJobDto {
 class DeclararHabilidadesExigidasDto {
   @IsArray()
   @IsString({ each: true })
+  // Achado de revisão final da Fase 2b: sem isto, ["React", ""] era aceito
+  // e virava um requisito-fantasma vazio que dilui o score de todo
+  // candidato (toda skill normaliza para string vazia via trim(), então
+  // "" sempre bate com "" -- ver LIMITE CONHECIDO em adherence-scoring.ts).
+  @IsNotEmpty({ each: true })
   habilidades!: string[];
 }
 
