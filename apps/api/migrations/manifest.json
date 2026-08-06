@@ -64,6 +64,7 @@
     "trust_0007__demographic_self_report.sql",
     "trust_0008__demographic_self_report_consent_tenant_coerencia.sql",
     "insights_0001__adverse_impact_snapshot.sql",
-    "insights_0002__adverse_impact_snapshot_grant_delete.sql"
+    "insights_0002__adverse_impact_snapshot_grant_delete.sql",
+    "llm_router_0001__llm_call_log.sql"
   ]
 }
