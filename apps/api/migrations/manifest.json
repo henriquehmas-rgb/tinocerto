@@ -62,6 +62,7 @@
     "hiring_0014__job_habilidades_exigidas.sql",
     "trust_0006__consent_finalidade_autodeclaracao.sql",
     "trust_0007__demographic_self_report.sql",
-    "trust_0008__demographic_self_report_consent_tenant_coerencia.sql"
+    "trust_0008__demographic_self_report_consent_tenant_coerencia.sql",
+    "insights_0001__adverse_impact_snapshot.sql"
   ]
 }
