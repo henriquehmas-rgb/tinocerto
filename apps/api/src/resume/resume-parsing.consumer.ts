@@ -5,6 +5,7 @@ import { StorageService } from '../storage/storage.service';
 import { extractResumeText } from './extract-resume-text';
 import { ResumeStructuringService, StructuredResume } from './resume-structuring.service';
 import { locateVerbatimOffset } from './locate-verbatim-offset';
+import { TenantContext } from '../database/tenant-context';
 
 const RESUME_BUCKET = process.env.MINIO_RESUME_BUCKET ?? 'curriculos';
 const CONSUMER_GROUP = 'resume_parsing_consumer_group';
@@ -24,6 +25,7 @@ function withOffset<T extends { citacaoVerbatim: string }>(texto: string, item: 
 export class ResumeParsingConsumer implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(ResumeParsingConsumer.name);
   private readonly redis: Redis;
+  private readonly tenantContext: TenantContext;
 
   constructor(
     private readonly pool: Pool,
@@ -31,6 +33,7 @@ export class ResumeParsingConsumer implements OnModuleInit, OnModuleDestroy {
     private readonly structuringService: ResumeStructuringService,
   ) {
     this.redis = new Redis(process.env.REDIS_URL!);
+    this.tenantContext = new TenantContext(this.pool);
   }
 
   async onModuleInit(): Promise<void> {
@@ -172,10 +175,10 @@ export class ResumeParsingConsumer implements OnModuleInit, OnModuleDestroy {
 
       try {
         const payload = JSON.parse(raw.payload ?? '{}');
-        await this.handleResumeUploaded({
-          resumeUploadId: payload.resume_upload_id,
-          storageKey: payload.storage_key,
-        });
+        await this.handleResumeUploaded(
+          { resumeUploadId: payload.resume_upload_id, storageKey: payload.storage_key },
+          tenantId,
+        );
         await this.redis.xack(streamKey, CONSUMER_GROUP, messageId);
         processed++;
       } catch (err) {
@@ -189,11 +192,19 @@ export class ResumeParsingConsumer implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  async handleResumeUploaded(payload: ResumeUploadedPayload): Promise<void> {
+  async handleResumeUploaded(payload: ResumeUploadedPayload, tenantId: string): Promise<void> {
     try {
       const buffer = await this.storageService.download(RESUME_BUCKET, payload.storageKey);
       const texto = await extractResumeText(buffer);
-      const estruturado: StructuredResume = await this.structuringService.structure(texto);
+      // A chamada ao Model Router precisa de uma transação com
+      // app.tenant_id setado (llm_call_log/audit_log_entry são
+      // tenant-scoped com RLS FORCE) -- transação PRÓPRIA, separada da
+      // escrita em person_profile logo abaixo (que é global, sem RLS).
+      // tenantId aqui é só para ATRIBUIÇÃO DE AUDITORIA de quem originou o
+      // evento -- nunca usado para filtrar/escopar person_profile.
+      const estruturado: StructuredResume = await this.tenantContext.run(tenantId, (client) =>
+        this.structuringService.structure(client, tenantId, texto),
+      );
 
       const client = await this.pool.connect();
       try {

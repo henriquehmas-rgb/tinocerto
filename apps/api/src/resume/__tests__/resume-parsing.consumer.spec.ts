@@ -4,13 +4,42 @@ import Redis from 'ioredis';
 import { StorageService } from '../../storage/storage.service';
 import { ResumeStructuringService } from '../resume-structuring.service';
 import { ResumeParsingConsumer } from '../resume-parsing.consumer';
+import { ModelRouterService } from '../../llm-router/model-router.service';
+import { AnthropicAdapter, OpenAiAdapter } from '../../llm-router/provider-adapter';
+import { ProviderAdapter } from '../../llm-router/model-router.types';
+import { AuditLogService } from '../../trust/audit-log.service';
+
+// Double leve para os testes que NÃO fazem chamada real (a maioria deste
+// arquivo -- eles falham antes de o router ser invocado: download()
+// lança primeiro para storageKey inexistente, ou o evento é descartado
+// como irrelevante antes de chegar em handleResumeUploaded). Necessário
+// porque `new OpenAiAdapter()` (Task 1, provider-adapter.ts) chama `new
+// OpenAI()` no inicializador de campo da classe, que LANÇA de forma
+// síncrona se OPENAI_API_KEY não estiver definida -- mesmo que
+// `.complete()` nunca seja chamado. Isso quebraria estes testes mesmo sem
+// ANTHROPIC_API_KEY estar em jogo (OPENAI_API_KEY não está configurada na
+// VPS ainda). Mesmo padrão de double usado em
+// llm-router/__tests__/model-router.service.spec.ts (AdapterFalho).
+class AdapterIndisponivel implements ProviderAdapter {
+  constructor(public readonly name: 'anthropic' | 'openai') {}
+  async complete(): Promise<never> {
+    throw new Error(`${this.name} não deveria ser chamado neste teste`);
+  }
+}
 
 describe('ResumeParsingConsumer.handleResumeUploaded', () => {
   const adminPool = new Pool({ connectionString: process.env.DATABASE_URL });
-  const hasApiKey = Boolean(process.env.ANTHROPIC_API_KEY);
+  // Exige as DUAS chaves (não só ANTHROPIC_API_KEY): o teste real abaixo
+  // constrói o router com AnthropicAdapter (primário) E OpenAiAdapter
+  // (fallback) -- e o construtor de OpenAiAdapter já lança sem
+  // OPENAI_API_KEY, então "ter só a chave da Anthropic" não é um estado
+  // utilizável para este teste (mesmo critério de
+  // model-router.service.spec.ts).
+  const hasApiKey = Boolean(process.env.ANTHROPIC_API_KEY) && Boolean(process.env.OPENAI_API_KEY);
   const maybeIt = hasApiKey ? it : it.skip;
   let personId: string;
   let resumeUploadId: string;
+  let tenantId: string;
   // ResumeParsingConsumer abre sua própria conexão ioredis no construtor
   // (não injetada) e este spec o instancia diretamente, sem passar pelo
   // ciclo de vida do Nest (onModuleInit/onModuleDestroy nunca são chamados
@@ -26,8 +55,21 @@ describe('ResumeParsingConsumer.handleResumeUploaded', () => {
     process.env.MINIO_ACCESS_KEY ??= 'tinocerto';
     process.env.MINIO_SECRET_KEY ??= 'dev_local_only';
 
+    // tenantId é criado incondicionalmente (antes do early-return abaixo)
+    // porque o teste "marca resume_upload como falhou" logo adiante NÃO é
+    // gated por hasApiKey -- roda sempre -- e agora precisa de um tenantId
+    // válido para chamar handleResumeUploaded(payload, tenantId). O
+    // ModelRouter nunca chega a gravar em llm_call_log nesse teste
+    // (storageService.download falha antes disso), mas o tenant precisa
+    // existir de verdade para o teste real (maybeIt, abaixo) quando
+    // ANTHROPIC_API_KEY estiver presente.
+    const t = await adminPool.query<{ id: string }>(
+      `INSERT INTO tenant (razao_social, cnpj, slug) VALUES ('Resume Consumer Router Ltda','00000000000078','test-tenant-00000000000078') RETURNING id`,
+    );
+    tenantId = t.rows[0].id;
+
     if (!hasApiKey) {
-      console.warn('ANTHROPIC_API_KEY ausente -- pulando teste de integração real (ResumeParsingConsumer)');
+      console.warn('ANTHROPIC_API_KEY e/ou OPENAI_API_KEY ausentes -- pulando teste de integração real (ResumeParsingConsumer)');
       return;
     }
 
@@ -66,6 +108,11 @@ describe('ResumeParsingConsumer.handleResumeUploaded', () => {
       await adminPool.query('DELETE FROM resume_upload WHERE person_id = $1', [personId]);
       await adminPool.query('DELETE FROM person WHERE id = $1', [personId]);
     }
+    if (tenantId) {
+      await adminPool.query('DELETE FROM llm_call_log WHERE tenant_id = $1', [tenantId]);
+      await adminPool.query('DELETE FROM audit_log_entry WHERE tenant_id = $1', [tenantId]);
+      await adminPool.query('DELETE FROM tenant WHERE id = $1', [tenantId]);
+    }
     await adminPool.end();
   });
 
@@ -75,9 +122,13 @@ describe('ResumeParsingConsumer.handleResumeUploaded', () => {
   });
 
   maybeIt('extrai, estrutura e grava person_profile com offset rastreável, marcando resume_upload como processado', async () => {
-    consumer = new ResumeParsingConsumer(adminPool, new StorageService(), new ResumeStructuringService());
+    consumer = new ResumeParsingConsumer(
+      adminPool,
+      new StorageService(),
+      new ResumeStructuringService(new ModelRouterService(new AuditLogService(), new AnthropicAdapter(), new OpenAiAdapter())),
+    );
 
-    await consumer.handleResumeUploaded({ resumeUploadId, storageKey: `${personId}/curriculo-teste.pdf` });
+    await consumer.handleResumeUploaded({ resumeUploadId, storageKey: `${personId}/curriculo-teste.pdf` }, tenantId);
 
     const profile = await adminPool.query('SELECT experiencias FROM person_profile WHERE person_id = $1', [personId]);
     expect(profile.rows).toHaveLength(1);
@@ -90,10 +141,19 @@ describe('ResumeParsingConsumer.handleResumeUploaded', () => {
   }, 30000);
 
   it('marca resume_upload como falhou se a extração/estruturação lançar, sem deixar a transação pela metade', async () => {
-    consumer = new ResumeParsingConsumer(adminPool, new StorageService(), new ResumeStructuringService());
+    // AdapterIndisponivel (não os adapters reais): este teste falha em
+    // storageService.download() -- resumeUploadId/storageKey inexistentes
+    // -- antes de o router ser chamado, então não precisa de chave alguma.
+    consumer = new ResumeParsingConsumer(
+      adminPool,
+      new StorageService(),
+      new ResumeStructuringService(
+        new ModelRouterService(new AuditLogService(), new AdapterIndisponivel('anthropic'), new AdapterIndisponivel('openai')),
+      ),
+    );
 
     await expect(
-      consumer.handleResumeUploaded({ resumeUploadId: 'id-que-nao-existe', storageKey: 'chave-que-nao-existe.pdf' }),
+      consumer.handleResumeUploaded({ resumeUploadId: 'id-que-nao-existe', storageKey: 'chave-que-nao-existe.pdf' }, tenantId),
     ).rejects.toThrow();
   });
 
@@ -157,7 +217,13 @@ describe('ResumeParsingConsumer.handleResumeUploaded', () => {
         'occurred_at', new Date().toISOString(),
       );
 
-      consumer = new ResumeParsingConsumer(adminPool, new StorageService(), new ResumeStructuringService());
+      consumer = new ResumeParsingConsumer(
+        adminPool,
+        new StorageService(),
+        new ResumeStructuringService(
+          new ModelRouterService(new AuditLogService(), new AdapterIndisponivel('anthropic'), new AdapterIndisponivel('openai')),
+        ),
+      );
       // resume_upload_id/storageKey não existem de propósito:
       // handleResumeUploaded lança, e é exatamente esse throw propagando
       // até aqui (via processBatch) que prova que a mensagem foi
@@ -192,7 +258,13 @@ describe('ResumeParsingConsumer.handleResumeUploaded', () => {
         'occurred_at', new Date().toISOString(),
       );
 
-      consumer = new ResumeParsingConsumer(adminPool, new StorageService(), new ResumeStructuringService());
+      consumer = new ResumeParsingConsumer(
+        adminPool,
+        new StorageService(),
+        new ResumeStructuringService(
+          new ModelRouterService(new AuditLogService(), new AdapterIndisponivel('anthropic'), new AdapterIndisponivel('openai')),
+        ),
+      );
       await (consumer as unknown as { processBatch: (t: string, id: '0' | '>') => Promise<void> }).processBatch(
         streamTenantId,
         '>',

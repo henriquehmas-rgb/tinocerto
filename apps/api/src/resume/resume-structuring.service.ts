@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
-import Anthropic from '@anthropic-ai/sdk';
-import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
+import { PoolClient } from 'pg';
 import { z } from 'zod';
+import { ModelRouterService } from '../llm-router/model-router.service';
 
 const ResumeSchema = z.object({
   experiencias: z.array(
@@ -33,26 +33,22 @@ const ResumeSchema = z.object({
 
 export type StructuredResume = z.infer<typeof ResumeSchema>;
 
+const SYSTEM_PROMPT =
+  'Extraia experiências profissionais, formação e habilidades do currículo abaixo. Para cada item, o campo "citacaoVerbatim" deve ser uma cópia EXATA (mesmos espaços, mesma pontuação) de um trecho do texto original que comprove aquele item -- nunca parafraseado, nunca inventado. Se não houver um trecho exato que comprove um item, não inclua o item.';
+
 @Injectable()
 export class ResumeStructuringService {
-  private readonly client = new Anthropic();
+  constructor(private readonly modelRouter: ModelRouterService) {}
 
-  async structure(texto: string): Promise<StructuredResume> {
-    const response = await this.client.messages.parse({
-      model: 'claude-opus-5',
-      max_tokens: 4096,
-      output_config: { format: zodOutputFormat(ResumeSchema) },
-      messages: [
-        {
-          role: 'user',
-          content: `Extraia experiências profissionais, formação e habilidades do currículo abaixo. Para cada item, o campo "citacaoVerbatim" deve ser uma cópia EXATA (mesmos espaços, mesma pontuação) de um trecho do texto original que comprove aquele item -- nunca parafraseado, nunca inventado. Se não houver um trecho exato que comprove um item, não inclua o item.\n\n${texto}`,
-        },
-      ],
+  async structure(client: PoolClient, tenantId: string, texto: string): Promise<StructuredResume> {
+    const output = await this.modelRouter.complete({
+      client,
+      tier: 'tier2',
+      schema: ResumeSchema,
+      system: SYSTEM_PROMPT,
+      messages: [{ role: 'user', content: texto }],
+      metadata: { promptId: 'resume-parsing', promptVersion: 'v1', tenantId },
     });
-
-    if (!response.parsed_output) {
-      throw new Error('Claude não retornou uma estrutura válida para o currículo');
-    }
-    return response.parsed_output;
+    return output.data;
   }
 }
