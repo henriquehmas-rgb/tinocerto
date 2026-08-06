@@ -133,12 +133,26 @@ describe('PersonService', () => {
   });
 
   it('a query de habilidades só seleciona a coluna habilidades de person_profile -- allowlist estrutural', () => {
-    // Nunca resumo/experiencias/formacao -- dados mais sensíveis e menos
-    // auditáveis por feature nomeada do que uma lista de skills.
-    const query = QUERY_HABILIDADES_POR_PESSOA.toLowerCase();
-    expect(query).toContain('habilidades');
-    expect(query).not.toMatch(/\bresumo\b/);
-    expect(query).not.toMatch(/\bexperiencias\b/);
-    expect(query).not.toMatch(/\bformacao\b/);
+    // Subconjunto bidirecional, não blocklist: checar só a AUSÊNCIA de
+    // resumo/experiencias/formacao deixaria passar qualquer coluna futura
+    // não antecipada (telefone, endereço, foto -- plausíveis num perfil de
+    // RH). Mesmo achado de revisão adversarial que corrigiu o allowlist de
+    // AdherenceService (ver adherence.service.spec.ts) -- aqui era a MESMA
+    // classe de lacuna, só que num arquivo diferente.
+    const colunasPermitidas = ['habilidades'];
+    const selectClause = QUERY_HABILIDADES_POR_PESSOA.match(/SELECT([\s\S]*?)FROM/i)?.[1] ?? '';
+    const colunasNaQuery = new Set(
+      selectClause
+        .split(/[\s,]+/)
+        .map((token) => token.replace(/^[a-z]+\./i, '').toLowerCase())
+        .filter(Boolean),
+    );
+
+    for (const permitida of colunasPermitidas) {
+      expect(colunasNaQuery.has(permitida)).toBe(true);
+    }
+    for (const coluna of colunasNaQuery) {
+      expect(colunasPermitidas).toContain(coluna);
+    }
   });
 });
