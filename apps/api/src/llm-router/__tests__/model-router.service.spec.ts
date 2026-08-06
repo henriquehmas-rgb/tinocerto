@@ -101,6 +101,16 @@ describe('ModelRouterService', () => {
     ).rejects.toBeInstanceOf(ModelRouterUnavailableError);
   });
 
+  it('construir OpenAiAdapter sem OPENAI_API_KEY no ambiente não lança -- só lança se .complete() for de fato chamado', () => {
+    const original = process.env.OPENAI_API_KEY;
+    delete process.env.OPENAI_API_KEY;
+    try {
+      expect(() => new OpenAiAdapter()).not.toThrow();
+    } finally {
+      if (original !== undefined) process.env.OPENAI_API_KEY = original;
+    }
+  });
+
   // Chamada real -- mesma exceção deliberada ao padrão "sem mock" já usada
   // em resume-structuring.service.spec.ts: API paga e não-determinística,
   // pula com aviso se a chave não existir em vez de mockar a resposta.

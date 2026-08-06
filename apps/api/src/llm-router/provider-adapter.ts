@@ -8,7 +8,14 @@ import { ModelTier, ProviderAdapter, ProviderCompletionResult, TIER_CONFIG } fro
 
 export class AnthropicAdapter implements ProviderAdapter {
   readonly name = 'anthropic' as const;
-  private readonly client = new Anthropic();
+  private client: Anthropic | undefined;
+
+  private getClient(): Anthropic {
+    if (!this.client) {
+      this.client = new Anthropic();
+    }
+    return this.client;
+  }
 
   async complete<T>(
     tier: ModelTier,
@@ -17,7 +24,7 @@ export class AnthropicAdapter implements ProviderAdapter {
     messages: { role: 'user'; content: string }[],
   ): Promise<ProviderCompletionResult<T>> {
     const model = TIER_CONFIG[tier].anthropic;
-    const response = await this.client.messages.parse({
+    const response = await this.getClient().messages.parse({
       model,
       max_tokens: 4096,
       system,
@@ -38,7 +45,14 @@ export class AnthropicAdapter implements ProviderAdapter {
 
 export class OpenAiAdapter implements ProviderAdapter {
   readonly name = 'openai' as const;
-  private readonly client = new OpenAI();
+  private client: OpenAI | undefined;
+
+  private getClient(): OpenAI {
+    if (!this.client) {
+      this.client = new OpenAI();
+    }
+    return this.client;
+  }
 
   async complete<T>(
     tier: ModelTier,
@@ -47,7 +61,7 @@ export class OpenAiAdapter implements ProviderAdapter {
     messages: { role: 'user'; content: string }[],
   ): Promise<ProviderCompletionResult<T>> {
     const model = TIER_CONFIG[tier].openai;
-    const response = await this.client.chat.completions.parse({
+    const response = await this.getClient().chat.completions.parse({
       model,
       messages: [{ role: 'system', content: system }, ...messages],
       response_format: zodResponseFormat(schema, 'resultado'),
