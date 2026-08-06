@@ -32,11 +32,33 @@ export class AdverseImpactSnapshotService {
    * as quatro dimensões. "etapa" = 'triagem' (todo mundo que se
    * candidatou, baseline implícito -- ApplicationService.create não grava
    * pipeline_stage_transition na criação) UNION os to_state reais de
-   * pipeline_stage_transition UNION 'reprovado' sintético (a partir de
-   * decision.tipo = 'reprovacao', que não necessariamente move
-   * etapa_funil).
+   * pipeline_stage_transition.
+   *
+   * NÃO existe etapa sintética 'reprovado' (achado de re-revisão
+   * adversarial): a regra dos 4/5 assume "taxa mais alta = referência
+   * boa", e isso se inverte para uma medida de REPROVAÇÃO (taxa mais alta
+   * = pior, não melhor). Calculado com a mesma fórmula, o grupo mais
+   * reprovado vira a "referência" com razão 1.0, e um grupo com reprovação
+   * BAIXA (bom resultado) pode aparecer com razão baixa -- sinal
+   * ativamente invertido num painel antidiscriminação. Corrigir isso
+   * exige tratamento próprio (medir sobrevivência, não reprovação
+   * diretamente, ou inverter a comparação) -- decisão de design que não
+   * existia quando esta task foi escrita. Até essa decisão ser tomada,
+   * melhor não emitir o sinal do que emitir um sinal errado.
    */
   async recompute(client: PoolClient, tenantId: string, jobId: string): Promise<void> {
+    // Achado Important de re-revisão adversarial: sem isto, duas chamadas
+    // concorrentes de recompute() para a MESMA vaga (esperado a partir da
+    // Task 5, consumidor de outbox reagindo a eventos em rajada) podem se
+    // intercalar sob READ COMMITTED de um jeito que o DELETE de uma
+    // chamada nunca vê o que a outra ainda não commitou -- reintroduzindo
+    // sob concorrência o mesmo bug de linha obsoleta que este arquivo
+    // acabou de fechar. Lock consultivo de transação serializa
+    // recompute() por vaga (chave = tenant+job, não só job, para não
+    // colidir por acidente entre tenants diferentes); libera sozinho no
+    // COMMIT/ROLLBACK da transação de TenantContext.run.
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`${tenantId}:${jobId}`]);
+
     for (const dimensao of DIMENSOES) {
       // Achado CRITICAL de revisão adversarial: a versão anterior desta
       // query derivava a grade (etapa, categoria) das linhas que
@@ -68,13 +90,6 @@ export class AdverseImpactSnapshotService {
           FROM pipeline_stage_transition pst
           JOIN application a ON a.id = pst.application_id AND a.tenant_id = pst.tenant_id
           WHERE pst.tenant_id = $1 AND a.job_id = $2
-
-          UNION
-
-          SELECT d.application_id, 'reprovado' AS etapa
-          FROM decision d
-          JOIN application a ON a.id = d.application_id AND a.tenant_id = d.tenant_id
-          WHERE d.tenant_id = $1 AND a.job_id = $2 AND d.tipo = 'reprovacao'
         ),
         totais AS (
           SELECT a.id AS application_id, ${dimensao.categoriaExpr} AS categoria

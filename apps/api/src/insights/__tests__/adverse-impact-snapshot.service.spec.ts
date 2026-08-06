@@ -256,17 +256,28 @@ describe('AdverseImpactSnapshotService', () => {
       expect(Number(feminino!.razao_4_5)).toBe(0);
     });
 
-    it('candidatura reprovada aparece na etapa sintética reprovado, mesmo já tendo alcançado outra etapa', async () => {
+    it('decision de reprovação NUNCA gera etapa sintética "reprovado" -- decisão consciente pós-revisão adversarial', async () => {
+      // Achado de re-revisão adversarial: a primeira versão desta task
+      // media reprovação com a MESMA fórmula das etapas de progresso
+      // (taxa mais alta = referência boa), mas reprovação é o oposto --
+      // taxa mais alta de reprovação é PIOR, não melhor. Isso invertia o
+      // sinal: o grupo mais reprovado virava a "referência" (razão 1.0) e
+      // um grupo com reprovação baixa podia sair com razão baixa,
+      // apontando para o grupo FAVORECIDO como se fosse o prejudicado.
+      // Corrigir direito exige medir sobrevivência (não reprovação
+      // direta) ou inverter a comparação -- decisão de design própria,
+      // fora do escopo desta task. Até essa decisão ser tomada, o
+      // serviço não emite o sinal. Este teste trava que decision não
+      // produz NENHUMA linha de etapa 'reprovado', mesmo com dado real
+      // de reprovação no banco.
       const job = await adminPool.query<{ id: string }>(
-        `INSERT INTO job (tenant_id, requisition_id, titulo, seo_slug) VALUES ($1, $2, 'Vaga Reprovado', 'vaga-reprovado') RETURNING id`,
+        `INSERT INTO job (tenant_id, requisition_id, titulo, seo_slug) VALUES ($1, $2, 'Vaga Sem Reprovado', 'vaga-sem-reprovado') RETURNING id`,
         [tenantId, requisitionId],
       );
       jobIsoladoId = job.rows[0].id;
 
-      // N=5 "feminino" -- precisa bater o limiar mínimo (5) para gerar
-      // linha em QUALQUER etapa, "reprovado" incluída.
-      const appReprovadaId = await criarCandidatoIsolado('feminino', null, true); // alcança entrevista, depois é reprovada
-      for (let i = 0; i < 4; i++) await criarCandidatoIsolado('feminino', null, true); // as outras 4 também alcançam entrevista, não reprovadas
+      const appReprovadaId = await criarCandidatoIsolado('feminino', null, true);
+      for (let i = 0; i < 4; i++) await criarCandidatoIsolado('feminino', null, true);
       for (let i = 0; i < 5; i++) await criarCandidatoIsolado('masculino', null, false);
 
       await adminPool.query(
@@ -278,17 +289,20 @@ describe('AdverseImpactSnapshotService', () => {
       const service = new AdverseImpactSnapshotService();
       await ctx.run(tenantId, (client) => service.recompute(client, tenantId, jobIsoladoId));
 
-      const reprovado = await adminPool.query<{ taxa_selecao: string }>(
-        `SELECT taxa_selecao FROM adverse_impact_snapshot WHERE tenant_id = $1 AND job_id = $2 AND etapa = 'reprovado' AND grupo_demografico = 'genero:feminino'`,
+      const reprovado = await adminPool.query(
+        `SELECT 1 FROM adverse_impact_snapshot WHERE tenant_id = $1 AND job_id = $2 AND etapa = 'reprovado'`,
         [tenantId, jobIsoladoId],
       );
-      expect(Number(reprovado.rows[0].taxa_selecao)).toBeCloseTo(0.2, 4); // 1 de 5 "feminino"
+      expect(reprovado.rows).toEqual([]);
 
+      // Controle positivo: a candidatura reprovada CONTINUA contando
+      // normalmente na etapa 'entrevista' -- só a etapa sintética de
+      // reprovação em si não existe, o resto do funil não é afetado.
       const entrevista = await adminPool.query<{ taxa_selecao: string }>(
         `SELECT taxa_selecao FROM adverse_impact_snapshot WHERE tenant_id = $1 AND job_id = $2 AND etapa = 'entrevista' AND grupo_demografico = 'genero:feminino'`,
         [tenantId, jobIsoladoId],
       );
-      expect(Number(entrevista.rows[0].taxa_selecao)).toBeCloseTo(1, 4); // as 5 "feminino" alcançaram entrevista -- reprovado não exclui de outra etapa
+      expect(Number(entrevista.rows[0].taxa_selecao)).toBeCloseTo(1, 4);
     });
 
     it('dimensão pcd (boolean) gera categorias sim/nao, exclui autodeclaração NULL do agrupamento', async () => {
@@ -348,6 +362,49 @@ describe('AdverseImpactSnapshotService', () => {
         [tenantId, jobIsoladoId],
       );
       expect(depois.rows).toHaveLength(0); // linha obsoleta removida, não presa com valor calculado sobre dado que já não existe
+    });
+
+    it('duas chamadas concorrentes de recompute() na MESMA vaga não deixam linha obsoleta -- lock consultivo serializa', async () => {
+      // Achado de re-revisão adversarial: sem pg_advisory_xact_lock, duas
+      // transações concorrentes podiam se intercalar sob READ COMMITTED
+      // de um jeito que o DELETE de uma nunca via o que a outra ainda não
+      // tinha commitado -- a linha obsoleta sobrevivia à limpeza.
+      // Reproduzido ao vivo pelo revisor com duas conexões reais antes
+      // desta correção. Este teste chama recompute() duas vezes em
+      // paralelo (Promise.all, duas conexões distintas do pool) e afirma
+      // que a contagem final bate exatamente com o esperado -- nem
+      // duplicada, nem com sobra.
+      const job = await adminPool.query<{ id: string }>(
+        `INSERT INTO job (tenant_id, requisition_id, titulo, seo_slug) VALUES ($1, $2, 'Vaga Concorrencia', 'vaga-concorrencia') RETURNING id`,
+        [tenantId, requisitionId],
+      );
+      jobIsoladoId = job.rows[0].id;
+
+      for (let i = 0; i < 5; i++) await criarCandidatoIsolado('feminino', null, i < 2);
+      for (let i = 0; i < 5; i++) await criarCandidatoIsolado('masculino', null, true);
+
+      const service = new AdverseImpactSnapshotService();
+      const ctxA = new TenantContext(appPool);
+      const ctxB = new TenantContext(appPool);
+
+      await Promise.all([
+        ctxA.run(tenantId, (client) => service.recompute(client, tenantId, jobIsoladoId)),
+        ctxB.run(tenantId, (client) => service.recompute(client, tenantId, jobIsoladoId)),
+      ]);
+
+      const total = await adminPool.query(
+        `SELECT count(*) FROM adverse_impact_snapshot WHERE tenant_id = $1 AND job_id = $2`,
+        [tenantId, jobIsoladoId],
+      );
+      // 2 etapas (triagem, entrevista) x 2 categorias de gênero = 4 linhas
+      // -- mesmo resultado de uma chamada só, nenhuma sobra de corrida.
+      expect(Number(total.rows[0].count)).toBe(4);
+
+      const feminino = await adminPool.query<{ taxa_selecao: string }>(
+        `SELECT taxa_selecao FROM adverse_impact_snapshot WHERE tenant_id = $1 AND job_id = $2 AND etapa = 'entrevista' AND grupo_demografico = 'genero:feminino'`,
+        [tenantId, jobIsoladoId],
+      );
+      expect(Number(feminino.rows[0].taxa_selecao)).toBeCloseTo(0.4, 4); // 2 de 5
     });
   });
 });

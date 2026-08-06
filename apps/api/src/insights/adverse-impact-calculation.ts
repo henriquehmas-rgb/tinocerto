@@ -42,8 +42,18 @@ export function calcularRazoes4Quintos(categorias: ContagemCategoria[]): RazaoCa
   const taxas = validas.map((c) => ({ categoria: c.categoria, taxa: c.alcancaram / c.totalGrupo }));
   const maxTaxa = Math.max(...taxas.map((t) => t.taxa));
 
+  // Achado Important de re-revisão adversarial da Task 4: quando NENHUM
+  // grupo declarado alcançou a etapa, não há sinal de disparidade nenhum
+  // para relatar -- pode ser que a etapa ainda não tenha sido alcançada
+  // por ninguém (vaga nova), ou que só candidatos SEM autodeclaração a
+  // tenham alcançado até agora. Devolver razão 0 para todo mundo (versão
+  // anterior) fabricava um alarme de severidade MÁXIMA sem nenhuma
+  // disparidade real entre os grupos -- pior ainda quando só existe UMA
+  // categoria declarada na etapa, que sozinha nunca poderia expressar uma
+  // razão significativa. Lista vazia é a resposta honesta: "sem dado
+  // suficiente para julgar", não "impacto adverso máximo".
   if (maxTaxa === 0) {
-    return taxas.map((t) => ({ categoria: t.categoria, taxaSelecao: 0, razao4Quintos: 0 }));
+    return [];
   }
 
   return taxas.map((t) => ({

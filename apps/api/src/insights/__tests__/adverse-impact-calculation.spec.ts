@@ -37,13 +37,20 @@ describe('calcularRazoes4Quintos', () => {
     expect(resultado).toEqual([]);
   });
 
-  it('ninguém alcançou a etapa (todas as taxas zero) devolve razão 0, não NaN', () => {
+  it('ninguém alcançou a etapa (todas as taxas zero) devolve lista vazia -- sem disparidade real para relatar, não um alarme de severidade máxima', () => {
+    // Achado de re-revisão adversarial da Task 4: a versão anterior desta
+    // função devolvia razão 0 para todo mundo neste caso -- quando o
+    // AdverseImpactSnapshotService passou a alcançar de verdade este
+    // ramo (candidatos sem autodeclaração avançando sozinhos numa
+    // etapa), isso virava um alarme falso de impacto adverso MÁXIMO sem
+    // nenhuma disparidade real entre os grupos declarados. Lista vazia é
+    // a resposta honesta: "sem dado suficiente", não "pior caso
+    // possível". Nunca NaN de qualquer forma.
     const resultado = calcularRazoes4Quintos([
       { categoria: 'a', alcancaram: 0, totalGrupo: 10 },
       { categoria: 'b', alcancaram: 0, totalGrupo: 10 },
     ]);
-    expect(resultado.every((r) => r.taxaSelecao === 0 && r.razao4Quintos === 0)).toBe(true);
-    expect(resultado.some((r) => Number.isNaN(r.razao4Quintos))).toBe(false);
+    expect(resultado).toEqual([]);
   });
 
   it('grupos mistos: um com taxa zero, outro não -- não é tratado como caso especial "ninguém alcançou"', () => {
