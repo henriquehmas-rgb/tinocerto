@@ -58,6 +58,7 @@
     "trust_0005__consent_finalidade_processo_seletivo.sql",
     "assessment_0016__contrabalanca_posicao_valencia.sql",
     "assessment_0017__result_grant_consent_tenant_coerencia.sql",
-    "assessment_0018__consent_tenant_imutavel.sql"
+    "assessment_0018__consent_tenant_imutavel.sql",
+    "hiring_0014__job_habilidades_exigidas.sql"
   ]
 }

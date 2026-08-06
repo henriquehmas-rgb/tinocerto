@@ -11,6 +11,7 @@ export interface CreateJobInput {
   tenantId: string;
   requisitionId: string;
   titulo: string;
+  habilidadesExigidas?: string[];
 }
 
 @Injectable()
@@ -40,11 +41,19 @@ export class JobService {
     const seoSlug = generateSeoSlug(input.titulo, id);
 
     await client.query(
-      `INSERT INTO job (id, tenant_id, requisition_id, titulo, seo_slug) VALUES ($1, $2, $3, $4, $5)`,
-      [id, input.tenantId, input.requisitionId, input.titulo, seoSlug],
+      `INSERT INTO job (id, tenant_id, requisition_id, titulo, seo_slug, habilidades_exigidas) VALUES ($1, $2, $3, $4, $5, $6)`,
+      [id, input.tenantId, input.requisitionId, input.titulo, seoSlug, input.habilidadesExigidas ?? []],
     );
 
     return { id };
+  }
+
+  async declararHabilidadesExigidas(client: PoolClient, id: string, habilidades: string[]): Promise<void> {
+    const current = await client.query(`SELECT 1 FROM job WHERE id = $1`, [id]);
+    if (current.rows.length === 0) {
+      throw new Error(`Vaga ${id} não encontrada`);
+    }
+    await client.query(`UPDATE job SET habilidades_exigidas = $1 WHERE id = $2`, [habilidades, id]);
   }
 
   async publish(client: PoolClient, id: string, canais: string[]): Promise<void> {

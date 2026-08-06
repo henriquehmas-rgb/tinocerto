@@ -1,5 +1,5 @@
 import { Body, Controller, Param, Post, Req, UseGuards } from '@nestjs/common';
-import { ArrayNotEmpty, IsArray, IsNotEmpty, IsString, IsUUID } from 'class-validator';
+import { ArrayNotEmpty, IsArray, IsNotEmpty, IsOptional, IsString, IsUUID } from 'class-validator';
 import { Request } from 'express';
 import { TenantContext } from '../database/tenant-context';
 import { DatabaseService } from '../database/database.service';
@@ -14,6 +14,11 @@ class CreateJobDto {
   @IsString()
   @IsNotEmpty()
   titulo!: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  habilidadesExigidas?: string[];
 }
 
 class PublishJobDto {
@@ -21,6 +26,12 @@ class PublishJobDto {
   @ArrayNotEmpty()
   @IsString({ each: true })
   canais!: string[];
+}
+
+class DeclararHabilidadesExigidasDto {
+  @IsArray()
+  @IsString({ each: true })
+  habilidades!: string[];
 }
 
 interface RequestWithAuthContext extends Request {
@@ -49,6 +60,7 @@ export class JobController {
         tenantId: req.tenantId,
         requisitionId: dto.requisitionId,
         titulo: dto.titulo,
+        habilidadesExigidas: dto.habilidadesExigidas,
       }),
     );
   }
@@ -58,5 +70,18 @@ export class JobController {
   async publish(@Req() req: RequestWithAuthContext, @Param('id') id: string, @Body() dto: PublishJobDto) {
     await this.tenantContext.run(req.tenantId, (client) => this.jobService.publish(client, id, dto.canais));
     return { id, status: 'publicada' };
+  }
+
+  @Post(':id/actions/declarar-habilidades-exigidas')
+  @CerbosCheck('job', 'update')
+  async declararHabilidadesExigidas(
+    @Req() req: RequestWithAuthContext,
+    @Param('id') id: string,
+    @Body() dto: DeclararHabilidadesExigidasDto,
+  ) {
+    await this.tenantContext.run(req.tenantId, (client) =>
+      this.jobService.declararHabilidadesExigidas(client, id, dto.habilidades),
+    );
+    return { id, habilidadesExigidas: dto.habilidades };
   }
 }

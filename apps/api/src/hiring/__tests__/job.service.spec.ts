@@ -120,4 +120,54 @@ describe('JobService', () => {
 
     await adminPool.query('DELETE FROM tenant WHERE id = $1', [outroTenantId]);
   });
+
+  it('cria uma vaga com habilidades_exigidas quando informado, e com array vazio quando omitido', async () => {
+    const ctx = new TenantContext(appPool);
+    const service = new JobService(new RequisitionService());
+
+    const { id: comHabilidades } = await ctx.run(tenantId, (client) =>
+      service.create(client, {
+        tenantId,
+        requisitionId,
+        titulo: 'Vaga Com Skills',
+        habilidadesExigidas: ['TypeScript', 'PostgreSQL'],
+      }),
+    );
+    const { id: semHabilidades } = await ctx.run(tenantId, (client) =>
+      service.create(client, { tenantId, requisitionId, titulo: 'Vaga Sem Skills' }),
+    );
+
+    const rows = await adminPool.query('SELECT id, habilidades_exigidas FROM job WHERE id = ANY($1)', [
+      [comHabilidades, semHabilidades],
+    ]);
+    const porId = Object.fromEntries(rows.rows.map((r) => [r.id, r.habilidades_exigidas]));
+    expect(porId[comHabilidades]).toEqual(['TypeScript', 'PostgreSQL']);
+    expect(porId[semHabilidades]).toEqual([]);
+  });
+
+  it('declararHabilidadesExigidas substitui a lista de skills exigidas de uma vaga existente', async () => {
+    const ctx = new TenantContext(appPool);
+    const service = new JobService(new RequisitionService());
+
+    const { id } = await ctx.run(tenantId, (client) =>
+      service.create(client, { tenantId, requisitionId, titulo: 'Vaga a Editar Skills' }),
+    );
+
+    await ctx.run(tenantId, (client) => service.declararHabilidadesExigidas(client, id, ['React', 'Node.js']));
+
+    const row = await adminPool.query('SELECT habilidades_exigidas FROM job WHERE id = $1', [id]);
+    expect(row.rows[0].habilidades_exigidas).toEqual(['React', 'Node.js']);
+  });
+
+  it('declararHabilidadesExigidas rejeita vaga inexistente', async () => {
+    const ctx = new TenantContext(appPool);
+    const service = new JobService(new RequisitionService());
+
+    await expect(
+      ctx.run(tenantId, (client) =>
+        service.declararHabilidadesExigidas(client, '00000000-0000-0000-0000-000000000000', ['React']),
+      ),
+    ).rejects.toThrow(/não encontrada/);
+  });
+
 });
