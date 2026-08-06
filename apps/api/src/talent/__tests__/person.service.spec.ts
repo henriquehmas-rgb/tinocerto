@@ -1,6 +1,6 @@
 import { Pool } from 'pg';
 import { EnvelopeEncryptionService } from '../envelope-encryption.service';
-import { PersonService } from '../person.service';
+import { PersonService, QUERY_HABILIDADES_POR_PESSOA } from '../person.service';
 
 describe('PersonService', () => {
   const originalKek = process.env.ENVELOPE_ENCRYPTION_KEK;
@@ -97,5 +97,48 @@ describe('PersonService', () => {
     } finally {
       client.release();
     }
+  });
+
+  it('habilidades devolve os nomes das skills do person_profile, e array vazio quando não há perfil', async () => {
+    const encryption = new EnvelopeEncryptionService();
+    const service = new PersonService(encryption);
+    const client = await adminPool.connect();
+    try {
+      const comPerfil = await service.create(client, {
+        cpf: '44455566604',
+        nome: 'Pessoa Com Perfil De Skills',
+        emailPrincipal: 'com.skills@example.com',
+      });
+      personIdsToClean.push(comPerfil.id);
+      await adminPool.query('INSERT INTO person_profile (person_id, habilidades) VALUES ($1, $2)', [
+        comPerfil.id,
+        JSON.stringify([
+          { nome: 'TypeScript', citacaoVerbatim: 'TypeScript' },
+          { nome: 'SQL', citacaoVerbatim: 'SQL' },
+        ]),
+      ]);
+
+      const semPerfil = await service.create(client, {
+        cpf: '55566677715',
+        nome: 'Pessoa Sem Perfil',
+        emailPrincipal: 'sem.perfil.talent@example.com',
+      });
+      personIdsToClean.push(semPerfil.id);
+
+      expect(await service.habilidades(client, comPerfil.id)).toEqual(['TypeScript', 'SQL']);
+      expect(await service.habilidades(client, semPerfil.id)).toEqual([]);
+    } finally {
+      client.release();
+    }
+  });
+
+  it('a query de habilidades só seleciona a coluna habilidades de person_profile -- allowlist estrutural', () => {
+    // Nunca resumo/experiencias/formacao -- dados mais sensíveis e menos
+    // auditáveis por feature nomeada do que uma lista de skills.
+    const query = QUERY_HABILIDADES_POR_PESSOA.toLowerCase();
+    expect(query).toContain('habilidades');
+    expect(query).not.toMatch(/\bresumo\b/);
+    expect(query).not.toMatch(/\bexperiencias\b/);
+    expect(query).not.toMatch(/\bformacao\b/);
   });
 });

@@ -28,6 +28,12 @@ function hashCpf(cpf: string): string {
   return createHash('sha256').update(`${digitsOnly}:${pepper}`).digest('hex');
 }
 
+// Allowlist estrutural: esta query só pode selecionar a coluna
+// `habilidades` de person_profile -- nunca `resumo`/`experiencias`/
+// `formacao` (dados mais sensíveis e menos auditáveis por feature nomeada).
+// Testada em __tests__/person.service.spec.ts.
+export const QUERY_HABILIDADES_POR_PESSOA = `SELECT habilidades FROM person_profile WHERE person_id = $1`;
+
 @Injectable()
 export class PersonService {
   constructor(private readonly encryption: EnvelopeEncryptionService) {}
@@ -65,5 +71,20 @@ export class PersonService {
       emailPrincipal: row.email_principal,
       criadoEm: row.criado_em,
     };
+  }
+
+  /**
+   * Único ponto de leitura de `person_profile.habilidades` do sistema --
+   * qualquer módulo que precise das skills de uma pessoa (ex.: matching/
+   * AdherenceService, Fase 2b) passa por aqui, nunca por SQL direto contra
+   * `person_profile`. Devolve só os nomes (não a citação verbatim/offset --
+   * quem precisar disso lê o perfil completo por outro caminho).
+   */
+  async habilidades(client: PoolClient, personId: string): Promise<string[]> {
+    const result = await client.query<{ habilidades: { nome: string }[] | null }>(QUERY_HABILIDADES_POR_PESSOA, [
+      personId,
+    ]);
+    if (result.rows.length === 0) return [];
+    return (result.rows[0].habilidades ?? []).map((h) => h.nome);
   }
 }

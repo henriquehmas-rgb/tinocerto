@@ -1,5 +1,7 @@
 import { Pool } from 'pg';
 import { TenantContext } from '../../database/tenant-context';
+import { EnvelopeEncryptionService } from '../../talent/envelope-encryption.service';
+import { PersonService } from '../../talent/person.service';
 import { AdherenceService, QUERY_ADERENCIA_POR_CANDIDATURA } from '../adherence.service';
 
 describe('AdherenceService', () => {
@@ -17,6 +19,10 @@ describe('AdherenceService', () => {
   let applicationComPerfilId: string;
   let applicationSemPerfilId: string;
   let applicationVagaSemRequisitoId: string;
+
+  function buildService(): AdherenceService {
+    return new AdherenceService(new PersonService(new EnvelopeEncryptionService()));
+  }
 
   beforeAll(async () => {
     const t = await adminPool.query<{ id: string }>(
@@ -102,7 +108,7 @@ describe('AdherenceService', () => {
 
   it('calcula o score de uma candidatura com perfil batendo skills exigidas', async () => {
     const ctx = new TenantContext(appPool);
-    const service = new AdherenceService();
+    const service = buildService();
 
     const resultado = await ctx.run(tenantId, (client) => service.porCandidatura(client, applicationComPerfilId));
 
@@ -116,7 +122,7 @@ describe('AdherenceService', () => {
 
   it('candidato sem person_profile (currículo ainda não processado) devolve score 0, não erro', async () => {
     const ctx = new TenantContext(appPool);
-    const service = new AdherenceService();
+    const service = buildService();
 
     const resultado = await ctx.run(tenantId, (client) => service.porCandidatura(client, applicationSemPerfilId));
 
@@ -130,7 +136,7 @@ describe('AdherenceService', () => {
 
   it('vaga sem requisito declarado devolve score null', async () => {
     const ctx = new TenantContext(appPool);
-    const service = new AdherenceService();
+    const service = buildService();
 
     const resultado = await ctx.run(tenantId, (client) =>
       service.porCandidatura(client, applicationVagaSemRequisitoId),
@@ -141,7 +147,7 @@ describe('AdherenceService', () => {
 
   it('candidatura inexistente devolve null', async () => {
     const ctx = new TenantContext(appPool);
-    const service = new AdherenceService();
+    const service = buildService();
 
     const resultado = await ctx.run(tenantId, (client) =>
       service.porCandidatura(client, '00000000-0000-0000-0000-000000000000'),
@@ -152,7 +158,7 @@ describe('AdherenceService', () => {
 
   it('candidatura de outro tenant é invisível via RLS -- devolve null, não vaza dado cross-tenant', async () => {
     const ctx = new TenantContext(appPool);
-    const service = new AdherenceService();
+    const service = buildService();
 
     const resultado = await ctx.run(outroTenantId, (client) =>
       service.porCandidatura(client, applicationComPerfilId),
@@ -161,36 +167,18 @@ describe('AdherenceService', () => {
     expect(resultado).toBeNull();
   });
 
-  it('allowlist estrutural: a query só seleciona habilidades_exigidas e habilidades -- nenhuma outra coluna de job/person/person_profile', () => {
-    // Guarda contra regressão: se alguém expandir esta query para trazer
-    // nome/email/cpf/data_nascimento/etc. no futuro, este teste falha antes
-    // de virar um vazamento de feature proibida. Mesmo padrão de "asserção
-    // que não pode passar vazia" do faking-vulnerability.spec.ts (Fase 2a).
-    const colunasPermitidas = ['habilidades_exigidas', 'habilidades'];
-    const colunasProibidas = [
-      'cep',
-      'idade',
-      'data_nascimento',
-      'genero',
-      'nome',
-      'email_principal',
-      'foto',
-      'estado_civil',
-      'nacionalidade',
-      'instituicao',
-      'ano_formatura',
-      'cpf_hash',
-      'cpf_encriptado',
-      'resumo',
-      'experiencias',
-      'formacao',
-    ];
+  it('allowlist estrutural: a query só seleciona habilidades_exigidas (feature) e person_id (chave de junção) -- nenhuma outra coluna de job/application', () => {
+    // Guarda contra regressão real, não só contra as colunas proibidas que
+    // eu lembrei de listar hoje: em vez de checar "essas 16 colunas não
+    // aparecem" (blocklist, que deixa passar qualquer coluna sensível fora
+    // da lista -- ex. telefone, raça/cor, deficiência -- sem ser prevista),
+    // este teste afirma SUBCONJUNTO nas duas direções: toda coluna
+    // permitida está na query, e toda coluna DA QUERY está na lista
+    // permitida. Isso rejeita QUALQUER coluna fora das duas, não só as que
+    // eu antecipei -- é a diferença entre allowlist de verdade e blocklist
+    // disfarçado (achado de revisão adversarial da Task 3).
+    const colunasPermitidas = ['habilidades_exigidas', 'person_id'];
 
-    // Tokeniza em vez de checar substring: "habilidades" CONTÉM "idade"
-    // como substring ("habil-idade-s"), então um check de substring daria
-    // falso positivo na própria coluna permitida. Tokens exatos (separados
-    // por vírgula/espaço, com o alias de tabela removido) evitam essa
-    // classe de colisão para qualquer nome de coluna futuro.
     const selectClause = QUERY_ADERENCIA_POR_CANDIDATURA.match(/SELECT([\s\S]*?)FROM/i)?.[1] ?? '';
     const colunasNaQuery = new Set(
       selectClause
@@ -202,8 +190,17 @@ describe('AdherenceService', () => {
     for (const permitida of colunasPermitidas) {
       expect(colunasNaQuery.has(permitida)).toBe(true);
     }
-    for (const proibida of colunasProibidas) {
-      expect(colunasNaQuery.has(proibida)).toBe(false);
+    for (const coluna of colunasNaQuery) {
+      expect(colunasPermitidas).toContain(coluna);
     }
+  });
+
+  it('a leitura de habilidades do candidato passa por PersonService -- nunca SQL direto contra person_profile neste módulo', () => {
+    // Achado de revisão adversarial da Task 3: a versão anterior desta
+    // query fazia LEFT JOIN direto em person_profile, contrariando o
+    // design (§2) de que só PersonService lê aquela tabela. Este teste
+    // fixa a correção -- falha se alguém reintroduzir "person_profile" no
+    // texto da query desta classe.
+    expect(QUERY_ADERENCIA_POR_CANDIDATURA.toLowerCase()).not.toContain('person_profile');
   });
 });
