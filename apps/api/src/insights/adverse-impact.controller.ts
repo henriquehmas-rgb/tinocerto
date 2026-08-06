@@ -12,6 +12,17 @@ interface RequestWithAuthContext extends Request {
   userRoles: string[];
 }
 
+// Achado de revisão adversarial da Task 6: `[]` (não 404) para vaga sem
+// snapshot só é seguro porque quem de fato impede vazamento cross-tenant
+// aqui é o RLS FORCE+RESTRICTIVE de adverse_impact_snapshot (via
+// TenantContext.run), não o Cerbos. `CerbosGuard.canActivate` monta
+// `resource.attr.tenant_id` a partir do próprio `req.tenantId` do
+// requisitante -- nunca de um lookup real do tenant dono do `:id` da rota
+// (mesmo achado já registrado em `application.controller.ts`, Task 12 da
+// Fase 2a) -- então a regra `bloqueio-tenant-diferente` do Cerbos nunca
+// dispara para este recurso. Se o caminho de leitura algum dia deixar de
+// passar por `TenantContext.run`, essa proteção desaparece silenciosamente
+// -- registrado aqui para não ser confundido com "Cerbos já bloqueia".
 @Controller('v1/jobs')
 @UseGuards(CerbosGuard)
 export class AdverseImpactController {
