@@ -90,6 +90,7 @@
     "platform_0008__service_account_crp_link.sql",
     "platform_0009__api_key_rotation.sql",
     "public_0003__tenant_slug_resolution_filters_status.sql",
-    "platform_0010__idempotency_key_pronto.sql"
+    "platform_0010__idempotency_key_pronto.sql",
+    "identity_0009__staff_credentials_and_refresh_token.sql"
   ]
 }
