@@ -7,15 +7,18 @@ import { ApiKeyService } from './api-key.service';
 import { ApiKeyGuard } from './api-key.guard';
 import { IdempotencyService } from './idempotency.service';
 import { PlatformApplicationController } from './platform-application.controller';
+import { WebhookEndpointController } from './webhooks/webhook-endpoint.controller';
+import { WebhookEndpointService } from './webhooks/webhook-endpoint.service';
 
 @Module({
   imports: [DatabaseModule, HiringModule],
-  controllers: [PlatformApplicationController],
+  controllers: [PlatformApplicationController, WebhookEndpointController],
   providers: [
     { provide: ApiKeyService, useFactory: (db: DatabaseService) => new ApiKeyService(db.pool), inject: [DatabaseService] },
     ApiKeyGuard,
     IdempotencyService,
     OutboxPublishingScheduler,
+    WebhookEndpointService,
   ],
   exports: [ApiKeyService, IdempotencyService],
 })
