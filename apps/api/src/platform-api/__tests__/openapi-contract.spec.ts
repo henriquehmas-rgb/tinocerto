@@ -8,6 +8,8 @@ import { JobController } from '../../hiring/job.controller';
 import { OfferController } from '../../hiring/offer.controller';
 import { DecisionController } from '../../hiring/decision.controller';
 import { PlatformApplicationController } from '../platform-application.controller';
+import { DeveloperApiKeyController } from '../developer-api-key.controller';
+import { PlatformPsychReportController } from '../platform-psych-report.controller';
 
 const OPENAPI_ROOT = path.resolve(__dirname, '../../../openapi');
 
@@ -95,6 +97,13 @@ describe('Documento OpenAPI -- nenhum contrato fictício', () => {
       ...routesOf(JobController),
       ...routesOf(OfferController),
       ...routesOf(DecisionController),
+      // Fase 4d: as duas peças novas da Plataforma API (emissão
+      // self-service de chave + psych-report gated por CRP) também
+      // documentadas em openapi.yaml -- mesma lógica de escopo do
+      // comentário acima ("+ Plataforma API"), agora completada com os
+      // controllers que esta fatia introduziu.
+      ...routesOf(DeveloperApiKeyController),
+      ...routesOf(PlatformPsychReportController),
     ]);
 
     for (const documented of documentedPaths) {
