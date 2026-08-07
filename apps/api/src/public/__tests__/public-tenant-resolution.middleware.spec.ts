@@ -61,7 +61,7 @@ describe('PublicTenantResolutionMiddleware', () => {
 
   it('lança NotFoundException para tenant existente porém inativo (mesma resposta que slug inexistente)', async () => {
     const inactive = await adminPool.query<{ id: string; slug: string }>(
-      `INSERT INTO tenant (razao_social, cnpj, slug, status) VALUES ('Empresa Public MW Inativa', '00000000000041', 'empresa-public-mw-inativa-test', 'inativo') RETURNING id, slug`,
+      `INSERT INTO tenant (razao_social, cnpj, slug, status) VALUES ('Empresa Public MW Inativa', '00000000000205', 'empresa-public-mw-inativa-test', 'inativo') RETURNING id, slug`,
     );
     const inactiveTenantId = inactive.rows[0].id;
     const inactiveSlug = inactive.rows[0].slug;
