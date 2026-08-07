@@ -39,6 +39,67 @@ describe('verificarCitacoesResumoCandidato', () => {
     ).toThrow(CitacaoNaoVerificavelError);
   });
 
+  // Achado da revisão consolidada: bug real reproduzido ao vivo antes deste
+  // fix -- uma frase INTEIRAMENTE fabricada, citando só a palavra "de"
+  // (presente em "...de janeiro de 2020..." do trecho real), passava pela
+  // verificação sem lançar nada. As duas checagens abaixo (piso de tamanho
+  // e sobreposição lexical) fecham exatamente essa lacuna.
+  it('rejeita citação curta e genérica que "prova" uma frase totalmente fabricada e desconexa', () => {
+    expect(() =>
+      verificarCitacoesResumoCandidato(
+        [
+          {
+            texto: 'Foi Diretor Executivo de uma multinacional por 15 anos e liderou fusão bilionária.',
+            fonteId: 'experiencia:0',
+            citacaoVerbatim: 'de',
+          },
+        ],
+        trechos,
+      ),
+    ).toThrow(CitacaoNaoVerificavelError);
+  });
+
+  it('rejeita citação longa o bastante mas cujo conteúdo não sustenta a alegação feita -- citação real, porém irrelevante à frase', () => {
+    expect(() =>
+      verificarCitacoesResumoCandidato(
+        [
+          {
+            texto: 'Foi Diretor Executivo de uma multinacional por quinze anos.',
+            fonteId: 'experiencia:0',
+            // citação real e >= 15 chars, mas nenhuma palavra significativa
+            // da FRASE aparece na citação -- deve falhar na sobreposição.
+            citacaoVerbatim: 'Empresa Exemplo Ltda',
+          },
+        ],
+        trechos,
+      ),
+    ).toThrow(CitacaoNaoVerificavelError);
+  });
+
+  it('aceita citação mais detalhada que a frase resume -- frase pode omitir parte do que a citação diz, contanto que o que ela ALEGA esteja lá', () => {
+    expect(() =>
+      verificarCitacoesResumoCandidato(
+        [{ texto: 'O candidato foi Analista Pleno.', fonteId: 'experiencia:0', citacaoVerbatim: 'Analista Pleno na Empresa Exemplo Ltda' }],
+        trechos,
+      ),
+    ).not.toThrow();
+  });
+
+  it('aceita citação substancial cujo conteúdo de fato sustenta a frase gerada -- caso positivo real', () => {
+    expect(() =>
+      verificarCitacoesResumoCandidato(
+        [
+          {
+            texto: 'Atuou como Analista Pleno na Empresa Exemplo entre 2020 e 2023.',
+            fonteId: 'experiencia:0',
+            citacaoVerbatim: 'Analista Pleno na Empresa Exemplo Ltda',
+          },
+        ],
+        trechos,
+      ),
+    ).not.toThrow();
+  });
+
   it('rejeita mesmo que outras frases da lista sejam válidas -- nunca descarta em silêncio só a ruim', () => {
     expect(() =>
       verificarCitacoesResumoCandidato(

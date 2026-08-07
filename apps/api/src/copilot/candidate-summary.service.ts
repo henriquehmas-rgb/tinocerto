@@ -97,7 +97,7 @@ export class CandidateSummaryService {
       const FraseSchema = z.object({
         texto: z.string().min(1).max(400),
         fonteId: z.enum(fonteIds),
-        citacaoVerbatim: z.string().min(1),
+        citacaoVerbatim: z.string().min(15),
       });
       const ResumoCandidatoSchema = z.object({ frases: z.array(FraseSchema).min(1).max(6) });
 
