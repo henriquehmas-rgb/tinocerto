@@ -5,6 +5,8 @@ import { HiringModule } from '../hiring/hiring.module';
 import { ApiKeyService } from './api-key.service';
 import { ApiKeyGuard } from './api-key.guard';
 import { IdempotencyService } from './idempotency.service';
+import { RateLimitService } from './rate-limit.service';
+import { RateLimitGuard } from './rate-limit.guard';
 import { PlatformApplicationController } from './platform-application.controller';
 
 @Module({
@@ -14,6 +16,8 @@ import { PlatformApplicationController } from './platform-application.controller
     { provide: ApiKeyService, useFactory: (db: DatabaseService) => new ApiKeyService(db.pool), inject: [DatabaseService] },
     ApiKeyGuard,
     IdempotencyService,
+    RateLimitService,
+    RateLimitGuard,
   ],
   exports: [ApiKeyService, IdempotencyService],
 })

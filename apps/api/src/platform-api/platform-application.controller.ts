@@ -7,6 +7,7 @@ import { ApplicationService } from '../hiring/application.service';
 import { CerbosGuard } from '../authz/cerbos.guard';
 import { CerbosCheck } from '../authz/cerbos-check.decorator';
 import { ApiKeyGuard, RequestWithApiKeyContext } from './api-key.guard';
+import { RateLimitGuard } from './rate-limit.guard';
 import { PlatformApiExceptionFilter } from './platform-api-exception.filter';
 import { decodeCursor, encodeCursor } from './cursor-pagination';
 
@@ -36,7 +37,7 @@ class ListApplicationsQuery {
 // spec §1): esta classe só registra GET /v1/applications (sem :id), que
 // ApplicationController nunca registrou.
 @Controller('v1/applications')
-@UseGuards(ApiKeyGuard, CerbosGuard)
+@UseGuards(ApiKeyGuard, RateLimitGuard, CerbosGuard)
 @UseFilters(PlatformApiExceptionFilter)
 export class PlatformApplicationController {
   private readonly tenantContext: TenantContext;
