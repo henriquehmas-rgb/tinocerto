@@ -132,11 +132,11 @@ describe('ApiKeyService -- rotação, revogação, listagem (Fase 4d)', () => {
 
     expect(rotacionada.rawKey).not.toBe(original.rawKey);
     const resolvidaNova = await apiKeyService.authenticate(rotacionada.rawKey);
-    expect(resolvidaNova).toEqual({ tenantId, serviceAccountId, escopos: ['applications:read'] });
+    expect(resolvidaNova).toEqual({ apiKeyId: rotacionada.id, tenantId, serviceAccountId, escopos: ['applications:read'] });
 
     // Antiga AINDA autentica -- overlap de verdade, não revogação imediata.
     const resolvidaAntiga = await apiKeyService.authenticate(original.rawKey);
-    expect(resolvidaAntiga).toEqual({ tenantId, serviceAccountId, escopos: ['applications:read'] });
+    expect(resolvidaAntiga).toEqual({ apiKeyId: original.id, tenantId, serviceAccountId, escopos: ['applications:read'] });
   });
 
   it('chave com expira_em no passado para de autenticar (fim da janela de overlap)', async () => {
