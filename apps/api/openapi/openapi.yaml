@@ -66,3 +66,11 @@ paths:
     $ref: './paths/offers.yaml#/decline'
   /v1/decisions/revisoes-pendentes:
     $ref: './paths/decisions.yaml#/revisoesPendentes'
+  /v1/developer/api-keys:
+    $ref: './paths/developer.yaml#/root'
+  /v1/developer/api-keys/{id}:
+    $ref: './paths/developer.yaml#/revokeApiKey'
+  /v1/developer/api-keys/{id}/actions/rotate:
+    $ref: './paths/developer.yaml#/rotateApiKey'
+  /v1/assessment-results/{id}/psych-report:
+    $ref: './paths/psych-report.yaml#/getPsychReport'

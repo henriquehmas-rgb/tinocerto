@@ -47,6 +47,22 @@ export class AppModule implements NestModule {
         // Exato -- rota nova, sem risco de colidir com nenhuma outra
         // (nenhum controller usa o prefixo v1/assessment-results).
         { path: 'v1/assessment-results/:id/psych-report', method: RequestMethod.GET },
+        // Wildcard -- documentação pública, sem estado de tenant, mesmo
+        // padrão já usado para v1/public/(.*). Nenhum outro controller usa
+        // estes dois prefixos, sem risco de exclusão indevida.
+        //
+        // DESVIO DO PLANO (achado ao verificar manualmente, Task 6 Step 5):
+        // o wildcard 'v1/developer/docs/(.*)' exige uma '/' seguida de
+        // mais caracteres depois de 'docs' -- não casa a própria rota
+        // GET /v1/developer/docs (sem segmento adicional), que é
+        // exatamente o path de DeveloperDocsController. Sem a entrada
+        // exata abaixo, a página HTML em si devolvia 401
+        // 'x-tenant-id ausente' enquanto os assets sob
+        // /v1/developer/docs/assets/... (que TÊM segmento adicional)
+        // funcionavam normalmente -- confirmado ao vivo com curl.
+        'v1/developer/docs',
+        'v1/developer/docs/(.*)',
+        'v1/developer/openapi-spec/(.*)',
       )
       .forRoutes('*');
   }
