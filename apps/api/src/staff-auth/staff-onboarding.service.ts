@@ -12,6 +12,18 @@ export interface OnboardInput {
   senhaAdmin: string;
 }
 
+// Mesmo padrão usado em src/hiring/offer.service.ts e
+// src/hiring/application-started-work.service.ts: checa o code + constraint
+// específicos do erro do pg em vez de deixar o 23505 cru vazar pro caller.
+function isUniqueViolation(err: unknown, constraintName: string): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    (err as { code?: unknown }).code === '23505' &&
+    (err as { constraint?: unknown }).constraint === constraintName
+  );
+}
+
 @Injectable()
 export class StaffOnboardingService {
   constructor(
@@ -39,12 +51,27 @@ export class StaffOnboardingService {
         throw new ConflictException('Este CNPJ já tem um tenant cadastrado');
       }
 
-      await client.query(`INSERT INTO tenant (id, razao_social, cnpj, slug) VALUES ($1, $2, $3, $4)`, [
-        tenantId,
-        input.nomeEmpresa,
-        input.cnpj,
-        slug,
-      ]);
+      // O SELECT acima não basta sozinho: duas chamadas concorrentes de
+      // onboard() com o mesmo CNPJ (double-click no formulário público de
+      // self-service, ou retry de cliente instável) podem ambas passar pelo
+      // pre-check antes de qualquer uma commitar. Nesse caso o Postgres
+      // serializa no próprio INSERT -- a segunda transação bloqueia até a
+      // primeira commitar/dar rollback e então recebe 23505 na
+      // tenant_cnpj_key. Sem este catch, esse erro cru do pg vazaria pro
+      // caller em vez do ConflictException que o pre-check já usa.
+      try {
+        await client.query(`INSERT INTO tenant (id, razao_social, cnpj, slug) VALUES ($1, $2, $3, $4)`, [
+          tenantId,
+          input.nomeEmpresa,
+          input.cnpj,
+          slug,
+        ]);
+      } catch (err) {
+        if (isUniqueViolation(err, 'tenant_cnpj_key')) {
+          throw new ConflictException('Este CNPJ já tem um tenant cadastrado');
+        }
+        throw err;
+      }
 
       const senhaHash = await this.passwordService.hash(input.senhaAdmin);
       const userResult = await client.query<{ id: string }>(
