@@ -86,6 +86,8 @@
     "hiring_0018__application_tenant_criado_id_index.sql",
     "platform_0005__outbox_event_tenant_id_unique.sql",
     "platform_0006__webhook_endpoint.sql",
-    "platform_0007__webhook_delivery.sql"
+    "platform_0007__webhook_delivery.sql",
+    "platform_0008__service_account_crp_link.sql",
+    "platform_0009__api_key_rotation.sql"
   ]
 }

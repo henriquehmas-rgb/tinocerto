@@ -1,0 +1,32 @@
+# apps/api/openapi/paths/psych-report.yaml
+getPsychReport:
+  get:
+    operationId: getPsychReport
+    summary: Laudo íntegro (dado psicométrico bruto) -- exige service account com CRP vinculado
+    x-tinocerto-auth: api-key
+    security:
+      - apiKey: ['psych:report.read']
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+        description: id de assessment_result.
+    responses:
+      '200':
+        description: theta/se_theta/escore_bruto/protocolo_confianca/calibracao_versao.
+      '401':
+        description: Credenciais ausentes ou inválidas.
+        content:
+          application/json:
+            schema: { $ref: '../components/schemas/common.yaml#/schemas/Problem' }
+      '403':
+        description: escopo-insuficiente (sem psych:report.read) ou crp-nao-vinculado-ou-inativo (RFC 9457).
+        content:
+          application/json:
+            schema: { $ref: '../components/schemas/common.yaml#/schemas/Problem' }
+      '404':
+        description: Sem grant de consentimento vivo para este tenant.
+        content:
+          application/json:
+            schema: { $ref: '../components/schemas/common.yaml#/schemas/Problem' }

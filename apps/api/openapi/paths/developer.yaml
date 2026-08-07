@@ -1,0 +1,57 @@
+# apps/api/openapi/paths/developer.yaml
+#
+# root -- UM PathItem só com get+post, mesmo padrão de applications.yaml
+# (root: { get: ..., post: ... }): dois métodos do MESMO path vivem sob a
+# MESMA âncora, nunca duas âncoras concorrendo pelo mesmo path no arquivo
+# raiz (OpenAPI 3.1 não faz merge de dois $ref de PathItem inteiro no
+# mesmo path).
+root:
+  post:
+    operationId: createDeveloperApiKey
+    summary: Emite uma chave de API self-service (sessão, admin_tenant)
+    x-tinocerto-auth: session-only
+    responses:
+      '201':
+        description: Chave criada -- raw_key só aparece nesta resposta, nunca mais recuperável.
+      '403':
+        description: Papel sem permissão (só admin_tenant emite chave).
+        content:
+          application/json:
+            schema: { $ref: '../components/schemas/common.yaml#/schemas/Problem' }
+  get:
+    operationId: listDeveloperApiKeys
+    summary: Lista as chaves do tenant (nunca reexpõe o segredo, só prefixo)
+    x-tinocerto-auth: session-only
+    responses:
+      '200':
+        description: Lista de chaves.
+
+revokeApiKey:
+  delete:
+    operationId: revokeDeveloperApiKey
+    summary: Revoga uma chave
+    x-tinocerto-auth: session-only
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    responses:
+      '200':
+        description: Chave revogada.
+      '404':
+        description: Chave não encontrada ou já revogada.
+
+rotateApiKey:
+  post:
+    operationId: rotateDeveloperApiKey
+    summary: Rotaciona uma chave com overlap de 7 dias (padrão Stripe)
+    x-tinocerto-auth: session-only
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    responses:
+      '201':
+        description: Nova chave emitida; a antiga continua válida por 7 dias (expira_em).

@@ -101,3 +101,19 @@ resourcePolicy:
       condition:
         match:
           expr: "request.aux_data.jwt.breakglass_ticket_id != ''"
+
+    # Fase 4d: service account com escopo psych:report.read na chave de
+    # API. As duas regras DENY universais ACIMA (bloqueio-sem-crp-ativo,
+    # bloqueio-tenant-diferente) continuam valendo para esta regra também
+    # -- deny-overrides do Cerbos garante isso sem precisar repetir a
+    # condição aqui. Sem vínculo em service_account_crp_link,
+    # LaudoPsicologicoAccessGuard nunca populou crp_ativo/crp_numero/
+    # crp_uf no principal -- bloqueio-sem-crp-ativo já dispara antes desta
+    # regra sequer importar.
+    - name: "acesso-laudo-via-service-account"
+      actions: ["read"]
+      effect: EFFECT_ALLOW
+      roles: ["service_account"]
+      condition:
+        match:
+          expr: "'psych:report.read' in request.principal.attr.scopes"

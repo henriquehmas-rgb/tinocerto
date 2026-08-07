@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { createHash, randomBytes, timingSafeEqual } from 'crypto';
 import { Pool, PoolClient } from 'pg';
 
@@ -22,6 +22,17 @@ export interface AuthenticatedApiKey {
   tenantId: string;
   serviceAccountId: string;
   escopos: string[];
+}
+
+export interface ApiKeySummary {
+  id: string;
+  serviceAccountId: string;
+  nomeServiceAccount: string;
+  prefixo: string;
+  escopos: string[];
+  criadoEm: Date;
+  revogadoEm: Date | null;
+  expiraEm: Date | null;
 }
 
 // Mesmo algoritmo de person.service.ts (SHA-256 + pepper), pepper PRÓPRIO
@@ -69,7 +80,7 @@ export class ApiKeyService {
   // conhecido neste ponto, é justamente o que esta chamada resolve. Usa a
   // conexão crua app_runtime da pool (sem app.tenant_id setado);
   // resolve_api_key_by_prefix é SECURITY DEFINER e bypassa RLS de forma
-  // estreita (só as 6 colunas do handshake).
+  // estreita (só as 7 colunas do handshake, agora incluindo expira_em).
   async authenticate(rawKey: string): Promise<AuthenticatedApiKey | null> {
     if (!rawKey || rawKey.length < KEY_PREFIX_LENGTH) return null;
     const prefixo = rawKey.slice(0, KEY_PREFIX_LENGTH);
@@ -81,16 +92,95 @@ export class ApiKeyService {
       hash: string;
       escopos: string[];
       revogado_em: Date | null;
-    }>(`SELECT id, tenant_id, service_account_id, hash, escopos, revogado_em FROM resolve_api_key_by_prefix($1)`, [
-      prefixo,
-    ]);
+      expira_em: Date | null;
+    }>(
+      `SELECT id, tenant_id, service_account_id, hash, escopos, revogado_em, expira_em FROM resolve_api_key_by_prefix($1)`,
+      [prefixo],
+    );
 
     const row = result.rows[0];
-    if (!row || row.revogado_em) return null;
+    // Mesma mensagem de erro para chave expirada, revogada, inexistente ou
+    // hash divergente -- não dá oráculo de "qual dos quatro motivos foi".
+    const expirada = row?.expira_em !== null && row?.expira_em !== undefined && row.expira_em <= new Date();
+    if (!row || row.revogado_em || expirada) return null;
 
     const presentedHash = hashApiKey(rawKey);
     if (!safeCompare(presentedHash, row.hash)) return null;
 
     return { apiKeyId: row.id, tenantId: row.tenant_id, serviceAccountId: row.service_account_id, escopos: row.escopos };
+  }
+
+  // Emite uma chave NOVA sob o MESMO service_account_id/escopos da antiga
+  // -- preserva o vínculo de CRP (Task 1), que é por service_account_id,
+  // através de toda rotação futura. Marca a antiga com expira_em = now() +
+  // overlapDays -- ela continua autenticando até lá (overlap de verdade),
+  // sem revogado_em (que continua significando "revogada AGORA", nunca
+  // "vai expirar depois" -- os dois campos não se confundem).
+  async rotate(
+    client: PoolClient,
+    input: { tenantId: string; oldApiKeyId: string; overlapDays?: number },
+  ): Promise<IssuedApiKey> {
+    const overlapDays = input.overlapDays ?? 7;
+    const old = await client.query<{ service_account_id: string; escopos: string[] }>(
+      `SELECT service_account_id, escopos FROM api_key WHERE id = $1 AND tenant_id = $2 AND revogado_em IS NULL`,
+      [input.oldApiKeyId, input.tenantId],
+    );
+    if (old.rows.length === 0) {
+      throw new NotFoundException('Chave de API não encontrada ou já revogada');
+    }
+
+    const novo = await this.issue(client, {
+      tenantId: input.tenantId,
+      serviceAccountId: old.rows[0].service_account_id,
+      escopos: old.rows[0].escopos,
+    });
+
+    await client.query(
+      `UPDATE api_key SET expira_em = now() + ($3 || ' days')::interval WHERE id = $1 AND tenant_id = $2`,
+      [input.oldApiKeyId, input.tenantId, overlapDays],
+    );
+
+    return novo;
+  }
+
+  async revoke(client: PoolClient, input: { tenantId: string; apiKeyId: string }): Promise<void> {
+    const result = await client.query(
+      `UPDATE api_key SET revogado_em = now() WHERE id = $1 AND tenant_id = $2 AND revogado_em IS NULL`,
+      [input.apiKeyId, input.tenantId],
+    );
+    if (result.rowCount === 0) {
+      throw new NotFoundException('Chave de API não encontrada ou já revogada');
+    }
+  }
+
+  async listByTenant(client: PoolClient, tenantId: string): Promise<ApiKeySummary[]> {
+    const result = await client.query<{
+      id: string;
+      service_account_id: string;
+      nome_service_account: string;
+      prefixo: string;
+      escopos: string[];
+      criado_em: Date;
+      revogado_em: Date | null;
+      expira_em: Date | null;
+    }>(
+      `SELECT k.id, k.service_account_id, sa.nome AS nome_service_account, k.prefixo, k.escopos,
+              k.criado_em, k.revogado_em, k.expira_em
+         FROM api_key k
+         JOIN service_account sa ON sa.id = k.service_account_id
+        WHERE k.tenant_id = $1
+        ORDER BY k.criado_em DESC`,
+      [tenantId],
+    );
+    return result.rows.map((row) => ({
+      id: row.id,
+      serviceAccountId: row.service_account_id,
+      nomeServiceAccount: row.nome_service_account,
+      prefixo: row.prefixo,
+      escopos: row.escopos,
+      criadoEm: row.criado_em,
+      revogadoEm: row.revogado_em,
+      expiraEm: row.expira_em,
+    }));
   }
 }
