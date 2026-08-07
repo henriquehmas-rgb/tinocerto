@@ -1,7 +1,6 @@
 import { Controller, Get, Query, Req, UseFilters, UseGuards } from '@nestjs/common';
 import { IsInt, IsOptional, IsString, IsUUID, Max, Min } from 'class-validator';
 import { Type } from 'class-transformer';
-import { Request } from 'express';
 import { TenantContext } from '../database/tenant-context';
 import { DatabaseService } from '../database/database.service';
 import { ApplicationService } from '../hiring/application.service';
