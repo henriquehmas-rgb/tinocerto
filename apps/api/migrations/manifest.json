@@ -83,6 +83,9 @@
     "resume_0006__candidate_application_summary_tenant_id.sql",
     "platform_0003__api_key.sql",
     "platform_0004__idempotency_key.sql",
-    "hiring_0018__application_tenant_criado_id_index.sql"
+    "hiring_0018__application_tenant_criado_id_index.sql",
+    "platform_0005__outbox_event_tenant_id_unique.sql",
+    "platform_0006__webhook_endpoint.sql",
+    "platform_0007__webhook_delivery.sql"
   ]
 }

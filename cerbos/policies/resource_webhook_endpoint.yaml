@@ -1,0 +1,31 @@
+# /docker/tinocerto/cerbos/policies/resource_webhook_endpoint.yaml
+#
+# Único papel autorizado: admin_tenant -- mesmo tratamento de
+# service_account (04-api-e-webhooks.md §1: "somente admin_tenant"), o
+# recurso mais análogo por natureza (credencial de integração). Nenhum
+# recrutador/gestor_vaga gerencia webhook endpoint.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  resource: "webhook_endpoint"
+  version: "default"
+  scope: ""
+  rules:
+    - name: "bloqueio-tenant-diferente"
+      actions: ["*"]
+      effect: EFFECT_DENY
+      roles: ["*"]
+      condition:
+        match:
+          expr: >
+            !(has(request.principal.attr.tenant_id) &&
+              has(request.resource.attr.tenant_id) &&
+              type(request.principal.attr.tenant_id) == string &&
+              type(request.resource.attr.tenant_id) == string &&
+              size(request.principal.attr.tenant_id) > 0 &&
+              size(request.resource.attr.tenant_id) > 0 &&
+              request.principal.attr.tenant_id == request.resource.attr.tenant_id)
+
+    - name: "gestao-webhook-endpoint"
+      actions: ["create", "read", "update", "deactivate", "rotate-secret", "read-deliveries", "resend-delivery"]
+      effect: EFFECT_ALLOW
+      roles: ["admin_tenant"]
