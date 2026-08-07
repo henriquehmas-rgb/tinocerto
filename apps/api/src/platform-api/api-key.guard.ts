@@ -8,6 +8,7 @@ import { PlatformApiProblem } from './platform-api-problem';
 export const CURRENT_API_VERSION = '2026-08';
 
 export interface RequestWithApiKeyContext extends Request {
+  apiKeyId: string; // NOVO
   tenantId: string;
   userId: string;
   userRoles: string[];
@@ -43,6 +44,7 @@ export class ApiKeyGuard implements CanActivate {
       throw new PlatformApiProblem(401, 'credenciais-invalidas', 'Credenciais inválidas', 'Chave de API inválida, revogada ou inexistente.');
     }
 
+    req.apiKeyId = resolved.apiKeyId; // NOVO
     req.tenantId = resolved.tenantId;
     req.userId = resolved.serviceAccountId;
     req.userRoles = ['service_account'];

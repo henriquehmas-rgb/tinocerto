@@ -23,6 +23,7 @@ describe('ApiKeyGuard', () => {
 
   let tenantId: string;
   let serviceAccountId: string;
+  let apiKeyId: string;
   let rawKey: string;
 
   beforeAll(async () => {
@@ -43,6 +44,7 @@ describe('ApiKeyGuard', () => {
       apiKeyService.issue(client, { tenantId, serviceAccountId, escopos: ['applications:read'] }),
     );
     rawKey = issued.rawKey;
+    apiKeyId = issued.id;
   });
 
   afterAll(async () => {
@@ -64,13 +66,14 @@ describe('ApiKeyGuard', () => {
     await expect(guard.canActivate(context)).rejects.toBeInstanceOf(PlatformApiProblem);
   });
 
-  it('chave válida -- popula tenantId/userId/userRoles/apiKeyScopes e devolve true', async () => {
+  it('chave válida -- popula tenantId/userId/userRoles/apiKeyScopes/apiKeyId e devolve true', async () => {
     const { context, req } = fakeContext({ authorization: `Bearer ${rawKey}` });
     await expect(guard.canActivate(context)).resolves.toBe(true);
     expect(req.tenantId).toBe(tenantId);
     expect(req.userId).toBe(serviceAccountId);
     expect(req.userRoles).toEqual(['service_account']);
     expect(req.apiKeyScopes).toEqual(['applications:read']);
+    expect(req.apiKeyId).toBe(apiKeyId);
   });
 
   it('chave inválida -- 401', async () => {
