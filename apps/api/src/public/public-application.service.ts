@@ -61,15 +61,23 @@ export class PublicApplicationService {
       touchpointId: touchpoint.id,
     });
 
-    // [Achado do gate consolidado da Fase 1b, Task 18] candidate_application_summary
-    // é global de propósito (sem tenant_id, mesma classe de person/resume_upload,
-    // ver resume_0005__candidate_application_summary_drop_tenant_id.sql) -- não
-    // grava tenant_id aqui.
+    // [Fase 3d] candidate_application_summary.tenant_id volta ao schema
+    // (resume_0006__candidate_application_summary_tenant_id.sql) -- mesmo
+    // achado do gate consolidado da Fase 1b (Task 18) que removeu a coluna
+    // por não ter consumidor, revertido porque agora existe um consumidor
+    // real: CandidateEvaluationViewService ("Como fomos avaliados")
+    // precisa resolver o tenant de uma application_id sem tenant conhecido
+    // a priori antes de abrir um TenantContext sobre decision/offer/
+    // pipeline_stage_transition (todas tenant-scoped com RLS FORCE). Este
+    // é o caminho SÍNCRONO de candidatura pública (o outro caminho,
+    // assíncrono via outbox, é candidate-application-summary.consumer.ts,
+    // corrigido no mesmo commit da Fase 3d) -- os dois precisam gravar
+    // tenant_id, não só um deles.
     await client.query(
-      `INSERT INTO candidate_application_summary (person_id, application_id, job_titulo, etapa_funil)
-       VALUES ($1, $2, (SELECT titulo FROM job WHERE id = $3), 'triagem')
+      `INSERT INTO candidate_application_summary (person_id, application_id, job_titulo, etapa_funil, tenant_id)
+       VALUES ($1, $2, (SELECT titulo FROM job WHERE id = $3), 'triagem', $4)
        ON CONFLICT (application_id) DO NOTHING`,
-      [input.personId, application.id, input.jobId],
+      [input.personId, application.id, input.jobId, input.tenantId],
     );
 
     // Reaproveita ApplicationCustomFieldResponseService (Fase 1a Task 15)

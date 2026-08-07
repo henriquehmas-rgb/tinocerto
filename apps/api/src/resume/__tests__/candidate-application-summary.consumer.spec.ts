@@ -91,6 +91,29 @@ describe('CandidateApplicationSummaryConsumer.handleEvent', () => {
     expect(row.rows[0].etapa_funil).toBe('entrevista');
   });
 
+  // [Fase 3d] tenant_id volta ao schema (resume_0006) -- antes desta fase,
+  // event.tenantId chegava até o consumer só para resolver a stream do
+  // outbox e era descartado nesta escrita. Prova que a mudança do Step 2
+  // (candidate-application-summary.consumer.ts) realmente grava o valor.
+  it('application.created grava tenant_id em candidate_application_summary igual ao tenantId do evento', async () => {
+    const outroApplicationId = '11111111-2222-3333-4444-555555555597';
+    consumer = new CandidateApplicationSummaryConsumer(adminPool);
+
+    await consumer.handleEvent({
+      eventType: 'application.created',
+      tenantId,
+      payload: { application_id: outroApplicationId, person_id: personId, job_id: jobId },
+    });
+
+    const row = await adminPool.query<{ tenant_id: string }>(
+      'SELECT tenant_id FROM candidate_application_summary WHERE application_id = $1',
+      [outroApplicationId],
+    );
+    expect(row.rows[0].tenant_id).toBe(tenantId);
+
+    await adminPool.query('DELETE FROM candidate_application_summary WHERE application_id = $1', [outroApplicationId]);
+  });
+
   it('marca reprovado_em em application.rejected', async () => {
     consumer = new CandidateApplicationSummaryConsumer(adminPool);
 

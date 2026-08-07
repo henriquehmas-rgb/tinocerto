@@ -76,6 +76,10 @@
     "interview_0008__interview_schedule_calendar_event.sql",
     "copilot_0001__job_description_suggestion.sql",
     "copilot_0002__candidate_summary_draft.sql",
-    "copilot_0003__interview_question_suggestion.sql"
+    "copilot_0003__interview_question_suggestion.sql",
+    "hiring_0015__offer.sql",
+    "hiring_0016__application_started_work.sql",
+    "hiring_0017__decision_revisao_solicitada_em.sql",
+    "resume_0006__candidate_application_summary_tenant_id.sql"
   ]
 }

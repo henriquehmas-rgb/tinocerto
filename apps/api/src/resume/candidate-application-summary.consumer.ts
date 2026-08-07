@@ -186,16 +186,16 @@ export class CandidateApplicationSummaryConsumer implements OnModuleInit, OnModu
         // título via subquery a partir de job_id, em vez de confiar num
         // campo que o publisher de eventos nunca escreveu.
         //
-        // [Achado do gate consolidado da Fase 1b, Task 18] candidate_application_summary
-        // é global de propósito (sem tenant_id, mesma classe de person/resume_upload,
-        // ver resume_0005__candidate_application_summary_drop_tenant_id.sql) -- não
-        // grava tenant_id aqui, mesmo que o DomainEvent carregue tenantId (usado só
-        // para resolver a stream do outbox, não para esta escrita).
+        // [Fase 3d] tenant_id volta a ser gravado (resume_0006) -- agora
+        // tem consumidor real (CandidateEvaluationViewService precisa
+        // resolver o tenant de uma application_id sem tenant conhecido a
+        // priori). event.tenantId já chegava até aqui só para resolver a
+        // stream do outbox; passa a ser usado também para esta escrita.
         await this.pool.query(
-          `INSERT INTO candidate_application_summary (person_id, application_id, job_titulo, etapa_funil)
-           VALUES ($1, $2, (SELECT titulo FROM job WHERE id = $3), 'triagem')
+          `INSERT INTO candidate_application_summary (person_id, application_id, job_titulo, etapa_funil, tenant_id)
+           VALUES ($1, $2, (SELECT titulo FROM job WHERE id = $3), 'triagem', $4)
            ON CONFLICT (application_id) DO NOTHING`,
-          [event.payload.person_id, event.payload.application_id, event.payload.job_id],
+          [event.payload.person_id, event.payload.application_id, event.payload.job_id, event.tenantId],
         );
         break;
       case 'application.stage_changed':

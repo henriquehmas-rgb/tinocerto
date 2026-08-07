@@ -1,6 +1,6 @@
 apiVersion: api.cerbos.dev/v1
 resourcePolicy:
-  resource: "application"
+  resource: "offer"
   version: "default"
   scope: ""
   rules:
@@ -19,10 +19,7 @@ resourcePolicy:
               size(request.resource.attr.tenant_id) > 0 &&
               request.principal.attr.tenant_id == request.resource.attr.tenant_id)
 
-    - name: "gestao-candidatura"
-      actions: ["read", "move-stage", "reject", "resumo_candidato", "aplicar_resumo_candidato", "mark-started-work"]
+    - name: "gestao-oferta"
+      actions: ["extend", "read", "accept", "decline"]
       effect: EFFECT_ALLOW
       roles: ["admin_tenant", "recrutador", "gestor_vaga"]
-
-    # create fica de fora do ALLOW acima de propósito -- ver nota original
-    # da Fase 1b sobre o fluxo público de candidatura.

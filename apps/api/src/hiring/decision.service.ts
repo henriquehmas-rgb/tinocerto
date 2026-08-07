@@ -11,6 +11,19 @@ export interface RecordDecisionInput {
   decidoPor: string;
 }
 
+export interface RevisaoPendenteRow {
+  id: string;
+  applicationId: string;
+  tipo: 'aprovacao' | 'reprovacao' | 'oferta';
+  motivoCodigo: string | null;
+  decididoPor: string;
+  revisaoSolicitadaEm: string | null;
+  criadoEm: string;
+}
+
+export class DecisaoNaoEncontradaError extends Error {}
+export class RevisaoJaSolicitadaError extends Error {}
+
 @Injectable()
 export class DecisionService {
   constructor(private readonly outbox: OutboxService) {}
@@ -46,5 +59,63 @@ export class DecisionService {
     }
 
     return { id };
+  }
+
+  // Aciona-se pelo lado do candidato (candidate-auth) -- é um direito do
+  // titular (LGPD art. 20 / GDPR art. 22(3)), não uma ferramenta
+  // operacional de recrutador. Restrito a tipo = 'reprovacao': uma oferta
+  // recusada ou uma aprovação não são decisões adversas automatizadas
+  // contra o candidato, não fazem sentido nesta fila. Ver design spec
+  // §Decisões fechadas, item 5.
+  async solicitarRevisao(client: PoolClient, tenantId: string, decisionId: string): Promise<{ id: string }> {
+    const result = await client.query<{ id: string }>(
+      `UPDATE decision
+          SET revisao_solicitada = true, revisao_solicitada_em = now()
+        WHERE tenant_id = $1 AND id = $2 AND tipo = 'reprovacao' AND revisao_solicitada = false
+        RETURNING id`,
+      [tenantId, decisionId],
+    );
+    if (result.rows.length > 0) {
+      return { id: result.rows[0].id };
+    }
+
+    // Distingue "não existe/não é reprovação" de "já solicitada" com uma
+    // segunda consulta de diagnóstico -- mesma disciplina de erro
+    // específico já usada em OfferService.
+    const existing = await client.query<{ id: string; tipo: string; revisao_solicitada: boolean }>(
+      `SELECT id, tipo, revisao_solicitada FROM decision WHERE tenant_id = $1 AND id = $2`,
+      [tenantId, decisionId],
+    );
+    if (existing.rows.length === 0 || existing.rows[0].tipo !== 'reprovacao') {
+      throw new DecisaoNaoEncontradaError(`decisão de reprovação ${decisionId} não encontrada`);
+    }
+    throw new RevisaoJaSolicitadaError(`revisão já foi solicitada para a decisão ${decisionId}`);
+  }
+
+  async listarRevisoesPendentes(client: PoolClient, tenantId: string): Promise<RevisaoPendenteRow[]> {
+    const result = await client.query<{
+      id: string;
+      application_id: string;
+      tipo: 'aprovacao' | 'reprovacao' | 'oferta';
+      motivo_codigo: string | null;
+      decidido_por: string;
+      revisao_solicitada_em: string | null;
+      criado_em: string;
+    }>(
+      `SELECT id, application_id, tipo, motivo_codigo, decidido_por, revisao_solicitada_em, criado_em
+         FROM decision
+        WHERE tenant_id = $1 AND revisao_solicitada = true
+        ORDER BY revisao_solicitada_em ASC NULLS LAST`,
+      [tenantId],
+    );
+    return result.rows.map((row) => ({
+      id: row.id,
+      applicationId: row.application_id,
+      tipo: row.tipo,
+      motivoCodigo: row.motivo_codigo,
+      decididoPor: row.decidido_por,
+      revisaoSolicitadaEm: row.revisao_solicitada_em,
+      criadoEm: row.criado_em,
+    }));
   }
 }
