@@ -157,9 +157,7 @@ describe('Gate consolidado — Fase 3a (Model Router + Interview)', () => {
         guideService,
         { pool: appPool } as DatabaseService,
       );
-      const draft1 = await tenantContext.run(tenantId, (client) =>
-        barsPrimarioSaudavel.gerarRascunho(client, { tenantId: tenantId!, jobId: job.rows[0].id, tituloVaga: 'x', textoRequisicao: 'y' }),
-      );
+      const draft1 = await barsPrimarioSaudavel.gerarRascunho({ tenantId: tenantId!, jobId: job.rows[0].id, tituloVaga: 'x', textoRequisicao: 'y' });
       expect(draft1.id).toBeDefined();
 
       // Rodada 2: MESMO código de BarsGenerationService -- só o adapter
@@ -169,9 +167,7 @@ describe('Gate consolidado — Fase 3a (Model Router + Interview)', () => {
         guideService,
         { pool: appPool } as DatabaseService,
       );
-      const draft2 = await tenantContext.run(tenantId, (client) =>
-        barsComFallback.gerarRascunho(client, { tenantId: tenantId!, jobId: job.rows[0].id, tituloVaga: 'x', textoRequisicao: 'y' }),
-      );
+      const draft2 = await barsComFallback.gerarRascunho({ tenantId: tenantId!, jobId: job.rows[0].id, tituloVaga: 'x', textoRequisicao: 'y' });
       expect(draft2.id).toBeDefined();
 
       const providerLog = await tenantContext.run(tenantId, (client) =>

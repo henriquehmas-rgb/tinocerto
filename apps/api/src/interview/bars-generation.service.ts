@@ -1,5 +1,4 @@
 import { Injectable } from '@nestjs/common';
-import { PoolClient } from 'pg';
 import { z } from 'zod';
 import { ModelRouterService } from '../llm-router/model-router.service';
 import { InterviewGuideService } from './interview-guide.service';
@@ -50,14 +49,22 @@ export class BarsGenerationService {
     this.tenantContext = new TenantContext(databaseService.pool);
   }
 
-  async gerarRascunho(client: PoolClient, input: GerarRascunhoInput): Promise<{ id: string }> {
-    // [Fix 2 da revisão final] Transação PRÓPRIA, separada da transação do
-    // chamador (que só cobre criarRascunho) -- garante que o log da
-    // chamada de IA sobrevive mesmo que criarRascunho falhe depois (ex.:
-    // job_id inválido). Mesmo princípio já usado em
-    // resume-parsing.consumer.ts: sem isso, uma chamada de IA real e
-    // faturada some do llm_call_log se a escrita seguinte, na MESMA
-    // transação, for revertida por qualquer motivo alheio à chamada em si.
+  // [Fix da revisão de segunda passagem pós-66fc25a] As DUAS transações
+  // abaixo são estritamente SEQUENCIAIS, nunca aninhadas: a primeira
+  // (chamada de IA) faz BEGIN...COMMIT e libera seu client de volta à pool
+  // -- tudo isso já aconteceu quando o `await` abaixo retorna -- antes da
+  // segunda (criarRascunho) sequer chamar `pool.connect()`. Nenhum client
+  // de uma permanece "em escopo" enquanto a outra está aberta. Isso evita
+  // o deadlock da pool inteira sob carga concorrente: antes, o controller
+  // segurava um client durante toda a requisição e este método abria um
+  // SEGUNDO client (mesma pool) aninhado dentro do primeiro, preso até 60s
+  // (timeout do LLM) -- com poucas conexões concorrentes, a pool inteira
+  // (default do pg: max 10) travava esperando por clients que nunca seriam
+  // liberados. Mesmo princípio de log sobrevivendo a rollback do Fix 2 da
+  // revisão final (66fc25a) é preservado: as duas transações continuam
+  // separadas, então uma falha em criarRascunho não reverte o log da
+  // chamada de IA já commitada.
+  async gerarRascunho(input: GerarRascunhoInput): Promise<{ id: string }> {
     const output = await this.tenantContext.run(input.tenantId, (llmClient) =>
       this.modelRouter.complete({
         client: llmClient,
@@ -79,11 +86,13 @@ export class BarsGenerationService {
     // de devolver -- ver model-router.service.ts. O `.parse()` explícito
     // que existia aqui era um workaround para a mesma lacuna, redundante
     // agora que o router garante a invariante para qualquer consumidor.
-    return this.guideService.criarRascunho(client, {
-      tenantId: input.tenantId,
-      jobId: input.jobId,
-      criadoPor: input.criadoPor,
-      competencias: output.data.competencias,
-    });
+    return this.tenantContext.run(input.tenantId, (client) =>
+      this.guideService.criarRascunho(client, {
+        tenantId: input.tenantId,
+        jobId: input.jobId,
+        criadoPor: input.criadoPor,
+        competencias: output.data.competencias,
+      }),
+    );
   }
 }

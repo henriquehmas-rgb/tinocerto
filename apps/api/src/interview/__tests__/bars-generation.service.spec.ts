@@ -89,14 +89,12 @@ describe('BarsGenerationService', () => {
     // escopo neste arquivo.
     const barsService = new BarsGenerationService(router, guideService, { pool: appPool } as DatabaseService);
 
-    const { id: guideId } = await tenantContext.run(tenantId, (client) =>
-      barsService.gerarRascunho(client, {
-        tenantId,
-        jobId,
-        tituloVaga: 'Analista de Operações',
-        textoRequisicao: 'Vaga para analista pleno, foco em processos e comunicação com times internos.',
-      }),
-    );
+    const { id: guideId } = await barsService.gerarRascunho({
+      tenantId,
+      jobId,
+      tituloVaga: 'Analista de Operações',
+      textoRequisicao: 'Vaga para analista pleno, foco em processos e comunicação com times internos.',
+    });
 
     const guide = await tenantContext.run(tenantId, (client) =>
       client.query(`SELECT status, competencias_rascunho FROM interview_guide WHERE tenant_id = $1 AND id = $2`, [tenantId, guideId]),
@@ -126,14 +124,12 @@ describe('BarsGenerationService', () => {
     const jobIdInexistente = '00000000-0000-0000-0000-000000000000';
 
     await expect(
-      tenantContext.run(tenantId, (client) =>
-        barsService.gerarRascunho(client, {
-          tenantId,
-          jobId: jobIdInexistente,
-          tituloVaga: 'Vaga Inexistente',
-          textoRequisicao: 'Requisição qualquer.',
-        }),
-      ),
+      barsService.gerarRascunho({
+        tenantId,
+        jobId: jobIdInexistente,
+        tituloVaga: 'Vaga Inexistente',
+        textoRequisicao: 'Requisição qualquer.',
+      }),
     ).rejects.toThrow();
 
     const log = await tenantContext.run(tenantId, (client) =>
@@ -161,14 +157,12 @@ describe('BarsGenerationService', () => {
     const guideService = new InterviewGuideService(new CompetencyService());
     const barsService = new BarsGenerationService(router, guideService, { pool: appPool } as DatabaseService);
 
-    const { id: guideId } = await tenantContext.run(tenantId, (client) =>
-      barsService.gerarRascunho(client, {
-        tenantId,
-        jobId,
-        tituloVaga: 'Analista de Operações',
-        textoRequisicao: 'Vaga para analista pleno, foco em processos e comunicação com times internos.',
-      }),
-    );
+    const { id: guideId } = await barsService.gerarRascunho({
+      tenantId,
+      jobId,
+      tituloVaga: 'Analista de Operações',
+      textoRequisicao: 'Vaga para analista pleno, foco em processos e comunicação com times internos.',
+    });
 
     const guide = await tenantContext.run(tenantId, (client) =>
       client.query<{ competencias_rascunho: { ancoras: unknown[] }[] }>(

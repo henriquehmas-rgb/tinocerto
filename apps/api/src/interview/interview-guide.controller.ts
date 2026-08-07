@@ -123,16 +123,14 @@ export class InterviewGuideController {
   @CerbosCheck('interview_guide', 'create')
   async gerar(@Req() req: RequestWithAuthContext, @Body() dto: GerarRascunhoDto) {
     try {
-      return await this.tenantContext.run(req.tenantId, (client) =>
-        this.barsGenerationService.gerarRascunho(client, {
-          tenantId: req.tenantId,
-          jobId: dto.jobId,
-          tituloVaga: dto.tituloVaga,
-          textoRequisicao: dto.textoRequisicao,
-          criadoPor: req.userId,
-          actorId: req.userId,
-        }),
-      );
+      return await this.barsGenerationService.gerarRascunho({
+        tenantId: req.tenantId,
+        jobId: dto.jobId,
+        tituloVaga: dto.tituloVaga,
+        textoRequisicao: dto.textoRequisicao,
+        criadoPor: req.userId,
+        actorId: req.userId,
+      });
     } catch (err) {
       // [Minor 3 da revisão final] Os dois fornecedores de LLM fora do ar
       // é uma indisponibilidade temporária do lado de fora (503), não um
