@@ -7,6 +7,7 @@ import { DatabaseService } from '../database/database.service';
 import { CerbosGuard } from '../authz/cerbos.guard';
 import { CerbosCheck } from '../authz/cerbos-check.decorator';
 import { InterviewGuideService } from './interview-guide.service';
+import { BarsGenerationService } from './bars-generation.service';
 
 class AncoraDto {
   @IsNotEmpty() nivel!: number;
@@ -27,6 +28,12 @@ class EditarRascunhoDto {
   @IsArray() @ValidateNested({ each: true }) @Type(() => CompetenciaDto) competencias!: CompetenciaDto[];
 }
 
+class GerarRascunhoDto {
+  @IsString() @IsNotEmpty() jobId!: string;
+  @IsString() @IsNotEmpty() tituloVaga!: string;
+  @IsString() @IsNotEmpty() textoRequisicao!: string;
+}
+
 interface RequestWithAuthContext extends Request {
   tenantId: string;
   userId: string;
@@ -41,6 +48,7 @@ export class InterviewGuideController {
   constructor(
     private readonly guideService: InterviewGuideService,
     databaseService: DatabaseService,
+    private readonly barsGenerationService: BarsGenerationService,
   ) {
     this.tenantContext = new TenantContext(databaseService.pool);
   }
@@ -77,5 +85,20 @@ export class InterviewGuideController {
     } catch (err) {
       throw new NotFoundException((err as Error).message);
     }
+  }
+
+  @Post('generate')
+  @CerbosCheck('interview_guide', 'create')
+  async gerar(@Req() req: RequestWithAuthContext, @Body() dto: GerarRascunhoDto) {
+    return this.tenantContext.run(req.tenantId, (client) =>
+      this.barsGenerationService.gerarRascunho(client, {
+        tenantId: req.tenantId,
+        jobId: dto.jobId,
+        tituloVaga: dto.tituloVaga,
+        textoRequisicao: dto.textoRequisicao,
+        criadoPor: req.userId,
+        actorId: req.userId,
+      }),
+    );
   }
 }
