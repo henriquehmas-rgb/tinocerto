@@ -44,6 +44,9 @@ export class AppModule implements NestModule {
         // sessão existente) é um path template diferente e continua
         // coberto pelo middleware sem mudança de comportamento.
         { path: 'v1/applications', method: RequestMethod.GET },
+        // Exato -- rota nova, sem risco de colidir com nenhuma outra
+        // (nenhum controller usa o prefixo v1/assessment-results).
+        { path: 'v1/assessment-results/:id/psych-report', method: RequestMethod.GET },
       )
       .forRoutes('*');
   }
