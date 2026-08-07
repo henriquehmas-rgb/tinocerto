@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PoolClient } from 'pg';
 import { classificarTermosClinicos } from './clinical-vocabulary-linter';
+import { RESULT_GRANT_LIVE_EXISTS } from '../../talent/result-grant-predicate';
 
 export const RODAPE_OBRIGATORIO =
   'Este relatório descreve preferências de comportamento no trabalho e não constitui avaliação psicológica.';
@@ -142,19 +143,7 @@ export class ReportService {
       `SELECT r.id, r.theta, r.se_theta, r.protocolo_confianca, r.calibracao_versao
          FROM assessment_result r
         WHERE r.id = $1
-          AND EXISTS (
-            SELECT 1
-              FROM result_grant g
-              JOIN consent c ON c.id = g.consent_id
-             WHERE g.assessment_result_id = r.id
-               AND g.tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid
-               AND g.revoked_at IS NULL
-               AND (g.expires_at IS NULL OR g.expires_at > now())
-               AND c.revoked_at IS NULL
-               AND (c.ttl_meses IS NULL
-                    OR c.granted_at + (c.ttl_meses * interval '1 month') > now())
-               AND (c.tenant_id IS NULL OR c.tenant_id = g.tenant_id)
-          )`,
+          AND ${RESULT_GRANT_LIVE_EXISTS}`,
       [assessmentResultId],
     );
     if (rows.length === 0) {
