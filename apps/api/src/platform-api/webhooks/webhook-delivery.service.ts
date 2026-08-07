@@ -30,6 +30,19 @@ export interface AttemptDeliveryInput {
   agendarProximaTentativa?: boolean;
 }
 
+// Prefixo de exibição -- NUNCA parte da chave HMAC. generateWebhookSecret()
+// (webhook-secret-cipher.ts) devolve 'whsec_' + aleatoriedade, seguindo a
+// convenção Svix/Stripe de prefixar credenciais para reconhecimento humano/
+// scanner de segredo -- mas a RECEITA DE VERIFICAÇÃO documentada em
+// 04-api-e-webhooks.md §4 (replicada literalmente no gate consolidado,
+// Task 9) usa `$whsec_sem_prefixo` como chave do HMAC, isto é, o prefixo é
+// removido ANTES de assinar/verificar. Ver WEBHOOK_SECRET_PREFIX abaixo.
+const WEBHOOK_SECRET_PREFIX = 'whsec_';
+
+function stripWebhookSecretPrefix(secret: string): string {
+  return secret.startsWith(WEBHOOK_SECRET_PREFIX) ? secret.slice(WEBHOOK_SECRET_PREFIX.length) : secret;
+}
+
 @Injectable()
 export class WebhookDeliveryService {
   async attemptDelivery(client: PoolClient, input: AttemptDeliveryInput): Promise<{ sucesso: boolean; statusHttp: number | null }> {
@@ -42,7 +55,19 @@ export class WebhookDeliveryService {
       payload: input.event.payload,
     });
     const timestamp = Math.floor(Date.now() / 1000);
-    const secrets = [input.webhookEndpoint.segredoAtualCifrado, ...input.webhookEndpoint.segredosHistoricoCifrados].map(decryptWebhookSecret);
+    // Bug real encontrado e corrigido pelo gate consolidado (Task 9, prova
+    // openssl): decryptWebhookSecret devolve o texto original completo,
+    // SEMPRE com o prefixo 'whsec_' (é assim que generateWebhookSecret o
+    // gerou) -- sem stripWebhookSecretPrefix aqui, toda assinatura seria
+    // calculada com a chave ERRADA (string completa, prefixo incluído),
+    // divergindo para sempre da chave que a receita documentada (e
+    // qualquer receptor real seguindo 04-api-e-webhooks.md §4) usaria para
+    // verificar. Confirmado ao vivo: o gate falhou byte a byte antes desta
+    // correção, com a assinatura do app e a do openssl completamente
+    // diferentes (prova de chave diferente, não de formatação/encoding).
+    const secrets = [input.webhookEndpoint.segredoAtualCifrado, ...input.webhookEndpoint.segredosHistoricoCifrados]
+      .map(decryptWebhookSecret)
+      .map(stripWebhookSecretPrefix);
     const assinatura = signWebhookBody(secrets, input.event.id, timestamp, rawBody);
 
     const startedAt = Date.now();
