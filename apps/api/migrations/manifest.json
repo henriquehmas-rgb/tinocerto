@@ -71,6 +71,7 @@
     "interview_0003__interview_guide_version.sql",
     "interview_0004__interview_schedule.sql",
     "interview_0005__interview_evaluator.sql",
-    "interview_0006__scorecard.sql"
+    "interview_0006__scorecard.sql",
+    "hiring_0015__offer.sql"
   ]
 }
