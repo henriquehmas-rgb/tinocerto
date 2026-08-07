@@ -221,4 +221,44 @@ describe('CandidateApplicationSummaryConsumer.handleEvent', () => {
       expect(Number((pendentes as unknown[])[0])).toBe(0); // ACKed, não preso como pendente
     });
   });
+
+  // Achado da investigação pós-Fase 4a: onModuleDestroy fechava só a
+  // conexão Redis e retornava, mas o `for (;;)` de consumeLoop() continuava
+  // rodando pra sempre (fire-and-forget desde onModuleInit), agora batendo
+  // num socket/pool já fechados a cada volta -- é por isso que testes que
+  // sobem o AppModule inteiro (fase-4a-gate.spec.ts, route-topology.spec.ts)
+  // levavam ~10min pra o processo Jest encerrar sozinho, sem --forceExit.
+  // Este teste sobrescreve listTenantIds() (privado, via cast, mesmo padrão
+  // já usado neste arquivo para processBatch) para devolver sempre `[]`,
+  // forçando o laço a cair no ramo "sem tenants -> dorme 5s" de forma
+  // determinística, sem depender do estado real de tenants no Postgres
+  // compartilhado entre specs.
+  describe('ciclo de vida (onModuleInit/onModuleDestroy)', () => {
+    it('onModuleDestroy interrompe o laço de consumo (não fica preso nos 5s de sleep) e o laço realmente para de rodar', async () => {
+      const c = new CandidateApplicationSummaryConsumer(adminPool);
+      const listTenantIdsMock = jest.fn().mockResolvedValue([]);
+      (c as unknown as { listTenantIds: () => Promise<string[]> }).listTenantIds = listTenantIdsMock;
+
+      await c.onModuleInit();
+      // Deixa a 1ª volta do laço rodar até cair no sleepUnlessShuttingDown(5000).
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(listTenantIdsMock).toHaveBeenCalled();
+
+      const inicio = Date.now();
+      await c.onModuleDestroy();
+      const duracaoMs = Date.now() - inicio;
+      // Sem o `wakeUp` interrompendo o setTimeout da pausa "sem tenants",
+      // isto ficaria preso até os 5000ms inteiros do sleep (ou, no bug
+      // original sem shuttingDown nenhum, para sempre). Com o fix, resolve
+      // quase na hora.
+      expect(duracaoMs).toBeLessThan(500);
+
+      // Prova que o laço realmente parou (não que onModuleDestroy só
+      // "correu na frente" dele): espera mais que a pausa normal de 5s e
+      // confirma que listTenantIds não foi chamado de novo.
+      const chamadasLogoAposDestroy = listTenantIdsMock.mock.calls.length;
+      await new Promise((resolve) => setTimeout(resolve, 5200));
+      expect(listTenantIdsMock.mock.calls.length).toBe(chamadasLogoAposDestroy);
+    }, 10000);
+  });
 });

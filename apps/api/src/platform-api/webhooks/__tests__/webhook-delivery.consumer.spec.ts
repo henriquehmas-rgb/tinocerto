@@ -97,4 +97,29 @@ describe('WebhookDeliveryConsumer', () => {
     const entregasInativo = await adminPool.query(`SELECT * FROM webhook_delivery WHERE webhook_endpoint_id = $1`, [inativoRow.id]);
     expect(entregasInativo.rows).toHaveLength(0);
   }, 20_000);
+
+  // Mesmo padrao de teste ja usado em resume-parsing.consumer.spec.ts /
+  // adverse-impact.consumer.spec.ts / candidate-application-summary.consumer.spec.ts
+  // para provar o fix de ciclo de vida (onModuleDestroy interrompe o laco
+  // de verdade, sem esperar o sleep de 5s inteiro).
+  describe('ciclo de vida (onModuleInit/onModuleDestroy)', () => {
+    it('onModuleDestroy interrompe o laço de consumo (não fica preso nos 5s de sleep) e o laço realmente para de rodar', async () => {
+      const c = new WebhookDeliveryConsumer(new WebhookDeliveryService(), databaseService);
+      const listTenantIdsMock = jest.fn().mockResolvedValue([]);
+      (c as unknown as { listTenantIds: () => Promise<string[]> }).listTenantIds = listTenantIdsMock;
+
+      await c.onModuleInit();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(listTenantIdsMock).toHaveBeenCalled();
+
+      const inicio = Date.now();
+      await c.onModuleDestroy();
+      const duracaoMs = Date.now() - inicio;
+      expect(duracaoMs).toBeLessThan(500);
+
+      const chamadasLogoAposDestroy = listTenantIdsMock.mock.calls.length;
+      await new Promise((resolve) => setTimeout(resolve, 5200));
+      expect(listTenantIdsMock.mock.calls.length).toBe(chamadasLogoAposDestroy);
+    }, 10000);
+  });
 });

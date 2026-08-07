@@ -23,10 +23,21 @@ const CONSUMER_NAME = 'webhook-delivery-consumer-1';
 @Injectable()
 export class WebhookDeliveryConsumer implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(WebhookDeliveryConsumer.name);
-  private destroyed = false;
   private readonly redis: Redis;
   private readonly pool: Pool;
   private readonly tenantContext: TenantContext;
+  // [Investigacao pos-Fase 4a, mesmo padrao aplicado aos outros 3
+  // consumers de outbox] consumeLoop() e fire-and-forget desde
+  // onModuleInit -- sem sinalizar o laco, onModuleDestroy fechava so a
+  // conexao Redis e retornava, mas o laco continuava rodando, batendo em
+  // pool/redis ja fechados a cada volta, para sempre. shuttingDown e
+  // checado no topo do laco e entre tenants; wakeUp interrompe o
+  // setTimeout de espera na hora; onModuleDestroy espera consumeLoopPromise
+  // antes de fechar o redis, para nao fechar o socket com uma volta do
+  // laco ainda em andamento.
+  private shuttingDown = false;
+  private wakeUp?: () => void;
+  private consumeLoopPromise?: Promise<void>;
 
   constructor(
     private readonly webhookDeliveryService: WebhookDeliveryService,
@@ -38,11 +49,13 @@ export class WebhookDeliveryConsumer implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleInit(): Promise<void> {
-    void this.consumeLoop();
+    this.consumeLoopPromise = this.consumeLoop();
   }
 
   async onModuleDestroy(): Promise<void> {
-    this.destroyed = true;
+    this.shuttingDown = true;
+    this.wakeUp?.();
+    await this.consumeLoopPromise;
     await this.redis.quit();
   }
 
@@ -51,23 +64,35 @@ export class WebhookDeliveryConsumer implements OnModuleInit, OnModuleDestroy {
   }
 
   private async consumeLoop(): Promise<void> {
-    for (;;) {
-      if (this.destroyed) return;
+    while (!this.shuttingDown) {
       try {
         const tenantIds = await this.listTenantIds();
         for (const tenantId of tenantIds) {
+          if (this.shuttingDown) break;
           await this.ensureConsumerGroup(tenantId);
           await this.processBatch(tenantId, '0');
           await this.processBatch(tenantId, '>');
         }
         if (tenantIds.length === 0) {
-          await new Promise((resolve) => setTimeout(resolve, 5000));
+          await this.sleepUnlessShuttingDown(5000);
         }
       } catch (err) {
         this.logger.error('Falha numa volta do laço de consumo -- seguindo para a próxima', err as Error);
-        await new Promise((resolve) => setTimeout(resolve, 5000));
+        await this.sleepUnlessShuttingDown(5000);
       }
     }
+  }
+
+  private async sleepUnlessShuttingDown(ms: number): Promise<void> {
+    if (this.shuttingDown) return;
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, ms);
+      this.wakeUp = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+    });
+    this.wakeUp = undefined;
   }
 
   private async listTenantIds(): Promise<string[]> {

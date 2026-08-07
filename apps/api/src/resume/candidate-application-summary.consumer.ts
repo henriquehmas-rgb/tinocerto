@@ -15,19 +15,30 @@ export interface DomainEvent {
 @Injectable()
 export class CandidateApplicationSummaryConsumer implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(CandidateApplicationSummaryConsumer.name);
-  // Sinaliza para consumeLoop() parar de tentar usar pool/redis já
-  // encerrados por onModuleDestroy() -- sem isso, o laco for(;;) segue
-  // tentando indefinidamente (retry a cada 5s) contra uma pool já fechada
-  // pelo teste que instanciou este consumer diretamente, nunca convergindo.
-  private destroyed = false;
   private readonly redis: Redis;
+  // [Investigação pós-Fase 4a] consumeLoop() é `for (;;)` fire-and-forget
+  // (onModuleInit chama `void this.consumeLoop()`) -- sem sinalizar o laço,
+  // onModuleDestroy fechava só a conexão Redis e retornava, mas o laço
+  // continuava rodando, agora batendo em `this.redis`/`this.pool` já
+  // fechados a cada volta ("Connection is closed" / "Cannot use a pool
+  // after calling end on the pool"), pra sempre, a cada ~5s. Isso não
+  // quebra nenhuma asserção (o erro só é logado), mas mantém o event loop
+  // do Node vivo -- em testes que sobem o AppModule inteiro via
+  // `Test.createTestingModule` + `app.close()` (fase-4a-gate.spec.ts,
+  // route-topology.spec.ts), o processo Jest levava ~10min pra encerrar
+  // sozinho sem `--forceExit`. `shuttingDown` é checado no topo do laço e
+  // entre tenants; `wakeUp` interrompe o `setTimeout` de espera (tenants
+  // vazios ou erro) na hora, em vez de esperar até 5s à toa.
+  private shuttingDown = false;
+  private wakeUp?: () => void;
+  private consumeLoopPromise?: Promise<void>;
 
   constructor(private readonly pool: Pool) {
     this.redis = new Redis(process.env.REDIS_URL!);
   }
 
   async onModuleInit(): Promise<void> {
-    void this.consumeLoop();
+    this.consumeLoopPromise = this.consumeLoop();
   }
 
   // A conexão ioredis é aberta no construtor (acima) e precisa ser fechada
@@ -37,9 +48,16 @@ export class CandidateApplicationSummaryConsumer implements OnModuleInit, OnModu
   // vida do Nest) fica com uma conexão TCP viva mantendo o event loop ativo
   // indefinidamente após o trabalho terminar. Quando registrado como
   // provider via Nest DI (`ResumeModule`), o Nest chama este hook
-  // automaticamente em app.close()/shutdown.
+  // automaticamente em app.close()/shutdown. Sinaliza o laço e ESPERA ele
+  // notar (consumeLoopPromise) antes de fechar o Redis -- na ordem
+  // inversa, a volta em andamento do laço bateria num socket já fechado.
+  // Se onModuleInit nunca rodou (testes que instanciam a classe direto e
+  // só chamam handleEvent/processBatch), consumeLoopPromise é undefined e
+  // o await resolve na hora.
   async onModuleDestroy(): Promise<void> {
-    this.destroyed = true;
+    this.shuttingDown = true;
+    this.wakeUp?.();
+    await this.consumeLoopPromise;
     await this.redis.quit();
   }
 
@@ -63,8 +81,7 @@ export class CandidateApplicationSummaryConsumer implements OnModuleInit, OnModu
   }
 
   private async consumeLoop(): Promise<void> {
-    for (;;) {
-      if (this.destroyed) return;
+    while (!this.shuttingDown) {
       // [Fix round 1, achado #2 do revisor independente da Task 17]
       // Corpo inteiro envolto em try/catch: sem isso, QUALQUER exceção
       // aqui dentro (Postgres, Redis, ou -- caso concreto reproduzido ao
@@ -81,6 +98,7 @@ export class CandidateApplicationSummaryConsumer implements OnModuleInit, OnModu
       try {
         const tenantIds = await this.listTenantIds();
         for (const tenantId of tenantIds) {
+          if (this.shuttingDown) break;
           await this.ensureConsumerGroup(tenantId);
           // PEL primeiro (mensagens pendentes de uma queda anterior deste
           // consumer para este tenant), só depois mensagens novas -- mesmo
@@ -91,13 +109,30 @@ export class CandidateApplicationSummaryConsumer implements OnModuleInit, OnModu
           await this.processBatch(tenantId, '>');
         }
         if (tenantIds.length === 0) {
-          await new Promise((resolve) => setTimeout(resolve, 5000));
+          await this.sleepUnlessShuttingDown(5000);
         }
       } catch (err) {
         this.logger.error('Falha numa volta do laço de consumo -- seguindo para a próxima em vez de derrubar o processo', err as Error);
-        await new Promise((resolve) => setTimeout(resolve, 5000));
+        await this.sleepUnlessShuttingDown(5000);
       }
     }
+  }
+
+  // Espera interrompível: usada nas duas pausas de 5s do laço (sem tenant
+  // pra ler / erro na volta) para que onModuleDestroy não fique preso
+  // esperando um `setTimeout` correr até o fim -- `wakeUp` cancela o timer
+  // e resolve na hora quando o shutdown é sinalizado enquanto o laço está
+  // dormindo.
+  private async sleepUnlessShuttingDown(ms: number): Promise<void> {
+    if (this.shuttingDown) return;
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, ms);
+      this.wakeUp = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+    });
+    this.wakeUp = undefined;
   }
 
   private async listTenantIds(): Promise<string[]> {
