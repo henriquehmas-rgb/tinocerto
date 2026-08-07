@@ -11,6 +11,7 @@ import { WebhookEndpointController } from './webhooks/webhook-endpoint.controlle
 import { WebhookEndpointService } from './webhooks/webhook-endpoint.service';
 import { WebhookDeliveryService } from './webhooks/webhook-delivery.service';
 import { WebhookDeliveryConsumer } from './webhooks/webhook-delivery.consumer';
+import { WebhookRetryScheduler } from './webhooks/webhook-retry.scheduler';
 
 @Module({
   imports: [DatabaseModule, HiringModule],
@@ -23,6 +24,7 @@ import { WebhookDeliveryConsumer } from './webhooks/webhook-delivery.consumer';
     WebhookEndpointService,
     WebhookDeliveryService,
     WebhookDeliveryConsumer,
+    WebhookRetryScheduler,
   ],
   exports: [ApiKeyService, IdempotencyService],
 })
