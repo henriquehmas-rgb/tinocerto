@@ -16,6 +16,7 @@ import { ApplicationStartedWorkService } from './application-started-work.servic
 import { ApplicationCustomFieldResponseService } from './application-custom-field-response.service';
 import { QuotaService } from './quota.service';
 import { LiaDocumentService } from './lia-document.service';
+import { CandidateEvaluationViewService } from './candidate-evaluation-view.service';
 import { OutboxService } from '../outbox/outbox.service';
 
 @Module({
@@ -33,7 +34,9 @@ import { OutboxService } from '../outbox/outbox.service';
     ApplicationCustomFieldResponseService,
     QuotaService,
     LiaDocumentService,
+    CandidateEvaluationViewService,
     OutboxService,
   ],
+  exports: [DecisionService, CandidateEvaluationViewService],
 })
 export class HiringModule {}
