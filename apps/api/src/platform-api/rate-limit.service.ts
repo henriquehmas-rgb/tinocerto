@@ -1,5 +1,5 @@
 // apps/api/src/platform-api/rate-limit.service.ts
-import { Injectable, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import Redis from 'ioredis';
 import { DatabaseService } from '../database/database.service';
 import { TenantContext } from '../database/tenant-context';
@@ -30,6 +30,7 @@ export interface RateLimitCheck {
 
 @Injectable()
 export class RateLimitService implements OnModuleDestroy {
+  private readonly logger = new Logger(RateLimitService.name);
   private readonly redis: Redis;
   private readonly tenantContext: TenantContext;
 
@@ -61,12 +62,15 @@ export class RateLimitService implements OnModuleDestroy {
     let current: number;
     try {
       current = (await this.redis.eval(INCR_AND_EXPIRE_LUA, 1, key, String(tier.windowSeconds + 5))) as number;
-    } catch {
+    } catch (err) {
       // Fail-open (design spec, decisão adicional 13): Redis fora do ar
       // não pode derrubar a Plataforma API inteira. Sem contagem real
       // nesta chamada -- devolve "permitido, teto cheio" sem persistir
       // nada. RateLimitGuard trata isto como resposta sem garantia de
-      // enforcement, não como erro.
+      // enforcement, não como erro. O log abaixo é só observabilidade --
+      // sem ele, degradação do Redis passa despercebida (ver "Riscos
+      // conhecidos" no design spec da Fase 4b).
+      this.logger.warn(`Redis indisponível para rate limit (apiKeyId=${apiKeyId}) -- fail-open aplicado nesta chamada: ${err}`);
       return {
         allowed: true,
         limit: tier.limit,

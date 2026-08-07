@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import { Logger } from '@nestjs/common';
 import { Pool } from 'pg';
 import Redis from 'ioredis';
 import { DatabaseService } from '../../database/database.service';
@@ -122,9 +123,17 @@ describe('RateLimitService.checkAndIncrement', () => {
     const redisQuebrado = new Redis({ port: 1, lazyConnect: true, retryStrategy: () => null });
     (serviceComRedisQuebrado as unknown as { redis: Redis }).redis = redisQuebrado;
 
+    const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+
     const result = await serviceComRedisQuebrado.checkAndIncrement(randomUUID(), tenantIdEntrada);
     expect(result.allowed).toBe(true);
     expect(result.remaining).toBe(result.limit);
+    // Fail-open não pode ficar silencioso -- degradação do Redis precisa
+    // deixar rastro (ver "Riscos conhecidos" no design spec da Fase 4b).
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy.mock.calls[0][0]).toContain('Redis indisponível');
+
+    warnSpy.mockRestore();
     await redisQuebrado.quit().catch(() => undefined);
     await redisOriginalDescartado.quit().catch(() => undefined);
   });
