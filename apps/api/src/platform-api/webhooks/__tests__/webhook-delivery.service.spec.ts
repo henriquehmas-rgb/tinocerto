@@ -42,7 +42,7 @@ describe('WebhookDeliveryService.attemptDelivery', () => {
 
   beforeAll(async () => {
     const t = await adminPool.query<{ id: string }>(
-      `INSERT INTO tenant (razao_social, cnpj, slug) VALUES ('Webhook Delivery Service Ltda','00000000000155','test-tenant-00000000000155') RETURNING id`,
+      `INSERT INTO tenant (razao_social, cnpj, slug) VALUES ('Webhook Delivery Service Ltda','00000000000203','test-tenant-00000000000203') RETURNING id`,
     );
     tenantId = t.rows[0].id;
 

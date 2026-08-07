@@ -9,7 +9,7 @@ describe('OutboxPublishingScheduler', () => {
 
   beforeAll(async () => {
     const t = await adminPool.query<{ id: string }>(
-      `INSERT INTO tenant (razao_social, cnpj, slug) VALUES ('Outbox Scheduler Ltda','00000000000151','test-tenant-00000000000151') RETURNING id`,
+      `INSERT INTO tenant (razao_social, cnpj, slug) VALUES ('Outbox Scheduler Ltda','00000000000200','test-tenant-00000000000200') RETURNING id`,
     );
     tenantId = t.rows[0].id;
   });

@@ -16,7 +16,7 @@ describe('WebhookEndpointService', () => {
 
   beforeAll(async () => {
     const t = await adminPool.query<{ id: string }>(
-      `INSERT INTO tenant (razao_social, cnpj, slug) VALUES ('Webhook Endpoint Ltda','00000000000152','test-tenant-00000000000152') RETURNING id`,
+      `INSERT INTO tenant (razao_social, cnpj, slug) VALUES ('Webhook Endpoint Ltda','00000000000201','test-tenant-00000000000201') RETURNING id`,
     );
     tenantId = t.rows[0].id;
   });
@@ -72,7 +72,7 @@ describe('WebhookEndpointService', () => {
 
   it('isolamento de tenant real: outro tenant não vê os endpoints deste', async () => {
     const outro = await adminPool.query<{ id: string }>(
-      `INSERT INTO tenant (razao_social, cnpj, slug) VALUES ('Webhook Endpoint Outro Ltda','00000000000153','test-tenant-00000000000153') RETURNING id`,
+      `INSERT INTO tenant (razao_social, cnpj, slug) VALUES ('Webhook Endpoint Outro Ltda','00000000000202','test-tenant-00000000000202') RETURNING id`,
     );
     try {
       const listados = await tenantContext.run(outro.rows[0].id, (client) => service.list(client));
