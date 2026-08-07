@@ -13,10 +13,11 @@ import { WebhookDeliveryService } from './webhooks/webhook-delivery.service';
 import { WebhookDeliveryConsumer } from './webhooks/webhook-delivery.consumer';
 import { WebhookRetryScheduler } from './webhooks/webhook-retry.scheduler';
 import { WebhookEndpointDisableScheduler } from './webhooks/webhook-endpoint-disable.scheduler';
+import { WebhookDeliveryController } from './webhooks/webhook-delivery.controller';
 
 @Module({
   imports: [DatabaseModule, HiringModule],
-  controllers: [PlatformApplicationController, WebhookEndpointController],
+  controllers: [PlatformApplicationController, WebhookEndpointController, WebhookDeliveryController],
   providers: [
     { provide: ApiKeyService, useFactory: (db: DatabaseService) => new ApiKeyService(db.pool), inject: [DatabaseService] },
     ApiKeyGuard,
