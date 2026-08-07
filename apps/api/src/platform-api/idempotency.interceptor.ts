@@ -49,6 +49,14 @@ export class IdempotencyInterceptor implements NestInterceptor {
             'A mesma Idempotency-Key foi usada com um corpo de requisição diferente dentro da janela de 24h.',
           );
         }
+        if (result.status === 'em-andamento') {
+          throw new PlatformApiProblem(
+            409,
+            'idempotency-key-in-progress',
+            'Requisição em andamento',
+            'Uma requisição com esta Idempotency-Key ainda está sendo processada. Tente novamente em instantes.',
+          );
+        }
         if (result.status === 'repetido') {
           return from([result.respostaSnapshot]);
         }

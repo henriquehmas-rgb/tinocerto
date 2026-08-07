@@ -81,7 +81,30 @@ describe('IdempotencyService', () => {
       );
       expect(result).toEqual({ status: 'novo' });
     } finally {
+      // checkOrReserve() agora reserva de verdade (é o próprio ponto da
+      // correção), então o 'novo' acima gravou uma linha em idempotency_key
+      // para o tenant outro -- precisa sair antes do tenant, por causa da FK.
+      await adminPool.query('DELETE FROM idempotency_key WHERE tenant_id = $1', [outro.rows[0].id]);
       await adminPool.query('DELETE FROM tenant WHERE id = $1', [outro.rows[0].id]);
     }
+  });
+
+  it('duas chamadas concorrentes com a mesma chave -- só uma reserva (novo), a outra não pode prosseguir como se fosse a primeira', async () => {
+    const chave = 'chave-concorrente';
+    const hash = hashRequestBody({ concorrente: true });
+    const [r1, r2] = await Promise.all([
+      tenantContext.run(tenantId, (client) =>
+        service.checkOrReserve(client, { tenantId, chave, hashDaRequisicao: hash }),
+      ),
+      tenantContext.run(tenantId, (client) =>
+        service.checkOrReserve(client, { tenantId, chave, hashDaRequisicao: hash }),
+      ),
+    ]);
+    const statuses = [r1.status, r2.status].sort();
+    // Exatamente uma das duas reserva a chave (status novo); a outra
+    // encontra a reserva em andamento e NÃO deve seguir como se também
+    // fosse a primeira -- é isso que fecha a race condition do handler
+    // de negócio rodando duas vezes.
+    expect(statuses).toEqual(['em-andamento', 'novo']);
   });
 });
