@@ -11,6 +11,7 @@ import { MatchingModule } from './matching/matching.module';
 import { InsightsModule } from './insights/insights.module';
 import { LlmRouterModule } from './llm-router/llm-router.module';
 import { InterviewModule } from './interview/interview.module';
+import { CopilotModule } from './copilot/copilot.module';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { InterviewModule } from './interview/interview.module';
     MatchingModule,
     InsightsModule,
     InterviewModule,
+    CopilotModule,
   ],
 })
 export class AppModule implements NestModule {

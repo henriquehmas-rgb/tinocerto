@@ -20,6 +20,6 @@ resourcePolicy:
               request.principal.attr.tenant_id == request.resource.attr.tenant_id)
 
     - name: "gestao-vaga"
-      actions: ["create", "read", "update", "publish", "close"]
+      actions: ["create", "read", "update", "publish", "close", "rewrite_description", "apply_description"]
       effect: EFFECT_ALLOW
       roles: ["admin_tenant", "recrutador", "gestor_vaga"]

@@ -20,6 +20,6 @@ resourcePolicy:
               request.principal.attr.tenant_id == request.resource.attr.tenant_id)
 
     - name: "gestao-roteiro"
-      actions: ["create", "read", "update", "publish"]
+      actions: ["create", "read", "update", "publish", "sugerir_perguntas"]
       effect: EFFECT_ALLOW
       roles: ["admin_tenant", "recrutador", "gestor_vaga"]

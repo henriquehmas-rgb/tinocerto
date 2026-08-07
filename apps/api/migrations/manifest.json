@@ -73,6 +73,9 @@
     "interview_0005__interview_evaluator.sql",
     "interview_0006__scorecard.sql",
     "interview_0007__google_calendar_connection.sql",
-    "interview_0008__interview_schedule_calendar_event.sql"
+    "interview_0008__interview_schedule_calendar_event.sql",
+    "copilot_0001__job_description_suggestion.sql",
+    "copilot_0002__candidate_summary_draft.sql",
+    "copilot_0003__interview_question_suggestion.sql"
   ]
 }
