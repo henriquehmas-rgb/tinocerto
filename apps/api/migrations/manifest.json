@@ -83,6 +83,7 @@
     "resume_0006__candidate_application_summary_tenant_id.sql",
     "platform_0003__api_key.sql",
     "platform_0004__idempotency_key.sql",
-    "hiring_0018__application_tenant_criado_id_index.sql"
+    "hiring_0018__application_tenant_criado_id_index.sql",
+    "platform_0005__service_account_crp_link.sql"
   ]
 }
