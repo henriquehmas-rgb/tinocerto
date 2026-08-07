@@ -1,4 +1,5 @@
 // apps/api/src/platform-api/webhooks/__tests__/webhook-endpoint.controller.spec.ts
+import { randomUUID } from 'crypto';
 import { Test } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Pool } from 'pg';
@@ -87,5 +88,57 @@ describe('WebhookEndpointController', () => {
     expect(resposta.status).toBe(201);
     const corpo = (await resposta.json()) as { segredoAtual: string };
     expect(corpo.segredoAtual.startsWith('whsec_')).toBe(true);
+  });
+
+  // Achados da revisão de código consolidada: CerbosGuard monta
+  // resource.attr.tenant_id a partir do tenant do REQUISITANTE (nunca busca
+  // o recurso real para confirmar posse), então um :id inexistente nunca é
+  // barrado pela policy Cerbos -- só o 404 explícito do service (RLS +
+  // rows.length/rowCount === 0) protege esses casos.
+  const headers = () => ({ 'content-type': 'application/json', 'x-tenant-id': tenantId, 'x-user-id': userId, 'x-user-roles': 'admin_tenant' });
+
+  it('GET /v1/webhook-endpoints/:id com id existente devolve os dados do endpoint', async () => {
+    const criado = await fetch(`${serverUrl}/v1/webhook-endpoints`, {
+      method: 'POST',
+      headers: headers(),
+      body: JSON.stringify({ url: 'https://exemplo.com.br/get-controller', eventosFiltro: [] }),
+    });
+    const { id } = (await criado.json()) as { id: string };
+
+    const resposta = await fetch(`${serverUrl}/v1/webhook-endpoints/${id}`, { headers: headers() });
+    expect(resposta.status).toBe(200);
+    const corpo = (await resposta.json()) as { id: string; url: string };
+    expect(corpo.id).toBe(id);
+    expect(corpo.url).toBe('https://exemplo.com.br/get-controller');
+  });
+
+  it('GET /v1/webhook-endpoints/:id com id inexistente devolve 404', async () => {
+    const resposta = await fetch(`${serverUrl}/v1/webhook-endpoints/${randomUUID()}`, { headers: headers() });
+    expect(resposta.status).toBe(404);
+  });
+
+  it('PATCH /v1/webhook-endpoints/:id com id inexistente devolve 404 em vez de sucesso silencioso', async () => {
+    const resposta = await fetch(`${serverUrl}/v1/webhook-endpoints/${randomUUID()}`, {
+      method: 'PATCH',
+      headers: headers(),
+      body: JSON.stringify({ url: 'https://exemplo.com.br/novo' }),
+    });
+    expect(resposta.status).toBe(404);
+  });
+
+  it('POST /v1/webhook-endpoints/:id/actions/deactivate com id inexistente devolve 404 em vez de sucesso silencioso', async () => {
+    const resposta = await fetch(`${serverUrl}/v1/webhook-endpoints/${randomUUID()}/actions/deactivate`, {
+      method: 'POST',
+      headers: headers(),
+    });
+    expect(resposta.status).toBe(404);
+  });
+
+  it('POST /v1/webhook-endpoints/:id/actions/rotate-secret com id inexistente devolve 404 (não 500)', async () => {
+    const resposta = await fetch(`${serverUrl}/v1/webhook-endpoints/${randomUUID()}/actions/rotate-secret`, {
+      method: 'POST',
+      headers: headers(),
+    });
+    expect(resposta.status).toBe(404);
   });
 });

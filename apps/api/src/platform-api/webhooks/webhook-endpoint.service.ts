@@ -1,5 +1,5 @@
 // apps/api/src/platform-api/webhooks/webhook-endpoint.service.ts
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { PoolClient } from 'pg';
 import { decryptWebhookSecret, encryptWebhookSecret, EncryptedSecret, generateWebhookSecret } from './webhook-secret-cipher';
 
@@ -48,15 +48,54 @@ export class WebhookEndpointService {
     }));
   }
 
+  // Busca de um único endpoint por id -- mesma projeção decifrada de list(),
+  // ver design spec §10 (GET :id). RLS filtra id inexistente/de outro tenant
+  // para 0 linhas silenciosamente (CerbosGuard nunca confirma posse real --
+  // monta resource.attr.tenant_id do REQUISITANTE, não do recurso -- ver
+  // achado da revisão de código), então o 404 explícito abaixo é a única
+  // barreira real para esse caso.
+  async get(client: PoolClient, id: string): Promise<WebhookEndpointView> {
+    const result = await client.query<{
+      id: string; url: string; eventos_filtro: string[]; segredo_atual_cifrado: EncryptedSecret; ativo: boolean; criado_em: Date;
+    }>(`SELECT id, url, eventos_filtro, segredo_atual_cifrado, ativo, criado_em FROM webhook_endpoint WHERE id = $1`, [id]);
+    if (result.rows.length === 0) {
+      throw new NotFoundException('Endpoint de webhook não encontrado');
+    }
+    const row = result.rows[0];
+    return {
+      id: row.id,
+      url: row.url,
+      eventosFiltro: row.eventos_filtro,
+      segredoAtual: decryptWebhookSecret(row.segredo_atual_cifrado),
+      ativo: row.ativo,
+      criadoEm: row.criado_em,
+    };
+  }
+
+  // RLS (tenant_isolation, FORCE ROW LEVEL SECURITY) filtra id inexistente
+  // ou de outro tenant para 0 linhas de forma silenciosa -- UPDATE nunca
+  // lança erro por isso. CerbosGuard não é uma segunda barreira real aqui
+  // (monta resource.attr.tenant_id a partir do tenant do REQUISITANTE, nunca
+  // busca o recurso pra confirmar posse -- ver achado da revisão de
+  // código), então sem este rowCount === 0 o controller devolveria 200
+  // implicando sucesso quando nada mudou.
   async update(client: PoolClient, id: string, input: { url?: string; eventosFiltro?: string[] }): Promise<void> {
-    await client.query(
+    const result = await client.query(
       `UPDATE webhook_endpoint SET url = COALESCE($2, url), eventos_filtro = COALESCE($3, eventos_filtro) WHERE id = $1`,
       [id, input.url ?? null, input.eventosFiltro ?? null],
     );
+    if (result.rowCount === 0) {
+      throw new NotFoundException('Endpoint de webhook não encontrado');
+    }
   }
 
+  // Mesmo raciocínio de update() acima -- RLS filtra silenciosamente, então
+  // o rowCount === 0 é a única barreira real contra um 200 falso-positivo.
   async deactivate(client: PoolClient, id: string): Promise<void> {
-    await client.query(`UPDATE webhook_endpoint SET ativo = false WHERE id = $1`, [id]);
+    const result = await client.query(`UPDATE webhook_endpoint SET ativo = false WHERE id = $1`, [id]);
+    if (result.rowCount === 0) {
+      throw new NotFoundException('Endpoint de webhook não encontrado');
+    }
   }
 
   // Move o segredo atual para o histórico (cap MAX_HISTORICO -- descarta o
@@ -66,6 +105,14 @@ export class WebhookEndpointService {
       `SELECT segredo_atual_cifrado, segredos_historico_cifrados FROM webhook_endpoint WHERE id = $1`,
       [id],
     );
+    // RLS filtra id inexistente/de outro tenant para 0 linhas silenciosamente
+    // (CerbosGuard não confirma posse real -- ver achado da revisão de
+    // código); sem este check, atual.rows[0] é undefined e a linha seguinte
+    // lança TypeError não tratado (vira 500 genérico em vez de 404). Mesmo
+    // padrão de ApiKeyService.rotate/revoke.
+    if (atual.rows.length === 0) {
+      throw new NotFoundException('Endpoint de webhook não encontrado');
+    }
     const novoRaw = generateWebhookSecret();
     const novoCifrado = encryptWebhookSecret(novoRaw);
     const novoHistorico = [atual.rows[0].segredo_atual_cifrado, ...atual.rows[0].segredos_historico_cifrados].slice(0, MAX_HISTORICO);

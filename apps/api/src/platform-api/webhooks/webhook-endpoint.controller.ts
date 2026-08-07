@@ -67,6 +67,12 @@ export class WebhookEndpointController {
     return this.tenantContext.run(req.tenantId, (client) => this.webhookEndpointService.list(client));
   }
 
+  @Get(':id')
+  @CerbosCheck('webhook_endpoint', 'read')
+  get(@Req() req: RequestWithAuthContext, @Param('id') id: string) {
+    return this.tenantContext.run(req.tenantId, (client) => this.webhookEndpointService.get(client, id));
+  }
+
   @Patch(':id')
   @CerbosCheck('webhook_endpoint', 'update')
   async update(@Req() req: RequestWithAuthContext, @Param('id') id: string, @Body() dto: UpdateWebhookEndpointDto) {

@@ -1,3 +1,5 @@
+import { NotFoundException } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import { Pool } from 'pg';
 import { TenantContext } from '../../../database/tenant-context';
 import { WebhookEndpointService } from '../webhook-endpoint.service';
@@ -80,5 +82,40 @@ describe('WebhookEndpointService', () => {
     } finally {
       await adminPool.query('DELETE FROM tenant WHERE id = $1', [outro.rows[0].id]);
     }
+  });
+
+  // Achados da revisão de código consolidada: CerbosGuard monta
+  // resource.attr.tenant_id a partir do tenant do REQUISITANTE (nunca busca
+  // o recurso real para confirmar posse), então um id inexistente ou de
+  // outro tenant nunca é barrado pela policy -- só RLS filtra a query real
+  // para 0 linhas/rowCount, e cada método precisa tratar esse caso
+  // explicitamente como 404 em vez de deixar vazar como sucesso silencioso
+  // ou TypeError não tratado.
+  it('rotateSecret com id inexistente lança NotFoundException (não TypeError)', async () => {
+    await expect(tenantContext.run(tenantId, (client) => service.rotateSecret(client, randomUUID()))).rejects.toThrow(NotFoundException);
+  });
+
+  it('update com id inexistente lança NotFoundException em vez de devolver sucesso silencioso', async () => {
+    await expect(
+      tenantContext.run(tenantId, (client) => service.update(client, randomUUID(), { url: 'https://exemplo.com.br/novo' })),
+    ).rejects.toThrow(NotFoundException);
+  });
+
+  it('deactivate com id inexistente lança NotFoundException em vez de devolver sucesso silencioso', async () => {
+    await expect(tenantContext.run(tenantId, (client) => service.deactivate(client, randomUUID()))).rejects.toThrow(NotFoundException);
+  });
+
+  it('get devolve os dados do endpoint existente', async () => {
+    const created = await tenantContext.run(tenantId, (client) =>
+      service.create(client, { tenantId, url: 'https://exemplo.com.br/get', eventosFiltro: ['application.created'] }),
+    );
+    const encontrado = await tenantContext.run(tenantId, (client) => service.get(client, created.id));
+    expect(encontrado.id).toBe(created.id);
+    expect(encontrado.url).toBe('https://exemplo.com.br/get');
+    expect(encontrado.segredoAtual).toBe(created.segredoAtual);
+  });
+
+  it('get com id inexistente ou de outro tenant lança NotFoundException', async () => {
+    await expect(tenantContext.run(tenantId, (client) => service.get(client, randomUUID()))).rejects.toThrow(NotFoundException);
   });
 });
