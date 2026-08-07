@@ -1,6 +1,6 @@
 // apps/api/src/staff-auth/__tests__/staff-onboarding.service.spec.ts
 import { ConflictException } from '@nestjs/common';
-import { Pool } from 'pg';
+import { Pool, PoolClient } from 'pg';
 import { TenantContext } from '../../database/tenant-context';
 import { PasswordService } from '../password.service';
 import { StaffOnboardingService } from '../staff-onboarding.service';
@@ -67,36 +67,79 @@ describe('StaffOnboardingService.onboard', () => {
   });
 
   // Reproduz a corrida real (não o caminho do pre-check acima, que só pega o
-  // caso sequencial): duas chamadas de onboard() com o MESMO CNPJ novo,
-  // disparadas em paralelo via Promise.allSettled -- mesmo padrão de duas
-  // conexões reais do pool usado em
-  // src/insights/__tests__/adverse-impact-snapshot.service.spec.ts. Como
-  // TenantContext.run() pega uma conexão nova do pool a cada chamada
-  // (client = await pool.connect()), as duas transações rodam
-  // genuinamente em paralelo: ambas podem passar pelo SELECT de pre-check
-  // antes de qualquer uma commitar, e é o próprio Postgres que serializa a
-  // segunda no INSERT -- ela bloqueia até a primeira commitar/dar rollback e
-  // então recebe 23505 na tenant_cnpj_key. Isso é determinístico (a
-  // serialização é garantida pelo índice único do Postgres, não por
-  // timing do event loop), então não precisa de pausa artificial de query
-  // como em staff-token.service.spec.ts.
+  // caso sequencial): duas chamadas de onboard() com o MESMO CNPJ novo, com
+  // sobreposição FORÇADA deterministicamente -- mesma técnica usada em
+  // staff-token.service.spec.ts (interceptar client.query para pausar uma
+  // lane logo após seu próprio passo de leitura e só liberá-la depois que a
+  // outra lane já tiver commitado). Uma versão anterior deste teste disparava
+  // as duas chamadas em paralelo via Promise.allSettled sem nenhum controle
+  // de ordem e dependia do tempo incidental do bcrypt.hash() (que roda entre
+  // o SELECT de pre-check e o INSERT) para abrir uma janela grande o
+  // suficiente para a corrida acontecer -- na prática funcionava, mas sem
+  // garantia nenhuma: bastaria as duas chamadas não se sobreporem de verdade
+  // (uma terminando, commit incluído, antes da outra sequer começar) para o
+  // teste passar sem ter exercitado a corrida nenhuma vez, silenciosamente.
+  // Agora a sobreposição é forçada: a lane "lenta" (chamada A) é pausada logo
+  // depois do seu SELECT de pre-check (que só verifica se o CNPJ já existe --
+  // não decide mais nada sozinho) e só prossegue para o INSERT depois que a
+  // lane "rápida" (chamada B) já tiver inserido e commitado por completo com
+  // o MESMO CNPJ. Isso garante sobreposição genuína a cada execução -- não
+  // depende mais de timing de I/O incidental.
   it('duas chamadas concorrentes com o MESMO CNPJ novo: exatamente uma cria o tenant, a outra recebe ConflictException (não o erro cru do pg)', async () => {
     const cnpjConcorrente = '00000000000236';
 
-    const resultados = await Promise.allSettled([
-      service.onboard({
-        nomeEmpresa: 'Empresa Corrida A Ltda',
-        cnpj: cnpjConcorrente,
-        emailAdmin: 'corrida-a@example.com',
-        senhaAdmin: 'senha-forte-corrida-123',
-      }),
-      service.onboard({
-        nomeEmpresa: 'Empresa Corrida B Ltda',
-        cnpj: cnpjConcorrente,
-        emailAdmin: 'corrida-b@example.com',
-        senhaAdmin: 'senha-forte-corrida-456',
-      }),
-    ]);
+    let releaseSlowLane: () => void = () => {};
+    const fastLaneCommitted = new Promise<void>((resolve) => {
+      releaseSlowLane = resolve;
+    });
+
+    type ConnectFn = () => Promise<PoolClient>;
+    const realConnect = appPool.connect.bind(appPool) as ConnectFn;
+    (appPool as unknown as { connect: ConnectFn }).connect = (async () => {
+      // Restaura o connect original já na primeira chamada (síncrona, antes
+      // de qualquer await) -- graças à ordem de execução síncrona do JS até
+      // o primeiro await, apenas a conexão da lane lenta (chamada A, cujo
+      // onboard() é disparado primeiro logo abaixo) passa por este wrapper;
+      // a lane rápida (chamada B, disparada em seguida) já pega o
+      // pool.connect real, sem interceptação.
+      (appPool as unknown as { connect: ConnectFn }).connect = realConnect;
+      const client = await realConnect();
+      const realQuery = client.query.bind(client);
+      (client as unknown as { query: typeof client.query }).query = (async (...queryArgs: unknown[]) => {
+        const first = queryArgs[0];
+        const text = typeof first === 'string' ? first : (first as { text?: string })?.text;
+        const result = await (realQuery as (...a: unknown[]) => Promise<unknown>)(...queryArgs);
+        if (typeof text === 'string' && text.startsWith('SELECT 1 FROM tenant WHERE cnpj')) {
+          // Restaura já na primeira (e única) pausa -- o restante das
+          // queries desta transação (o INSERT etc.) segue sem interceptação.
+          (client as unknown as { query: typeof client.query }).query = realQuery as typeof client.query;
+          await fastLaneCommitted;
+        }
+        return result;
+      }) as typeof client.query;
+      return client;
+    }) as ConnectFn;
+
+    const slowLanePromise = service.onboard({
+      nomeEmpresa: 'Empresa Corrida A Ltda',
+      cnpj: cnpjConcorrente,
+      emailAdmin: 'corrida-a@example.com',
+      senhaAdmin: 'senha-forte-corrida-123',
+    });
+
+    const fastLanePromise = service.onboard({
+      nomeEmpresa: 'Empresa Corrida B Ltda',
+      cnpj: cnpjConcorrente,
+      emailAdmin: 'corrida-b@example.com',
+      senhaAdmin: 'senha-forte-corrida-456',
+    });
+
+    // Libera a lane lenta assim que a lane rápida tiver terminado (sucesso
+    // ou falha) -- neste ponto a rápida já commitou (ou deu rollback) por
+    // completo, então a lenta só continua depois disso.
+    void fastLanePromise.finally(() => releaseSlowLane());
+
+    const resultados = await Promise.allSettled([slowLanePromise, fastLanePromise]);
 
     const sucesso = resultados.filter(
       (r): r is PromiseFulfilledResult<{ tenantId: string; userId: string }> => r.status === 'fulfilled',
