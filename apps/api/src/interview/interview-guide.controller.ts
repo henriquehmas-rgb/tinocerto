@@ -1,5 +1,5 @@
-import { Body, Controller, Get, Param, Patch, Post, Req, UseGuards, NotFoundException } from '@nestjs/common';
-import { IsArray, IsNotEmpty, IsOptional, IsString, ValidateNested } from 'class-validator';
+import { Body, Controller, Param, Patch, Post, Req, UseGuards, NotFoundException } from '@nestjs/common';
+import { IsArray, IsNotEmpty, IsString, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { Request } from 'express';
 import { TenantContext } from '../database/tenant-context';
