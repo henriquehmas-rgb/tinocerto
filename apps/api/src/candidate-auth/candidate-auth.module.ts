@@ -12,6 +12,8 @@ import { CandidateAuthGuard } from './candidate-auth.guard';
 import { EmailService } from './email.service';
 import { PasswordResetService } from './password-reset.service';
 import { PasswordService } from './password.service';
+import { IpRateLimitService } from '../security/ip-rate-limit.service';
+import { IpRateLimitGuard } from '../security/ip-rate-limit.guard';
 import { PersonService } from '../talent/person.service';
 import { EnvelopeEncryptionService } from '../talent/envelope-encryption.service';
 
@@ -26,6 +28,8 @@ import { EnvelopeEncryptionService } from '../talent/envelope-encryption.service
     EmailService,
     PasswordResetService,
     PasswordService,
+    IpRateLimitService,
+    IpRateLimitGuard,
     PersonService,
     EnvelopeEncryptionService,
     { provide: Pool, useFactory: (db: DatabaseService) => db.pool, inject: [DatabaseService] },

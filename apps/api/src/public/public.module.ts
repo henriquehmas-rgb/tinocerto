@@ -15,6 +15,8 @@ import { EnvelopeEncryptionService } from '../talent/envelope-encryption.service
 import { OutboxService } from '../outbox/outbox.service';
 import { CandidateAuthGuard } from '../candidate-auth/candidate-auth.guard';
 import { CandidateJwtService } from '../candidate-auth/candidate-jwt.service';
+import { IpRateLimitService } from '../security/ip-rate-limit.service';
+import { IpRateLimitGuard } from '../security/ip-rate-limit.guard';
 
 @Module({
   imports: [DatabaseModule],
@@ -31,6 +33,8 @@ import { CandidateJwtService } from '../candidate-auth/candidate-jwt.service';
     OutboxService,
     CandidateAuthGuard,
     CandidateJwtService,
+    IpRateLimitService,
+    IpRateLimitGuard,
     { provide: Pool, useFactory: (db: DatabaseService) => db.pool, inject: [DatabaseService] },
   ],
 })

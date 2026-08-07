@@ -5,6 +5,7 @@ import { CandidateTokenService } from '../candidate-token.service';
 import { CandidateJwtService } from '../candidate-jwt.service';
 import { PasswordResetService } from '../password-reset.service';
 import { DatabaseService } from '../../database/database.service';
+import { IpRateLimitGuard } from '../../security/ip-rate-limit.guard';
 
 describe('CandidateAuthController', () => {
   beforeAll(() => {
@@ -24,7 +25,10 @@ describe('CandidateAuthController', () => {
         { provide: PasswordResetService, useValue: { requestReset: jest.fn(), resetPassword: jest.fn() } },
         { provide: DatabaseService, useValue: { pool: { connect: jest.fn().mockResolvedValue({ query: jest.fn().mockResolvedValue({ rows: [] }), release: jest.fn() }) } } },
       ],
-    }).compile();
+    })
+      .overrideGuard(IpRateLimitGuard)
+      .useValue({ canActivate: () => true })
+      .compile();
 
     const controller = moduleRef.get(CandidateAuthController);
     const result = await controller.register({
