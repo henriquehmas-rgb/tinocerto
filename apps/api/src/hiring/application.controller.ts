@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, Post, Req, UseGuards, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
-import { IsNotEmpty, IsOptional, IsString, Matches, isUUID } from 'class-validator';
+import { IsDateString, IsNotEmpty, IsOptional, IsString, Matches, isUUID } from 'class-validator';
 import { Request } from 'express';
 import { TenantContext } from '../database/tenant-context';
 import { DatabaseService } from '../database/database.service';
@@ -9,6 +9,7 @@ import { ApplicationService } from './application.service';
 import { PipelineStageTransitionService } from './pipeline-stage-transition.service';
 import { DecisionService } from './decision.service';
 import { OfferService, OfertaPendenteExistenteError } from './offer.service';
+import { ApplicationStartedWorkService, NenhumaOfertaAceitaError, InicioTrabalhoJaRegistradoError } from './application-started-work.service';
 
 class MoveStageDto {
   @IsString()
@@ -31,6 +32,11 @@ class ExtendOfferDto {
   @IsNotEmpty()
   @Matches(/^\d+(\.\d{1,2})?$/, { message: 'valor deve ser um decimal com até 2 casas (ex.: "8500.00")' })
   valor!: string;
+}
+
+class MarkStartedWorkDto {
+  @IsDateString()
+  startDate!: string;
 }
 
 interface RequestWithAuthContext extends Request {
@@ -80,6 +86,7 @@ export class ApplicationController {
     private readonly pipelineStageTransitionService: PipelineStageTransitionService,
     private readonly decisionService: DecisionService,
     private readonly offerService: OfferService,
+    private readonly applicationStartedWorkService: ApplicationStartedWorkService,
     databaseService: DatabaseService,
   ) {
     this.tenantContext = new TenantContext(databaseService.pool);
@@ -170,5 +177,25 @@ export class ApplicationController {
   @CerbosCheck('offer', 'read')
   async listOffers(@Req() req: RequestWithAuthContext, @Param('id') id: string) {
     return this.tenantContext.run(req.tenantId, (client) => this.offerService.listByApplication(client, req.tenantId, id));
+  }
+
+  @Post(':id/actions/mark-started-work')
+  @CerbosCheck('application', 'mark-started-work')
+  async markStartedWork(@Req() req: RequestWithAuthContext, @Param('id') id: string, @Body() dto: MarkStartedWorkDto) {
+    try {
+      return await this.tenantContext.run(req.tenantId, (client) =>
+        this.applicationStartedWorkService.registrar(client, {
+          tenantId: req.tenantId,
+          applicationId: id,
+          startDate: dto.startDate,
+          registradoPor: req.userId,
+        }),
+      );
+    } catch (err) {
+      if (err instanceof NenhumaOfertaAceitaError || err instanceof InicioTrabalhoJaRegistradoError) {
+        throw new ConflictException(err.message);
+      }
+      throw err;
+    }
   }
 }

@@ -11,6 +11,7 @@ import { CandidateTouchpointService } from './candidate-touchpoint.service';
 import { DecisionService } from './decision.service';
 import { OfferService } from './offer.service';
 import { OfferController } from './offer.controller';
+import { ApplicationStartedWorkService } from './application-started-work.service';
 import { ApplicationCustomFieldResponseService } from './application-custom-field-response.service';
 import { QuotaService } from './quota.service';
 import { LiaDocumentService } from './lia-document.service';
@@ -27,6 +28,7 @@ import { OutboxService } from '../outbox/outbox.service';
     CandidateTouchpointService,
     DecisionService,
     OfferService,
+    ApplicationStartedWorkService,
     ApplicationCustomFieldResponseService,
     QuotaService,
     LiaDocumentService,

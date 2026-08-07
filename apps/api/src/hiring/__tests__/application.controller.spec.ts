@@ -5,6 +5,7 @@ import { ApplicationService } from '../application.service';
 import { PipelineStageTransitionService } from '../pipeline-stage-transition.service';
 import { DecisionService } from '../decision.service';
 import { OfferService } from '../offer.service';
+import { ApplicationStartedWorkService } from '../application-started-work.service';
 import { DatabaseService } from '../../database/database.service';
 import { CerbosGuard } from '../../authz/cerbos.guard';
 
@@ -13,6 +14,7 @@ describe('ApplicationController', () => {
     moveStageMock: jest.Mock,
     recordMock: jest.Mock = jest.fn(),
     offerServiceMock: { extend?: jest.Mock; listByApplication?: jest.Mock } = {},
+    startedWorkServiceMock: { registrar?: jest.Mock } = {},
   ) {
     const fakeClient = { query: jest.fn().mockResolvedValue({ rows: [] }), release: jest.fn() };
     const fakePool = { connect: jest.fn().mockResolvedValue(fakeClient) };
@@ -34,6 +36,10 @@ describe('ApplicationController', () => {
           provide: OfferService,
           useValue: { extend: offerServiceMock.extend ?? jest.fn(), listByApplication: offerServiceMock.listByApplication ?? jest.fn() },
         },
+        // ApplicationStartedWorkService (Fase 3d, Task 4) -- mesmo padrão:
+        // mock vazio por padrão, os testes de mark-started-work abaixo
+        // passam seu próprio mock de registrar.
+        { provide: ApplicationStartedWorkService, useValue: { registrar: startedWorkServiceMock.registrar ?? jest.fn() } },
         { provide: DatabaseService, useValue: { pool: fakePool } },
       ],
     })
@@ -189,6 +195,56 @@ describe('ApplicationController', () => {
 
       expect(result).toEqual([{ id: 'offer-1', status: 'estendida' }]);
       expect(listByApplicationMock).toHaveBeenCalledWith(expect.anything(), 'tenant-abc', 'application-1');
+    });
+  });
+
+  // [Fase 3d, Task 4] mark-started-work. Mesmo desvio/motivo documentado no
+  // describe de extend-offer acima: não há fixture-based Postgres neste
+  // arquivo, o comportamento real de banco/outbox de
+  // ApplicationStartedWorkService.registrar já está coberto por
+  // application-started-work.service.spec.ts (Task 4) e pelo gate
+  // consolidado (Task 7); estes testes só verificam o roteamento HTTP e a
+  // tradução de erro de domínio para status code.
+  describe('mark-started-work (Fase 3d)', () => {
+    it('POST :id/actions/mark-started-work delega para ApplicationStartedWorkService.registrar com startDate e registradoPor = req.userId', async () => {
+      const registrarMock = jest.fn().mockResolvedValue({ id: 'started-work-1' });
+      const moveStageMock = jest.fn();
+      const controller = await buildController(moveStageMock, jest.fn(), {}, { registrar: registrarMock });
+      const req = { tenantId: 'tenant-abc', userId: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', userRoles: ['recrutador'] } as any;
+
+      const result = await controller.markStartedWork(req, 'application-1', { startDate: '2026-09-01' });
+
+      expect(result).toEqual({ id: 'started-work-1' });
+      expect(registrarMock).toHaveBeenCalledWith(expect.anything(), {
+        tenantId: 'tenant-abc',
+        applicationId: 'application-1',
+        startDate: '2026-09-01',
+        registradoPor: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
+      });
+    });
+
+    it('POST :id/actions/mark-started-work traduz NenhumaOfertaAceitaError em 409', async () => {
+      const { NenhumaOfertaAceitaError } = await import('../application-started-work.service');
+      const registrarMock = jest.fn().mockRejectedValue(new NenhumaOfertaAceitaError('sem oferta aceita'));
+      const moveStageMock = jest.fn();
+      const controller = await buildController(moveStageMock, jest.fn(), {}, { registrar: registrarMock });
+      const req = { tenantId: 'tenant-abc', userId: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', userRoles: ['recrutador'] } as any;
+
+      await expect(controller.markStartedWork(req, 'application-1', { startDate: '2026-09-01' })).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+    });
+
+    it('POST :id/actions/mark-started-work traduz InicioTrabalhoJaRegistradoError em 409', async () => {
+      const { InicioTrabalhoJaRegistradoError } = await import('../application-started-work.service');
+      const registrarMock = jest.fn().mockRejectedValue(new InicioTrabalhoJaRegistradoError('já registrado'));
+      const moveStageMock = jest.fn();
+      const controller = await buildController(moveStageMock, jest.fn(), {}, { registrar: registrarMock });
+      const req = { tenantId: 'tenant-abc', userId: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', userRoles: ['recrutador'] } as any;
+
+      await expect(controller.markStartedWork(req, 'application-1', { startDate: '2026-09-01' })).rejects.toBeInstanceOf(
+        ConflictException,
+      );
     });
   });
 });
