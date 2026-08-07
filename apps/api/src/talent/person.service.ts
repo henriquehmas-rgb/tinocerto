@@ -16,6 +16,23 @@ export interface PersonRecord {
   criadoEm: Date;
 }
 
+// [Fase 3c / Copiloto] Item de person_profile.experiencias|formacao|
+// habilidades com a citação verbatim já verificada na Fase 1 (parsing de
+// currículo) e o offset que localiza aquela citação no texto bruto
+// original -- offsetInicio null significa que a Fase 1 NÃO conseguiu
+// localizar a citação (ver locate-verbatim-offset.ts), então o item nunca
+// deve ser oferecido como fonte citável.
+export interface ItemPerfilComOffset {
+  citacaoVerbatim: string;
+  offsetInicio: number | null;
+}
+
+export interface PerfilCitavel {
+  experiencias: ItemPerfilComOffset[];
+  formacao: ItemPerfilComOffset[];
+  habilidades: ItemPerfilComOffset[];
+}
+
 function hashCpf(cpf: string): string {
   const pepper = process.env.CPF_HASH_PEPPER;
   if (!pepper) {
@@ -33,6 +50,19 @@ function hashCpf(cpf: string): string {
 // `formacao` (dados mais sensíveis e menos auditáveis por feature nomeada).
 // Testada em __tests__/person.service.spec.ts.
 export const QUERY_HABILIDADES_POR_PESSOA = `SELECT habilidades FROM person_profile WHERE person_id = $1`;
+
+// [Fase 3c / Copiloto] Allowlist estrutural irmã da acima -- segunda (e
+// última) query autorizada contra person_profile fora deste arquivo.
+// Seleciona SÓ experiencias/formacao/habilidades (cada item com
+// citacaoVerbatim/offsetInicio) -- NUNCA `resumo` (decisão 6 do design
+// spec da Fase 3c: o campo "vivo" global de resumo do candidato nunca é
+// lido nem escrito pelo Copiloto, porque person_profile não tem
+// tenant_id e gravar/ler o resumo interpretado por um tenant ali
+// vazaria/contaminaria a identidade global do candidato). Devolve estes
+// 3 arrays para o Copiloto (CandidateSummaryService, src/copilot/)
+// construir o universo citável do resumo de candidato -- ver
+// construirTrechosCitaveis em copilot/build-citable-snippets.ts.
+export const QUERY_PERFIL_CITAVEL_POR_PESSOA = `SELECT experiencias, formacao, habilidades FROM person_profile WHERE person_id = $1`;
 
 @Injectable()
 export class PersonService {
@@ -86,5 +116,29 @@ export class PersonService {
     ]);
     if (result.rows.length === 0) return [];
     return (result.rows[0].habilidades ?? []).map((h) => h.nome);
+  }
+
+  /**
+   * [Fase 3c / Copiloto] Segundo (e último) ponto de leitura de
+   * person_profile fora de habilidades() acima -- devolve experiencias/
+   * formacao/habilidades com citacaoVerbatim/offsetInicio de cada item,
+   * para o Copiloto construir o universo citável do resumo de candidato
+   * (gate consolidado da Fase 2b exige que nenhum arquivo fora deste
+   * mencione `FROM person_profile`/`JOIN person_profile` -- este método é
+   * como CandidateSummaryService obedece essa regra em vez de duplicar a
+   * leitura). Nunca seleciona `resumo` -- ver comentário de
+   * QUERY_PERFIL_CITAVEL_POR_PESSOA acima.
+   */
+  async perfilCitavel(client: PoolClient, personId: string): Promise<PerfilCitavel> {
+    const result = await client.query<PerfilCitavel>(QUERY_PERFIL_CITAVEL_POR_PESSOA, [personId]);
+    if (result.rows.length === 0) {
+      return { experiencias: [], formacao: [], habilidades: [] };
+    }
+    const row = result.rows[0];
+    return {
+      experiencias: row.experiencias ?? [],
+      formacao: row.formacao ?? [],
+      habilidades: row.habilidades ?? [],
+    };
   }
 }

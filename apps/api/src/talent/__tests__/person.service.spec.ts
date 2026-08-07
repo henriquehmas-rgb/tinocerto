@@ -1,6 +1,6 @@
 import { Pool } from 'pg';
 import { EnvelopeEncryptionService } from '../envelope-encryption.service';
-import { PersonService, QUERY_HABILIDADES_POR_PESSOA } from '../person.service';
+import { PersonService, QUERY_HABILIDADES_POR_PESSOA, QUERY_PERFIL_CITAVEL_POR_PESSOA } from '../person.service';
 
 describe('PersonService', () => {
   const originalKek = process.env.ENVELOPE_ENCRYPTION_KEK;
@@ -154,5 +154,77 @@ describe('PersonService', () => {
     for (const coluna of colunasNaQuery) {
       expect(colunasPermitidas).toContain(coluna);
     }
+  });
+
+  // [Fase 3c / Copiloto] perfilCitavel é o SEGUNDO ponto de leitura de
+  // person_profile autorizado neste arquivo -- introduzido porque
+  // CandidateSummaryService (src/copilot/candidate-summary.service.ts)
+  // precisa de experiencias/formacao/habilidades com citacaoVerbatim/
+  // offsetInicio para construir o universo citável do resumo de
+  // candidato, e o gate consolidado da Fase 2b proíbe qualquer arquivo
+  // fora deste de mencionar `FROM person_profile`/`JOIN person_profile`
+  // (ver fase-2b-gate.spec.ts). Sem este método, CandidateSummaryService
+  // teria que ler person_profile por SQL direto, violando aquele gate --
+  // desvio do plano original da Fase 3c (que previa SQL direto em
+  // candidate-summary.service.ts), corrigido durante a execução.
+  it('perfilCitavel devolve experiencias/formacao/habilidades com offset, e arrays vazios quando não há perfil', async () => {
+    const encryption = new EnvelopeEncryptionService();
+    const service = new PersonService(encryption);
+    const client = await adminPool.connect();
+    try {
+      const comPerfil = await service.create(client, {
+        cpf: '66677788826',
+        nome: 'Pessoa Com Perfil Citavel',
+        emailPrincipal: 'com.perfil.citavel@example.com',
+      });
+      personIdsToClean.push(comPerfil.id);
+      await adminPool.query(
+        `INSERT INTO person_profile (person_id, resumo, experiencias, formacao, habilidades) VALUES ($1, $2, $3, $4, $5)`,
+        [
+          comPerfil.id,
+          'resumo pré-existente que perfilCitavel NUNCA deve expor',
+          JSON.stringify([{ cargo: 'Analista Pleno', citacaoVerbatim: 'Analista Pleno na Empresa X', offsetInicio: 10, offsetFim: 38 }]),
+          JSON.stringify([{ curso: 'Engenharia', citacaoVerbatim: 'Engenharia de Software', offsetInicio: 100, offsetFim: 122 }]),
+          JSON.stringify([{ nome: 'TypeScript', citacaoVerbatim: 'TypeScript', offsetInicio: 5, offsetFim: 15 }]),
+        ],
+      );
+
+      const semPerfil = await service.create(client, {
+        cpf: '77788899937',
+        nome: 'Pessoa Sem Perfil Citavel',
+        emailPrincipal: 'sem.perfil.citavel@example.com',
+      });
+      personIdsToClean.push(semPerfil.id);
+
+      const perfil = await service.perfilCitavel(client, comPerfil.id);
+      expect(perfil).not.toHaveProperty('resumo');
+      expect(perfil.experiencias).toEqual([{ cargo: 'Analista Pleno', citacaoVerbatim: 'Analista Pleno na Empresa X', offsetInicio: 10, offsetFim: 38 }]);
+      expect(perfil.formacao).toEqual([{ curso: 'Engenharia', citacaoVerbatim: 'Engenharia de Software', offsetInicio: 100, offsetFim: 122 }]);
+      expect(perfil.habilidades).toEqual([{ nome: 'TypeScript', citacaoVerbatim: 'TypeScript', offsetInicio: 5, offsetFim: 15 }]);
+      expect(JSON.stringify(perfil)).not.toContain('resumo pré-existente');
+
+      expect(await service.perfilCitavel(client, semPerfil.id)).toEqual({ experiencias: [], formacao: [], habilidades: [] });
+    } finally {
+      client.release();
+    }
+  });
+
+  it('a query de perfilCitavel só seleciona experiencias/formacao/habilidades -- nunca resumo -- allowlist estrutural', () => {
+    const colunasPermitidas = ['experiencias', 'formacao', 'habilidades'];
+    const selectClause = QUERY_PERFIL_CITAVEL_POR_PESSOA.match(/SELECT([\s\S]*?)FROM/i)?.[1] ?? '';
+    const colunasNaQuery = new Set(
+      selectClause
+        .split(/[\s,]+/)
+        .map((token) => token.replace(/^[a-z]+\./i, '').toLowerCase())
+        .filter(Boolean),
+    );
+
+    for (const permitida of colunasPermitidas) {
+      expect(colunasNaQuery.has(permitida)).toBe(true);
+    }
+    for (const coluna of colunasNaQuery) {
+      expect(colunasPermitidas).toContain(coluna);
+    }
+    expect(colunasNaQuery.has('resumo')).toBe(false);
   });
 });

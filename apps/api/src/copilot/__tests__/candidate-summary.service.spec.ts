@@ -5,6 +5,8 @@ import { AuditLogService } from '../../trust/audit-log.service';
 import { ModelRouterService } from '../../llm-router/model-router.service';
 import { ProviderAdapter } from '../../llm-router/model-router.types';
 import { DatabaseService } from '../../database/database.service';
+import { PersonService } from '../../talent/person.service';
+import { EnvelopeEncryptionService } from '../../talent/envelope-encryption.service';
 import { CandidateSummaryService, ApplicationNotFoundError, CandidateSummaryInsufficientDataError } from '../candidate-summary.service';
 import { CitacaoNaoVerificavelError } from '../verify-candidate-summary-citations';
 
@@ -23,6 +25,11 @@ describe('CandidateSummaryService', () => {
   appUrl.password = 'app_runtime_dev_only';
   const appPool = new Pool({ connectionString: appUrl.toString() });
   const tenantContext = new TenantContext(appPool);
+  // [Desvio do plano original] CandidateSummaryService agora depende de
+  // PersonService.perfilCitavel (roteado por PersonService em vez de SQL
+  // direto contra person_profile) para respeitar o gate consolidado da
+  // Fase 2b -- ver comentário em candidate-summary.service.ts.
+  const personService = new PersonService(new EnvelopeEncryptionService());
 
   let tenantId: string;
   let jobId: string;
@@ -94,7 +101,7 @@ describe('CandidateSummaryService', () => {
       new AdapterComFrasesFixas([{ texto: 'Foi Analista Pleno na Empresa Exemplo.', fonteId: 'experiencia:0', citacaoVerbatim: 'Analista Pleno na Empresa Exemplo Ltda' }]),
       new AdapterComFrasesFixas([]),
     );
-    const service = new CandidateSummaryService(router, new AuditLogService(), { pool: appPool } as DatabaseService);
+    const service = new CandidateSummaryService(router, new AuditLogService(), { pool: appPool } as DatabaseService, personService);
 
     const draft = await service.gerar({ tenantId, applicationId });
     expect(draft.frases).toHaveLength(1);
@@ -121,7 +128,7 @@ describe('CandidateSummaryService', () => {
       new AdapterComFrasesFixas([{ texto: 'Foi Diretor Executivo global.', fonteId: 'experiencia:0', citacaoVerbatim: 'Diretor Executivo global de operações mundiais' }]),
       new AdapterComFrasesFixas([]),
     );
-    const service = new CandidateSummaryService(router, new AuditLogService(), { pool: appPool } as DatabaseService);
+    const service = new CandidateSummaryService(router, new AuditLogService(), { pool: appPool } as DatabaseService, personService);
 
     const logAntes = await tenantContext.run(tenantId, (client) =>
       client.query<{ count: string }>(`SELECT count(*) FROM llm_call_log WHERE tenant_id = $1 AND prompt_id = 'candidate-summary'`, [tenantId]),
@@ -147,7 +154,7 @@ describe('CandidateSummaryService', () => {
       `INSERT INTO tenant (razao_social, cnpj, slug) VALUES ('Copilot Summary Outro Tenant','00000000000102','test-tenant-00000000000102') RETURNING id`,
     );
     const router = new ModelRouterService(new AuditLogService(), new AdapterComFrasesFixas([]), new AdapterComFrasesFixas([]));
-    const service = new CandidateSummaryService(router, new AuditLogService(), { pool: appPool } as DatabaseService);
+    const service = new CandidateSummaryService(router, new AuditLogService(), { pool: appPool } as DatabaseService, personService);
 
     await expect(service.gerar({ tenantId: outroTenant.rows[0].id, applicationId })).rejects.toBeInstanceOf(ApplicationNotFoundError);
 
@@ -169,7 +176,7 @@ describe('CandidateSummaryService', () => {
     );
 
     const router = new ModelRouterService(new AuditLogService(), new AdapterComFrasesFixas([]), new AdapterComFrasesFixas([]));
-    const service = new CandidateSummaryService(router, new AuditLogService(), { pool: appPool } as DatabaseService);
+    const service = new CandidateSummaryService(router, new AuditLogService(), { pool: appPool } as DatabaseService, personService);
 
     const logAntes = await tenantContext.run(tenantId, (client) =>
       client.query<{ count: string }>(`SELECT count(*) FROM llm_call_log WHERE tenant_id = $1 AND prompt_id = 'candidate-summary'`, [tenantId]),

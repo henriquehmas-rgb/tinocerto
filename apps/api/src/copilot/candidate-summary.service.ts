@@ -6,6 +6,7 @@ import { ModelRouterService } from '../llm-router/model-router.service';
 import { AuditLogService } from '../trust/audit-log.service';
 import { TenantContext } from '../database/tenant-context';
 import { DatabaseService } from '../database/database.service';
+import { PersonService } from '../talent/person.service';
 import { CitableSnippet, construirTrechosCitaveis } from './build-citable-snippets';
 import { verificarCitacoesResumoCandidato } from './verify-candidate-summary-citations';
 
@@ -35,12 +36,6 @@ export interface CandidateSummaryDraft {
   criadoEm: Date;
 }
 
-interface PersonProfileRow {
-  experiencias: { citacaoVerbatim: string; offsetInicio: number | null }[];
-  formacao: { citacaoVerbatim: string; offsetInicio: number | null }[];
-  habilidades: { citacaoVerbatim: string; offsetInicio: number | null }[];
-}
-
 @Injectable()
 export class CandidateSummaryService {
   private readonly tenantContext: TenantContext;
@@ -49,6 +44,18 @@ export class CandidateSummaryService {
     private readonly modelRouter: ModelRouterService,
     private readonly auditLog: AuditLogService,
     databaseService: DatabaseService,
+    // [Desvio do plano original, corrigido durante a execução] O design
+    // spec (decisão 8) e o plano desta fase previam SQL direto contra
+    // person_profile aqui. O gate consolidado da Fase 2b
+    // (fase-2b-gate.spec.ts, endurecido por achado de revisão adversarial
+    // daquela fase) proíbe qualquer arquivo fora de talent/person.service.ts
+    // de fazer SELECT nessa tabela -- rodar a suíte completa depois de
+    // implementar com SQL direto quebrou esse gate pré-existente. Corrigido
+    // roteando por PersonService.perfilCitavel (novo método, mesmo padrão de
+    // PersonService.habilidades já usado por AdherenceService/Fase 2b),
+    // preservando o invariante "único ponto de leitura de person_profile"
+    // em vez de enfraquecer o gate.
+    private readonly personService: PersonService,
   ) {
     this.tenantContext = new TenantContext(databaseService.pool);
   }
@@ -73,13 +80,8 @@ export class CandidateSummaryService {
       }
       const personId = app.rows[0].person_id;
 
-      const profile = await client.query<PersonProfileRow>(
-        `SELECT experiencias, formacao, habilidades FROM person_profile WHERE person_id = $1`,
-        [personId],
-      );
-      const trechos = construirTrechosCitaveis(
-        profile.rows[0] ?? { experiencias: [], formacao: [], habilidades: [] },
-      );
+      const profile = await this.personService.perfilCitavel(client, personId);
+      const trechos = construirTrechosCitaveis(profile);
       if (trechos.length === 0) {
         throw new CandidateSummaryInsufficientDataError(
           `Candidato da candidatura ${input.applicationId} não tem nenhum item de currículo com citação verificada -- não é possível gerar um resumo grounded`,
