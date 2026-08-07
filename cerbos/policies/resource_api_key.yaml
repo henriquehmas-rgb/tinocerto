@@ -1,0 +1,28 @@
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  resource: "api_key"
+  version: "default"
+  scope: ""
+  rules:
+    - name: "bloqueio-tenant-diferente"
+      actions: ["*"]
+      effect: EFFECT_DENY
+      roles: ["*"]
+      condition:
+        match:
+          expr: >
+            !(has(request.principal.attr.tenant_id) &&
+              has(request.resource.attr.tenant_id) &&
+              type(request.principal.attr.tenant_id) == string &&
+              type(request.resource.attr.tenant_id) == string &&
+              size(request.principal.attr.tenant_id) > 0 &&
+              size(request.resource.attr.tenant_id) > 0 &&
+              request.principal.attr.tenant_id == request.resource.attr.tenant_id)
+
+    # Mesma autorização que o doc 04 §1 já define para /v1/service-accounts
+    # ("somente admin_tenant") -- emissão/gestão de chave de API é uma
+    # ação administrativa, não de recrutador comum.
+    - name: "gestao-chave-api-admin"
+      actions: ["create", "read", "revoke", "rotate"]
+      effect: EFFECT_ALLOW
+      roles: ["admin_tenant"]

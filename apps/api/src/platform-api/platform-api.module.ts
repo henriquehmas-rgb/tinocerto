@@ -6,10 +6,11 @@ import { ApiKeyService } from './api-key.service';
 import { ApiKeyGuard } from './api-key.guard';
 import { IdempotencyService } from './idempotency.service';
 import { PlatformApplicationController } from './platform-application.controller';
+import { DeveloperApiKeyController } from './developer-api-key.controller';
 
 @Module({
   imports: [DatabaseModule, HiringModule],
-  controllers: [PlatformApplicationController],
+  controllers: [PlatformApplicationController, DeveloperApiKeyController],
   providers: [
     { provide: ApiKeyService, useFactory: (db: DatabaseService) => new ApiKeyService(db.pool), inject: [DatabaseService] },
     ApiKeyGuard,
