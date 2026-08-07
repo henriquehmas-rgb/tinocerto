@@ -9,6 +9,8 @@ import { IdempotencyService } from './idempotency.service';
 import { PlatformApplicationController } from './platform-application.controller';
 import { WebhookEndpointController } from './webhooks/webhook-endpoint.controller';
 import { WebhookEndpointService } from './webhooks/webhook-endpoint.service';
+import { WebhookDeliveryService } from './webhooks/webhook-delivery.service';
+import { WebhookDeliveryConsumer } from './webhooks/webhook-delivery.consumer';
 
 @Module({
   imports: [DatabaseModule, HiringModule],
@@ -19,6 +21,8 @@ import { WebhookEndpointService } from './webhooks/webhook-endpoint.service';
     IdempotencyService,
     OutboxPublishingScheduler,
     WebhookEndpointService,
+    WebhookDeliveryService,
+    WebhookDeliveryConsumer,
   ],
   exports: [ApiKeyService, IdempotencyService],
 })

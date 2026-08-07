@@ -36,14 +36,27 @@ describe('WebhookEndpointController', () => {
     serverUrl = await app.getUrl();
   });
 
+  // Desvio adicional do plano (documentado): a ordem original do plano
+  // (app.close() primeiro, DELETE de fixture depois) deixa as linhas de
+  // fixture (tenant/user_account/role_assignment) órfãs no banco sempre que
+  // app.close() ultrapassa o timeout padrão de hook do Jest (5000ms) --
+  // que É o caso aqui, mesmo quirk de ambiente já documentado no briefing
+  // (três consumers de outbox pré-existentes que não desligam limpo:
+  // ResumeParsingConsumer/AdverseImpactConsumer/CandidateApplicationSummaryConsumer,
+  // confirmado reproduzível até em route-topology.spec.ts da própria Fase
+  // 4a já mesclada, rodado isoladamente). Órfãos de fixture então colidem
+  // (unique constraint em tenant.cnpj) em reexecuções futuras da suíte.
+  // Corrigido: DELETE primeiro (rápido, sempre completa), app.close() por
+  // último com timeout de hook aumentado -- se app.close() estourar mesmo
+  // assim, ao menos o banco já está limpo.
   afterAll(async () => {
-    await app.close();
     await adminPool.query('DELETE FROM role_assignment WHERE tenant_id = $1', [tenantId]);
     await adminPool.query('DELETE FROM webhook_endpoint WHERE tenant_id = $1', [tenantId]);
     await adminPool.query('DELETE FROM user_account WHERE tenant_id = $1', [tenantId]);
     await adminPool.query('DELETE FROM tenant WHERE id = $1', [tenantId]);
     await adminPool.end();
-  });
+    await app.close();
+  }, 60_000);
 
   it('POST /v1/webhook-endpoints com url http:// (não https) é rejeitado com 400', async () => {
     const resposta = await fetch(`${serverUrl}/v1/webhook-endpoints`, {
