@@ -12,6 +12,7 @@ import { InsightsModule } from './insights/insights.module';
 import { LlmRouterModule } from './llm-router/llm-router.module';
 import { InterviewModule } from './interview/interview.module';
 import { CopilotModule } from './copilot/copilot.module';
+import { PlatformApiModule } from './platform-api/platform-api.module';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { CopilotModule } from './copilot/copilot.module';
     InsightsModule,
     InterviewModule,
     CopilotModule,
+    PlatformApiModule,
   ],
 })
 export class AppModule implements NestModule {
