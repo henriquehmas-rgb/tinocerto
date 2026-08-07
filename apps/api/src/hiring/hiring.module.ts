@@ -29,5 +29,6 @@ import { OutboxService } from '../outbox/outbox.service';
     LiaDocumentService,
     OutboxService,
   ],
+  exports: [ApplicationService],
 })
 export class HiringModule {}
