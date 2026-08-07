@@ -1,0 +1,45 @@
+accept:
+  post:
+    operationId: acceptOffer
+    summary: Candidato aceita a oferta.
+    x-tinocerto-auth: session-only
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    responses:
+      '200':
+        description: Oferta aceita.
+        content:
+          application/json:
+            schema: { $ref: '../components/schemas/hiring.yaml#/schemas/OfferRespondResponse' }
+      '404':
+        description: Oferta não encontrada.
+      '409':
+        description: Oferta já respondida.
+
+decline:
+  post:
+    operationId: declineOffer
+    summary: Candidato recusa a oferta.
+    x-tinocerto-auth: session-only
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    requestBody:
+      content:
+        application/json:
+          schema: { $ref: '../components/schemas/hiring.yaml#/schemas/DeclineOfferRequest' }
+    responses:
+      '200':
+        description: Oferta recusada.
+        content:
+          application/json:
+            schema: { $ref: '../components/schemas/hiring.yaml#/schemas/OfferRespondResponse' }
+      '404':
+        description: Oferta não encontrada.
+      '409':
+        description: Oferta já respondida.

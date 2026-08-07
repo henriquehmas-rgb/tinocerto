@@ -1,0 +1,68 @@
+openapi: 3.1.0
+info:
+  title: Tinocerto Platform API
+  version: "2026-08"
+  description: >
+    API pública do Tinocerto. Versionamento por header X-Api-Version
+    (formato YYYY-MM, estilo Shopify). Nesta versão do documento (Fase 4a
+    do roadmap), só o domínio Hiring está coberto -- ver
+    docs/superpowers/specs/2026-08-07-fase-4a-openapi-plataforma-design.md
+    §8 para o que fica de fora e por quê. Todo path aqui corresponde a uma
+    rota REAL e funcionando hoje; nenhum endpoint aspiracional.
+servers:
+  - url: https://api.tinocerto.com.br
+    description: Produção
+security:
+  - apiKey: []
+components:
+  securitySchemes:
+    apiKey:
+      type: http
+      scheme: bearer
+      description: >
+        Authorization: Bearer <chave>. Hoje só GET /v1/applications aceita
+        esta forma de autenticação -- as demais operações deste documento
+        são x-tinocerto-auth: session-only (ver extensão em cada
+        operation) e permanecem autenticadas só pela sessão interna do
+        painel do recrutador.
+# Schemas de domínio NÃO são agregados aqui via $ref -- YAML puro não tem
+# como fazer merge de duas chaves `$ref` diferentes sob o mesmo
+# `components.schemas`. Cada path file referencia o schema que precisa
+# diretamente por caminho relativo de arquivo (ex.:
+# '../components/schemas/hiring.yaml#/schemas/ApplicationView'), o que já
+# é suficiente para qualquer ferramenta compatível com OpenAPI 3.1
+# resolver o documento por inteiro -- não depende de um índice central em
+# components.schemas. Se um bundler (Redocly/swagger-cli) entrar no
+# pipeline do portal do desenvolvedor (Fase 4d), ele resolve e achata
+# essas referências automaticamente.
+paths:
+  /v1/applications:
+    $ref: './paths/applications.yaml#/root'
+  /v1/applications/{id}:
+    $ref: './paths/applications.yaml#/byId'
+  /v1/applications/{id}/actions/move-stage:
+    $ref: './paths/applications.yaml#/moveStage'
+  /v1/applications/{id}/actions/reject:
+    $ref: './paths/applications.yaml#/reject'
+  /v1/applications/{id}/actions/extend-offer:
+    $ref: './paths/applications.yaml#/extendOffer'
+  /v1/applications/{id}/offers:
+    $ref: './paths/applications.yaml#/offers'
+  /v1/applications/{id}/actions/mark-started-work:
+    $ref: './paths/applications.yaml#/markStartedWork'
+  /v1/requisitions:
+    $ref: './paths/requisitions.yaml#/root'
+  /v1/requisitions/{id}/actions/approve:
+    $ref: './paths/requisitions.yaml#/approve'
+  /v1/jobs:
+    $ref: './paths/jobs.yaml#/root'
+  /v1/jobs/{id}/actions/publish:
+    $ref: './paths/jobs.yaml#/publish'
+  /v1/jobs/{id}/actions/declarar-habilidades-exigidas:
+    $ref: './paths/jobs.yaml#/declararHabilidadesExigidas'
+  /v1/offers/{id}/actions/accept:
+    $ref: './paths/offers.yaml#/accept'
+  /v1/offers/{id}/actions/decline:
+    $ref: './paths/offers.yaml#/decline'
+  /v1/decisions/revisoes-pendentes:
+    $ref: './paths/decisions.yaml#/revisoesPendentes'

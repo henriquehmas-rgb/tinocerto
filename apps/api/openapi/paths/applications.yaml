@@ -1,0 +1,175 @@
+root:
+  get:
+    operationId: listApplications
+    summary: Lista candidaturas por cursor
+    x-tinocerto-auth: api-key
+    security:
+      - apiKey: [applications:read]
+    parameters:
+      - name: jobId
+        in: query
+        schema: { type: string, format: uuid }
+      - name: stage
+        in: query
+        schema: { type: string }
+      - name: limit
+        in: query
+        schema: { type: integer, minimum: 1, maximum: 100, default: 25 }
+      - name: cursor
+        in: query
+        schema: { type: string }
+        description: Cursor opaco devolvido em next_cursor de uma resposta anterior.
+    responses:
+      '200':
+        description: Página de candidaturas.
+        content:
+          application/json:
+            schema: { $ref: '../components/schemas/hiring.yaml#/schemas/PlatformApplicationListResponse' }
+      '401':
+        description: Credenciais ausentes ou inválidas.
+        content:
+          application/json:
+            schema: { $ref: '../components/schemas/common.yaml#/schemas/Problem' }
+      '403':
+        description: Escopo insuficiente (a chave não tem applications:read).
+        content:
+          application/json:
+            schema: { $ref: '../components/schemas/common.yaml#/schemas/Problem' }
+      '422':
+        description: Cursor malformado.
+        content:
+          application/json:
+            schema: { $ref: '../components/schemas/common.yaml#/schemas/Problem' }
+
+byId:
+  get:
+    operationId: getApplication
+    summary: Detalhe de uma candidatura (visão do recrutador).
+    x-tinocerto-auth: session-only
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    responses:
+      '200':
+        description: Candidatura encontrada.
+        content:
+          application/json:
+            schema: { $ref: '../components/schemas/hiring.yaml#/schemas/ApplicationView' }
+      '404':
+        description: Candidatura não encontrada (ou pertence a outro tenant).
+
+moveStage:
+  post:
+    operationId: moveApplicationStage
+    summary: Move a candidatura para outra etapa do funil.
+    x-tinocerto-auth: session-only
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: '../components/schemas/hiring.yaml#/schemas/MoveStageRequest' }
+    responses:
+      '201':
+        description: Transição registrada.
+        content:
+          application/json:
+            schema: { $ref: '../components/schemas/common.yaml#/schemas/IdResponse' }
+
+reject:
+  post:
+    operationId: rejectApplication
+    summary: Reprova a candidatura.
+    x-tinocerto-auth: session-only
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    requestBody:
+      content:
+        application/json:
+          schema: { $ref: '../components/schemas/hiring.yaml#/schemas/RejectApplicationRequest' }
+    responses:
+      '201':
+        description: Decisão de reprovação registrada.
+        content:
+          application/json:
+            schema: { $ref: '../components/schemas/common.yaml#/schemas/IdResponse' }
+      '404':
+        description: Candidatura não encontrada.
+
+extendOffer:
+  post:
+    operationId: extendOfferForApplication
+    summary: Estende uma oferta para a candidatura.
+    x-tinocerto-auth: session-only
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: '../components/schemas/hiring.yaml#/schemas/ExtendOfferRequest' }
+    responses:
+      '201':
+        description: Oferta criada.
+        content:
+          application/json:
+            schema: { $ref: '../components/schemas/common.yaml#/schemas/IdResponse' }
+      '404':
+        description: Candidatura não encontrada.
+      '409':
+        description: Já existe oferta pendente para esta candidatura.
+
+offers:
+  get:
+    operationId: listOffersForApplication
+    summary: Lista as ofertas de uma candidatura.
+    x-tinocerto-auth: session-only
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    responses:
+      '200':
+        description: Lista de ofertas (mais recente primeiro).
+        content:
+          application/json:
+            schema:
+              type: array
+              items: { $ref: '../components/schemas/hiring.yaml#/schemas/OfferRow' }
+
+markStartedWork:
+  post:
+    operationId: markApplicationStartedWork
+    summary: Registra a data de início de trabalho (admissão).
+    x-tinocerto-auth: session-only
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: '../components/schemas/hiring.yaml#/schemas/MarkStartedWorkRequest' }
+    responses:
+      '201':
+        description: Marco registrado.
+        content:
+          application/json:
+            schema: { $ref: '../components/schemas/common.yaml#/schemas/IdResponse' }
+      '409':
+        description: Sem oferta aceita registrada, ou início de trabalho já registrado.

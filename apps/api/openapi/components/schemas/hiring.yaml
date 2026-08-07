@@ -1,0 +1,168 @@
+schemas:
+  # ---- domínio interno (session-only), forma REAL das rotas existentes --
+  # camelCase, conforme os DTOs/serviços de src/hiring/*.ts hoje. Ver nota
+  # em openapi.yaml/design spec: só GET /v1/applications (Task 5) usa
+  # snake_case, porque é o único endpoint da forma "pública" nova desta
+  # fatia; o resto do domínio Hiring segue como está no código.
+  RequisitionOpenRequest:
+    type: object
+    required: [orgUnitId, titulo]
+    properties:
+      orgUnitId: { type: string, format: uuid }
+      titulo: { type: string }
+
+  RequisitionApproveResponse:
+    type: object
+    required: [id, status]
+    properties:
+      id: { type: string, format: uuid }
+      status: { type: string, enum: [aprovada] }
+
+  JobCreateRequest:
+    type: object
+    required: [requisitionId, titulo]
+    properties:
+      requisitionId: { type: string, format: uuid }
+      titulo: { type: string }
+      habilidadesExigidas:
+        type: array
+        items: { type: string }
+
+  JobPublishRequest:
+    type: object
+    required: [canais]
+    properties:
+      canais:
+        type: array
+        minItems: 1
+        items: { type: string }
+
+  JobPublishResponse:
+    type: object
+    required: [id, status]
+    properties:
+      id: { type: string, format: uuid }
+      status: { type: string, enum: [publicada] }
+
+  JobDeclararHabilidadesRequest:
+    type: object
+    required: [habilidades]
+    properties:
+      habilidades:
+        type: array
+        items: { type: string }
+
+  JobDeclararHabilidadesResponse:
+    type: object
+    required: [id, habilidadesExigidas]
+    properties:
+      id: { type: string, format: uuid }
+      habilidadesExigidas:
+        type: array
+        items: { type: string }
+
+  ApplicationView:
+    type: object
+    required: [id, jobId, etapaFunil, criadoEm, person]
+    properties:
+      id: { type: string, format: uuid }
+      jobId: { type: string, format: uuid }
+      etapaFunil: { type: string }
+      criadoEm: { type: string, format: date-time }
+      person:
+        type: object
+        required: [id, nome, emailPrincipal]
+        properties:
+          id: { type: string, format: uuid }
+          nome: { type: string }
+          emailPrincipal: { type: string, format: email }
+
+  MoveStageRequest:
+    type: object
+    required: [toState]
+    properties:
+      toState: { type: string }
+      reasonCode: { type: string }
+
+  RejectApplicationRequest:
+    type: object
+    properties:
+      motivoCodigo: { type: string }
+
+  ExtendOfferRequest:
+    type: object
+    required: [valor]
+    properties:
+      valor:
+        type: string
+        pattern: '^\d+(\.\d{1,2})?$'
+        description: Decimal em string (evita perda de precisão monetária), ex. "8500.00".
+
+  DeclineOfferRequest:
+    type: object
+    properties:
+      motivoCodigo: { type: string }
+
+  MarkStartedWorkRequest:
+    type: object
+    required: [startDate]
+    properties:
+      startDate: { type: string, format: date }
+
+  OfferRow:
+    type: object
+    required: [id, applicationId, valor, moeda, status, estendidoPor, estendidoEm, respondidoPor, respondidoEm, motivoRecusaCodigo]
+    properties:
+      id: { type: string, format: uuid }
+      applicationId: { type: string, format: uuid }
+      valor: { type: string }
+      moeda: { type: string }
+      status: { type: string, enum: [estendida, aceita, recusada] }
+      estendidoPor: { type: string, format: uuid }
+      estendidoEm: { type: string, format: date-time }
+      respondidoPor: { type: [string, "null"], format: uuid }
+      respondidoEm: { type: [string, "null"], format: date-time }
+      motivoRecusaCodigo: { type: [string, "null"] }
+
+  OfferRespondResponse:
+    type: object
+    required: [id, applicationId]
+    properties:
+      id: { type: string, format: uuid }
+      applicationId: { type: string, format: uuid }
+
+  RevisaoPendenteRow:
+    type: object
+    required: [id, applicationId, tipo, motivoCodigo, decididoPor, revisaoSolicitadaEm, criadoEm]
+    properties:
+      id: { type: string, format: uuid }
+      applicationId: { type: string, format: uuid }
+      tipo: { type: string, enum: [aprovacao, reprovacao, oferta] }
+      motivoCodigo: { type: [string, "null"] }
+      decididoPor: { type: string, format: uuid }
+      revisaoSolicitadaEm: { type: [string, "null"], format: date-time }
+      criadoEm: { type: string, format: date-time }
+
+  # ---- superfície pública nova (API key), snake_case conforme doc 04 §1 --
+  PlatformApplicationListItem:
+    type: object
+    required: [id, job_id, candidate_id, stage, created_at]
+    properties:
+      id: { type: string, format: uuid }
+      job_id: { type: string, format: uuid }
+      candidate_id:
+        type: string
+        format: uuid
+        description: Referência opaca ao Person global -- nunca expande para nome/e-mail nesta listagem (ver 03-arquitetura-e-modelo-de-dados.md §2.3).
+      stage: { type: string, description: "Valor do funil (mesma taxonomia interna, ex. triagem) -- só a CHAVE do campo é traduzida para inglês." }
+      created_at: { type: string, format: date-time }
+
+  PlatformApplicationListResponse:
+    type: object
+    required: [data, has_more, next_cursor]
+    properties:
+      data:
+        type: array
+        items: { $ref: '#/schemas/PlatformApplicationListItem' }
+      has_more: { type: boolean }
+      next_cursor: { type: [string, "null"] }

@@ -1,0 +1,13 @@
+revisoesPendentes:
+  get:
+    operationId: listPendingReviews
+    summary: Lista decisões de reprovação com revisão humana solicitada pelo candidato.
+    x-tinocerto-auth: session-only
+    responses:
+      '200':
+        description: Fila de revisões pendentes.
+        content:
+          application/json:
+            schema:
+              type: array
+              items: { $ref: '../components/schemas/hiring.yaml#/schemas/RevisaoPendenteRow' }
