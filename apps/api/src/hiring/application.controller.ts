@@ -1,5 +1,5 @@
-import { Body, Controller, Get, Param, Post, Req, UseGuards, NotFoundException, BadRequestException } from '@nestjs/common';
-import { IsNotEmpty, IsOptional, IsString, isUUID } from 'class-validator';
+import { Body, Controller, Get, Param, Post, Req, UseGuards, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
+import { IsNotEmpty, IsOptional, IsString, Matches, isUUID } from 'class-validator';
 import { Request } from 'express';
 import { TenantContext } from '../database/tenant-context';
 import { DatabaseService } from '../database/database.service';
@@ -8,6 +8,7 @@ import { CerbosCheck } from '../authz/cerbos-check.decorator';
 import { ApplicationService } from './application.service';
 import { PipelineStageTransitionService } from './pipeline-stage-transition.service';
 import { DecisionService } from './decision.service';
+import { OfferService, OfertaPendenteExistenteError } from './offer.service';
 
 class MoveStageDto {
   @IsString()
@@ -23,6 +24,13 @@ class RejectApplicationDto {
   @IsOptional()
   @IsString()
   motivoCodigo?: string;
+}
+
+class ExtendOfferDto {
+  @IsString()
+  @IsNotEmpty()
+  @Matches(/^\d+(\.\d{1,2})?$/, { message: 'valor deve ser um decimal com até 2 casas (ex.: "8500.00")' })
+  valor!: string;
 }
 
 interface RequestWithAuthContext extends Request {
@@ -51,7 +59,8 @@ interface RequestWithAuthContext extends Request {
 // acesso cross-tenant) degradaria para um bug de robustez de API. A função
 // abaixo detecta especificamente essa violação para traduzi-la num 404
 // limpo (mesma semântica de `findOne`: da perspectiva de quem chama, a
-// candidatura simplesmente não existe neste tenant).
+// candidatura simplesmente não existe neste tenant). extend-offer usa o
+// mesmo tratamento contra fk_offer_tenant_application (hiring_0015).
 function isForeignKeyViolation(err: unknown, constraintName: string): boolean {
   return (
     typeof err === 'object' &&
@@ -70,6 +79,7 @@ export class ApplicationController {
     private readonly applicationService: ApplicationService,
     private readonly pipelineStageTransitionService: PipelineStageTransitionService,
     private readonly decisionService: DecisionService,
+    private readonly offerService: OfferService,
     databaseService: DatabaseService,
   ) {
     this.tenantContext = new TenantContext(databaseService.pool);
@@ -131,5 +141,34 @@ export class ApplicationController {
       }
       throw err;
     }
+  }
+
+  @Post(':id/actions/extend-offer')
+  @CerbosCheck('offer', 'extend')
+  async extendOffer(@Req() req: RequestWithAuthContext, @Param('id') id: string, @Body() dto: ExtendOfferDto) {
+    try {
+      return await this.tenantContext.run(req.tenantId, (client) =>
+        this.offerService.extend(client, {
+          tenantId: req.tenantId,
+          applicationId: id,
+          valor: dto.valor,
+          estendidoPor: req.userId,
+        }),
+      );
+    } catch (err) {
+      if (isForeignKeyViolation(err, 'fk_offer_tenant_application')) {
+        throw new NotFoundException(`Candidatura ${id} não encontrada`);
+      }
+      if (err instanceof OfertaPendenteExistenteError) {
+        throw new ConflictException(err.message);
+      }
+      throw err;
+    }
+  }
+
+  @Get(':id/offers')
+  @CerbosCheck('offer', 'read')
+  async listOffers(@Req() req: RequestWithAuthContext, @Param('id') id: string) {
+    return this.tenantContext.run(req.tenantId, (client) => this.offerService.listByApplication(client, req.tenantId, id));
   }
 }

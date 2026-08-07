@@ -1,14 +1,19 @@
 import { Test } from '@nestjs/testing';
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { ApplicationController } from '../application.controller';
 import { ApplicationService } from '../application.service';
 import { PipelineStageTransitionService } from '../pipeline-stage-transition.service';
 import { DecisionService } from '../decision.service';
+import { OfferService } from '../offer.service';
 import { DatabaseService } from '../../database/database.service';
 import { CerbosGuard } from '../../authz/cerbos.guard';
 
 describe('ApplicationController', () => {
-  async function buildController(moveStageMock: jest.Mock, recordMock: jest.Mock = jest.fn()) {
+  async function buildController(
+    moveStageMock: jest.Mock,
+    recordMock: jest.Mock = jest.fn(),
+    offerServiceMock: { extend?: jest.Mock; listByApplication?: jest.Mock } = {},
+  ) {
     const fakeClient = { query: jest.fn().mockResolvedValue({ rows: [] }), release: jest.fn() };
     const fakePool = { connect: jest.fn().mockResolvedValue(fakeClient) };
     const moduleRef = await Test.createTestingModule({
@@ -21,6 +26,14 @@ describe('ApplicationController', () => {
         // controller, que agora exige a dependência. Os testes de reject
         // abaixo passam seu próprio recordMock.
         { provide: DecisionService, useValue: { record: recordMock } },
+        // OfferService (Fase 3d, Task 3) -- mock vazio por padrão para
+        // satisfazer o construtor nos testes de move-stage/reject que não
+        // exercitam extend-offer/offers; os testes de extend-offer/offers
+        // abaixo passam seus próprios mocks de extend/listByApplication.
+        {
+          provide: OfferService,
+          useValue: { extend: offerServiceMock.extend ?? jest.fn(), listByApplication: offerServiceMock.listByApplication ?? jest.fn() },
+        },
         { provide: DatabaseService, useValue: { pool: fakePool } },
       ],
     })
@@ -101,5 +114,81 @@ describe('ApplicationController', () => {
     await expect(
       controller.reject(req, 'application-1', { motivoCodigo: 'perfil_nao_aderente' }),
     ).rejects.toBe(outraFalha);
+  });
+
+  // [Fase 3d, Task 3] extend-offer / offers. Nota de desvio do plano: o
+  // esqueleto original deste describe (plano, Task 3 Step 6) descrevia
+  // fixtures reais via adminPool (tenant/org_unit/... + TestingModule com
+  // OfferService REAL) -- mas este arquivo, como já escrito antes desta
+  // fase, é uma suíte de unidade do controller com TODOS os serviços
+  // mockados (ver buildController acima); não existe nenhum precedente de
+  // bootstrap de app HTTP real (supertest) ou de fixture Postgres neste
+  // arquivo especificamente, e a disciplina do projeto (documentada em
+  // offer.controller.spec.ts, Task 3) é mockar só na fronteira de
+  // transporte, nunca lógica de domínio/banco -- o comportamento real de
+  // banco/outbox de extend-offer já está integralmente coberto por
+  // offer.service.spec.ts (Task 2) e pelo gate consolidado (Task 7). Os
+  // testes abaixo seguem a convenção real deste arquivo (mock de
+  // OfferService) em vez do esqueleto do plano. Por esse mesmo motivo, o
+  // caso "valor inválido rejeitado pelo ValidationPipe (400)" do esqueleto
+  // do plano foi omitido -- chamar o método do controller diretamente (como
+  // todo teste deste arquivo faz) nunca passa pelo pipeline HTTP/pipes do
+  // Nest, então não há como exercitar validação de DTO por este caminho;
+  // nenhum teste existente no projeto inteiro bootstrapa um app HTTP real
+  // (grep por supertest/INestApplication.listen não encontra nenhum uso).
+  describe('extend-offer / offers (Fase 3d)', () => {
+    it('POST :id/actions/extend-offer traduz violação da FK composta cross-tenant (fk_offer_tenant_application) em 404', async () => {
+      const pgForeignKeyError = Object.assign(
+        new Error('insert or update on table "offer" violates foreign key constraint "fk_offer_tenant_application"'),
+        { code: '23503', constraint: 'fk_offer_tenant_application' },
+      );
+      const extendMock = jest.fn().mockRejectedValue(pgForeignKeyError);
+      const moveStageMock = jest.fn();
+      const controller = await buildController(moveStageMock, jest.fn(), { extend: extendMock });
+      const req = { tenantId: 'tenant-abc', userId: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', userRoles: ['recrutador'] } as any;
+
+      await expect(controller.extendOffer(req, 'application-de-outro-tenant', { valor: '8500.00' })).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+    });
+
+    it('POST :id/actions/extend-offer traduz OfertaPendenteExistenteError em 409', async () => {
+      const { OfertaPendenteExistenteError } = await import('../offer.service');
+      const extendMock = jest.fn().mockRejectedValue(new OfertaPendenteExistenteError('oferta pendente'));
+      const moveStageMock = jest.fn();
+      const controller = await buildController(moveStageMock, jest.fn(), { extend: extendMock });
+      const req = { tenantId: 'tenant-abc', userId: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', userRoles: ['recrutador'] } as any;
+
+      await expect(controller.extendOffer(req, 'application-1', { valor: '9000.00' })).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('POST :id/actions/extend-offer delega para OfferService.extend com o valor e estendidoPor = req.userId', async () => {
+      const extendMock = jest.fn().mockResolvedValue({ id: 'offer-1' });
+      const moveStageMock = jest.fn();
+      const controller = await buildController(moveStageMock, jest.fn(), { extend: extendMock });
+      const req = { tenantId: 'tenant-abc', userId: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', userRoles: ['recrutador'] } as any;
+
+      const result = await controller.extendOffer(req, 'application-1', { valor: '8500.00' });
+
+      expect(result).toEqual({ id: 'offer-1' });
+      expect(extendMock).toHaveBeenCalledWith(expect.anything(), {
+        tenantId: 'tenant-abc',
+        applicationId: 'application-1',
+        valor: '8500.00',
+        estendidoPor: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
+      });
+    });
+
+    it('GET :id/offers delega para OfferService.listByApplication e devolve a lista', async () => {
+      const listByApplicationMock = jest.fn().mockResolvedValue([{ id: 'offer-1', status: 'estendida' }]);
+      const moveStageMock = jest.fn();
+      const controller = await buildController(moveStageMock, jest.fn(), { listByApplication: listByApplicationMock });
+      const req = { tenantId: 'tenant-abc', userId: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', userRoles: ['recrutador'] } as any;
+
+      const result = await controller.listOffers(req, 'application-1');
+
+      expect(result).toEqual([{ id: 'offer-1', status: 'estendida' }]);
+      expect(listByApplicationMock).toHaveBeenCalledWith(expect.anything(), 'tenant-abc', 'application-1');
+    });
   });
 });

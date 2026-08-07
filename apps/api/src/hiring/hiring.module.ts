@@ -9,13 +9,15 @@ import { ApplicationService } from './application.service';
 import { PipelineStageTransitionService } from './pipeline-stage-transition.service';
 import { CandidateTouchpointService } from './candidate-touchpoint.service';
 import { DecisionService } from './decision.service';
+import { OfferService } from './offer.service';
+import { OfferController } from './offer.controller';
 import { ApplicationCustomFieldResponseService } from './application-custom-field-response.service';
 import { QuotaService } from './quota.service';
 import { LiaDocumentService } from './lia-document.service';
 import { OutboxService } from '../outbox/outbox.service';
 
 @Module({
-  controllers: [RequisitionController, JobController, ApplicationController],
+  controllers: [RequisitionController, JobController, ApplicationController, OfferController],
   providers: [
     RequisitionService,
     JobService,
@@ -24,6 +26,7 @@ import { OutboxService } from '../outbox/outbox.service';
     PipelineStageTransitionService,
     CandidateTouchpointService,
     DecisionService,
+    OfferService,
     ApplicationCustomFieldResponseService,
     QuotaService,
     LiaDocumentService,
