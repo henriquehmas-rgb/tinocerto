@@ -34,7 +34,31 @@ export class DatabaseService implements OnModuleDestroy {
         'APP_DATABASE_URL ausente — DatabaseService nunca deve conectar sem essa variável, ver Task 18/fix final da Fase 0',
       );
     }
-    this.pool = new Pool({ connectionString: process.env.APP_DATABASE_URL });
+    // max/connectionTimeoutMillis explícitos: os defaults do pg (max=10,
+    // espera infinita em pool.connect() quando saturado) deixam a
+    // aplicação inteira vulnerável a stall silencioso sob carga
+    // concorrente. Chamadas de LLM (BarsGenerationService,
+    // ModelRouterService com fallback entre providers) podem segurar uma
+    // conexão do pool por até ~120s no pior caso (2x timeout de 60s). Um
+    // burst de requisições concorrentes ao endpoint de geração de roteiro
+    // de entrevista via IA pode consumir todas as conexões do pool por
+    // até 120s cada — qualquer OUTRA requisição de QUALQUER outro
+    // endpoint que precise de conexão nesse intervalo (login, listagem
+    // de vaga, submissão de scorecard) ficaria bloqueada em
+    // pool.connect() indefinidamente, sem erro, sem timeout, até uma
+    // conexão liberar.
+    //
+    // connectionTimeoutMillis NÃO resolve esse problema de fundo — só
+    // transforma "trava para sempre, silenciosamente" em "falha com erro
+    // claro depois de 10s", o que já é uma melhoria real de robustez.
+    // A correção definitiva (rate-limit no endpoint de geração de
+    // roteiro, ou uma pool dedicada para operações de LLM) fica fora do
+    // escopo deste fix pontual.
+    this.pool = new Pool({
+      connectionString: process.env.APP_DATABASE_URL,
+      max: 20,
+      connectionTimeoutMillis: 10_000,
+    });
   }
 
   async query<T extends QueryResultRow = QueryResultRow>(
