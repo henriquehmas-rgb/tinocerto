@@ -71,6 +71,9 @@
     "interview_0003__interview_guide_version.sql",
     "interview_0004__interview_schedule.sql",
     "interview_0005__interview_evaluator.sql",
-    "interview_0006__scorecard.sql"
+    "interview_0006__scorecard.sql",
+    "copilot_0001__job_description_suggestion.sql",
+    "copilot_0002__candidate_summary_draft.sql",
+    "copilot_0003__interview_question_suggestion.sql"
   ]
 }
