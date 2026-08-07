@@ -1,0 +1,32 @@
+# cerbos/policies/resource_google_calendar_connection.yaml
+#
+# Sem regra de "dono vs. terceiro": o servidor nunca aceita um userId vindo
+# do cliente para connect/read/disconnect (sempre req.userId) -- não existe
+# caminho de código onde alguém tentaria ler/desconectar a conexão de
+# outro usuário. Checagem grossa de tenant+papel basta, mesmo padrão de
+# interview_schedule (create/read/update sem checagem por linha).
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  resource: "google_calendar_connection"
+  version: "default"
+  scope: ""
+  rules:
+    - name: "bloqueio-tenant-diferente"
+      actions: ["*"]
+      effect: EFFECT_DENY
+      roles: ["*"]
+      condition:
+        match:
+          expr: >
+            !(has(request.principal.attr.tenant_id) &&
+              has(request.resource.attr.tenant_id) &&
+              type(request.principal.attr.tenant_id) == string &&
+              type(request.resource.attr.tenant_id) == string &&
+              size(request.principal.attr.tenant_id) > 0 &&
+              size(request.resource.attr.tenant_id) > 0 &&
+              request.principal.attr.tenant_id == request.resource.attr.tenant_id)
+
+    - name: "autogerenciamento-de-conexao"
+      actions: ["connect", "read", "disconnect"]
+      effect: EFFECT_ALLOW
+      roles: ["admin_tenant", "recrutador", "gestor_vaga", "entrevistador"]

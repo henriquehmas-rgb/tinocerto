@@ -31,7 +31,7 @@ export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
     consumer
       .apply(TenantResolutionMiddleware)
-      .exclude('v1/candidate/(.*)', 'v1/public/(.*)')
+      .exclude('v1/candidate/(.*)', 'v1/public/(.*)', 'v1/calendar-connections/google/callback')
       .forRoutes('*');
   }
 }
