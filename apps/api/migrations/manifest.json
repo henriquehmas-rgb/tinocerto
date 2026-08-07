@@ -73,6 +73,7 @@
     "interview_0005__interview_evaluator.sql",
     "interview_0006__scorecard.sql",
     "hiring_0015__offer.sql",
-    "hiring_0016__application_started_work.sql"
+    "hiring_0016__application_started_work.sql",
+    "hiring_0017__decision_revisao_solicitada_em.sql"
   ]
 }
