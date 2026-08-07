@@ -23,7 +23,7 @@ describe('WebhookDeliveryConsumer', () => {
   let tenantId: string;
   let server: Server;
   let serverPort: number;
-  let requisicoesRecebidas: string[] = [];
+  const requisicoesRecebidas: string[] = [];
 
   beforeAll(async () => {
     const t = await adminPool.query<{ id: string }>(

@@ -19,7 +19,7 @@ describe('WebhookRetryScheduler.processDueRetries', () => {
   let tenantId: string;
   let server: Server;
   let serverPort: number;
-  let corposRecebidos: string[] = [];
+  const corposRecebidos: string[] = [];
   let statusASimular = 500;
 
   beforeAll(async () => {

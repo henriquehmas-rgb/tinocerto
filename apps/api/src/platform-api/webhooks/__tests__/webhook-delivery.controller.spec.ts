@@ -25,7 +25,6 @@ describe('WebhookDeliveryController (unitário, sem boot HTTP -- boot completo f
   let tenantId: string;
   let server: Server;
   let serverPort: number;
-  let requisicoesRecebidas = 0;
   let statusASimular = 500;
 
   beforeAll(async () => {
@@ -34,7 +33,6 @@ describe('WebhookDeliveryController (unitário, sem boot HTTP -- boot completo f
     );
     tenantId = t.rows[0].id;
     server = createServer((req, res) => {
-      requisicoesRecebidas++;
       res.writeHead(statusASimular);
       res.end();
     });

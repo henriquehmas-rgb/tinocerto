@@ -46,7 +46,7 @@ describe('WebhookEndpointService', () => {
       service.create(client, { tenantId, url: 'https://exemplo.com.br/rotacao', eventosFiltro: [] }),
     );
     const primeiro = created.segredoAtual;
-    const rot1 = await tenantContext.run(tenantId, (client) => service.rotateSecret(client, created.id));
+    await tenantContext.run(tenantId, (client) => service.rotateSecret(client, created.id));
     const rot2 = await tenantContext.run(tenantId, (client) => service.rotateSecret(client, created.id));
     const rot3 = await tenantContext.run(tenantId, (client) => service.rotateSecret(client, created.id));
 
