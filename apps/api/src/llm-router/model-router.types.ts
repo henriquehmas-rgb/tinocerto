@@ -16,6 +16,17 @@ export interface ModelRouterInput<T> {
     tenantId: string;
     actorId?: string;
   };
+  // [Fix 6 da revisão final] Controla o que é gravado em
+  // llm_call_log.output_summary -- por padrão (omitido) grava o `data`
+  // inteiro, preservando o comportamento anterior para qualquer consumidor
+  // que não opte por isto. Um consumidor cuja saída carregue dado pessoal
+  // (ex.: parsing de currículo, que inclui citações verbatim do CV) deve
+  // fornecer um resumo estrutural aqui em vez de deixar o payload completo
+  // duplicado nesta tabela de telemetria -- minimização de dados (LGPD),
+  // mesmo princípio já aplicado ao hash do input. llm_call_log não tem
+  // coluna person_id nem GRANT de DELETE, então um pedido de eliminação
+  // LGPD não alcançaria um payload de dado pessoal guardado aqui.
+  logOutputAs?: (data: T) => unknown;
 }
 
 export interface ModelRouterOutput<T> {

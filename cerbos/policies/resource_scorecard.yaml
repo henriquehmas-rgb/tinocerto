@@ -1,10 +1,23 @@
 # Não é chamado pelo CerbosGuard genérico (que só monta resource.attr.tenant_id
 # -- ver comentário em application.controller.ts sobre a mesma limitação
-# estrutural). Um serviço numa task futura chama CerbosService.check
-# diretamente, uma vez por linha, montando os atributos completos.
-# submetido_por precisa ser um mapa COMPLETO (uma entrada por avaliador da
-# entrevista, nunca esparso) -- indexar uma chave ausente de um mapa em CEL
-# lança erro em runtime em vez de devolver falso.
+# estrutural). apps/api/src/interview/scorecard.service.ts chama
+# CerbosService.check diretamente, uma vez por linha, montando os atributos
+# completos.
+# submetido_por é um mapa com uma entrada por AVALIADOR DA ENTREVISTA (nunca
+# um por principal que possa chamar o endpoint) -- por isso a regra abaixo
+# usa o operador `in` do CEL para checar pertencimento antes de indexar: um
+# principal que não é avaliador desta entrevista (ex.: um recrutador ou
+# admin_tenant que nunca submeteu scorecard) não tem chave no mapa, e a
+# expressão precisa ser total (bem definida) para QUALQUER principal que
+# alcance esta policy, não só para avaliadores. Cerbos NÃO propaga uma
+# indexação de chave ausente como exceção até a camada de aplicação --
+# antes desta regra usar `in`, essa indexação ausente era absorvida
+# internamente pelo Cerbos como erro de avaliação do CEL e resultava em
+# DENY, o que já era seguro, mas era um acidente da forma do mapa, não uma
+# decisão de política explícita. Com o guard `in`, a negação para um
+# principal não-avaliador é agora um EFFECT_ALLOW que simplesmente não
+# casa (a condição é `false`, não um erro) -- mesmo resultado observável,
+# mecanismo real e intencional.
 apiVersion: api.cerbos.dev/v1
 resourcePolicy:
   resource: "scorecard"
@@ -41,4 +54,5 @@ resourcePolicy:
         match:
           expr: >
             request.resource.attr.submetido_em != null &&
+            (request.principal.id in request.resource.attr.submetido_por) &&
             request.resource.attr.submetido_por[request.principal.id] == true

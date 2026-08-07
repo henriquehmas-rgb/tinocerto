@@ -48,6 +48,16 @@ export class ResumeStructuringService {
       system: SYSTEM_PROMPT,
       messages: [{ role: 'user', content: texto }],
       metadata: { promptId: 'resume-parsing', promptVersion: 'v1', tenantId },
+      // [Fix 6 da revisão final] A saída desta chamada carrega dado pessoal
+      // do candidato, incluindo citações verbatim do currículo -- em vez
+      // de deixar o payload completo duplicado em llm_call_log.output_summary
+      // (tabela de telemetria sem person_id e sem GRANT de DELETE, fora do
+      // alcance de um pedido de eliminação LGPD), gravamos só as contagens.
+      logOutputAs: (data) => ({
+        experienciasCount: data.experiencias.length,
+        formacaoCount: data.formacao.length,
+        habilidadesCount: data.habilidades.length,
+      }),
     });
     return output.data;
   }

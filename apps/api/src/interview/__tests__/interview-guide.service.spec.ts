@@ -1,7 +1,7 @@
 import { Pool } from 'pg';
 import { TenantContext } from '../../database/tenant-context';
 import { CompetencyService } from '../competency.service';
-import { InterviewGuideService } from '../interview-guide.service';
+import { InterviewGuideService, InterviewGuideNotFoundError, InterviewGuidePublishEmptyError } from '../interview-guide.service';
 
 describe('InterviewGuideService', () => {
   const adminPool = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -102,10 +102,38 @@ describe('InterviewGuideService', () => {
     expect(Number(count.rows[0].n)).toBe(1);
   });
 
+  // [Minor 1 da revisão final] Assertiva apertada de .rejects.toThrow()
+  // genérico para checar a classe específica -- prova que um roteiro sem
+  // nenhuma competência é discriminado de um roteiro inexistente
+  // (InterviewGuideNotFoundError, testado abaixo).
   it('não publica um roteiro sem nenhuma competência', async () => {
     const { id: guideId } = await tenantContext.run(tenantId, (client) =>
       guideService.criarRascunho(client, { tenantId, jobId, competencias: [] }),
     );
-    await expect(tenantContext.run(tenantId, (client) => guideService.publicar(client, tenantId, guideId))).rejects.toThrow();
+    await expect(
+      tenantContext.run(tenantId, (client) => guideService.publicar(client, tenantId, guideId)),
+    ).rejects.toBeInstanceOf(InterviewGuidePublishEmptyError);
+  });
+
+  // [Minor 1 da revisão final] Complementa o teste acima -- guia
+  // inexistente lança uma classe DIFERENTE (InterviewGuideNotFoundError),
+  // não a mesma usada para "sem competência".
+  it('não publica um roteiro inexistente', async () => {
+    const idInexistente = '00000000-0000-0000-0000-000000000000';
+    await expect(
+      tenantContext.run(tenantId, (client) => guideService.publicar(client, tenantId, idInexistente)),
+    ).rejects.toBeInstanceOf(InterviewGuideNotFoundError);
+  });
+
+  // [Minor 2 da revisão final] editarRascunho() de um guia inexistente (ou
+  // de outro tenant, bloqueado pela RLS) não deve mais fazer no-op
+  // silencioso -- deve lançar InterviewGuideNotFoundError.
+  it('não edita silenciosamente um roteiro inexistente -- lança InterviewGuideNotFoundError', async () => {
+    const idInexistente = '00000000-0000-0000-0000-000000000000';
+    await expect(
+      tenantContext.run(tenantId, (client) =>
+        guideService.editarRascunho(client, tenantId, idInexistente, [COMPETENCIAS_5_ANCORAS('Comunicação')]),
+      ),
+    ).rejects.toBeInstanceOf(InterviewGuideNotFoundError);
   });
 });

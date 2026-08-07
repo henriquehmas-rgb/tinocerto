@@ -1,16 +1,17 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { Pool } from 'pg';
-import { z } from 'zod';
 import { TenantContext } from '../../database/tenant-context';
 import { AuditLogService } from '../../trust/audit-log.service';
 import { ModelRouterService } from '../../llm-router/model-router.service';
 import { ProviderAdapter } from '../../llm-router/model-router.types';
 import { CerbosService } from '../../authz/cerbos.service';
+import { DatabaseService } from '../../database/database.service';
 import { CompetencyService } from '../../interview/competency.service';
 import { InterviewGuideService } from '../../interview/interview-guide.service';
 import { InterviewScheduleService } from '../../interview/interview-schedule.service';
 import { ScorecardService } from '../../interview/scorecard.service';
+import { BarsGenerationService } from '../../interview/bars-generation.service';
 
 function listarArquivosDeProducao(dir: string, acc: string[] = []): string[] {
   for (const entrada of readdirSync(dir)) {
@@ -69,17 +70,28 @@ describe('Gate consolidado — Fase 3a (Model Router + Interview)', () => {
     },
   );
 
-  it('nenhum arquivo de produção fora de llm-router/ e interview/ chama SDK de fornecedor de LLM diretamente', () => {
-    const arquivos = listarArquivosDeProducao(SRC_ROOT).filter(
-      (f) => !f.includes(`${path.sep}llm-router${path.sep}`) && !f.includes(`${path.sep}interview${path.sep}`),
-    );
+  // [Minor 4 da revisão final] Exclusão de interview/ removida -- nada sob
+  // src/interview/ legitimamente importa os SDKs crus (toda chamada de LLM
+  // ali passa pelo Model Router), então excluir a pasta não ganhava nada e
+  // esconderia uma violação futura real (ex.: uma feature de Copiloto que
+  // pousasse ali sem passar pelo router). Regex também ampliado para pegar
+  // um import nu do pacote do SDK, não só `new X(...)` -- só
+  // llm-router/provider-adapter.ts deve legitimamente casar, e esse
+  // arquivo já é excluído da varredura abaixo.
+  it('nenhum arquivo de produção fora de llm-router/ chama SDK de fornecedor de LLM diretamente', () => {
+    const arquivos = listarArquivosDeProducao(SRC_ROOT).filter((f) => !f.includes(`${path.sep}llm-router${path.sep}`));
     expect(arquivos.length).toBeGreaterThan(50);
 
-    const padraoSdkDireto = /new\s+(Anthropic|OpenAI)\s*\(/;
+    const padraoSdkDireto = /new\s+(Anthropic|OpenAI)\s*\(|from\s+['"]@anthropic-ai\/sdk['"]|from\s+['"]openai['"]/;
     const ofensores = arquivos.filter((f) => padraoSdkDireto.test(readFileSync(f, 'utf-8')));
     expect(ofensores.map((f) => path.relative(SRC_ROOT, f))).toEqual([]);
   });
 
+  // [Minor 5 da revisão final] Antes só checava presença (toContain) --
+  // "na ordem certa" no título não era exercitado por nenhuma asserção.
+  // Agora compara os índices reais das migrations esperadas no manifest
+  // contra a mesma lista ordenada -- se alguma vier fora de ordem (ex.:
+  // scorecard antes de competency), o teste falha de verdade.
   it('as migrations da Fase 3a estão registradas no manifest, na ordem certa', () => {
     const manifest = JSON.parse(readFileSync(path.join(SRC_ROOT, '../migrations/manifest.json'), 'utf-8')) as {
       migrations: string[];
@@ -93,38 +105,91 @@ describe('Gate consolidado — Fase 3a (Model Router + Interview)', () => {
       'interview_0005__interview_evaluator.sql',
       'interview_0006__scorecard.sql',
     ];
-    for (const migration of esperadas) {
-      expect(manifest.migrations).toContain(migration);
-    }
+    const indices = esperadas.map((m) => manifest.migrations.indexOf(m));
+    expect(indices.every((i) => i !== -1)).toBe(true);
+    expect(indices).toEqual([...indices].sort((a, b) => a - b));
   });
 
   it('trocar o provedor mockado por trás do Model Router não exige nenhuma alteração de código no consumidor (BARS generation)', async () => {
     let tenantId: string | undefined;
     try {
       const t = await adminPool.query<{ id: string }>(
-        `INSERT INTO tenant (razao_social, cnpj, slug) VALUES ('Gate 3a Ltda','00000000000081','test-tenant-00000000000081') RETURNING id`,
+        `INSERT INTO tenant (razao_social, cnpj, slug) VALUES ('Gate 3a Swap Ltda','00000000000085','test-tenant-00000000000085') RETURNING id`,
       );
       tenantId = t.rows[0].id;
+      const orgUnit = await adminPool.query<{ id: string }>(
+        `INSERT INTO org_unit (tenant_id, tipo, nome, materialized_path) VALUES ($1, 'empresa', 'Matriz', 'matriz') RETURNING id`,
+        [tenantId],
+      );
+      const req = await adminPool.query<{ id: string }>(
+        `INSERT INTO requisition (tenant_id, org_unit_id, titulo, status, approved_at) VALUES ($1, $2, 'Req Swap', 'aprovada', now()) RETURNING id`,
+        [tenantId, orgUnit.rows[0].id],
+      );
+      const job = await adminPool.query<{ id: string }>(
+        `INSERT INTO job (tenant_id, requisition_id, titulo, seo_slug) VALUES ($1, $2, 'Vaga Swap', 'vaga-swap') RETURNING id`,
+        [tenantId, req.rows[0].id],
+      );
 
-      // Mesmo ModelRouterService -- só o ADAPTER injetado muda entre
-      // "primário fora do ar" e "primário saudável". É o teste de portão
-      // exigido por 08-mapa-de-agentes.md §2.3 para toda a Fase 3.
-      const routerComPrimarioFalho = new ModelRouterService(new AuditLogService(), new AdapterFalho('anthropic'), new AdapterFalho('openai'));
-      await expect(
-        tenantContext.run(tenantId, (client) =>
-          routerComPrimarioFalho.complete({
-            client,
-            tier: 'tier2',
-            schema: z.object({ ok: z.boolean() }),
-            system: 'teste',
-            messages: [{ role: 'user', content: 'teste' }],
-            metadata: { promptId: 'gate-teste', promptVersion: 'v1', tenantId: tenantId! },
-          }),
+      const roteiroValido = {
+        competencias: [
+          {
+            nome: 'Comunicação',
+            ancoras: [1, 2, 3, 4, 5].map((nivel) => ({ nivel, descricaoComportamental: `Nível ${nivel}` })),
+          },
+        ],
+      };
+      // <T> explícito e cast em `data`: mesmo padrão dos outros doubles de
+      // teste no projeto (ex.: AdapterFixo em model-router.service.spec.ts)
+      // -- ProviderAdapter é genérico sobre T, mas este double devolve
+      // sempre o mesmo roteiro fixo.
+      class AdapterSaudavel implements ProviderAdapter {
+        constructor(public readonly name: 'anthropic' | 'openai') {}
+        async complete<T>() {
+          return { data: roteiroValido as T, modelId: `fake-${this.name}`, inputTokens: 100, outputTokens: 100 };
+        }
+      }
+
+      const guideService = new InterviewGuideService(new CompetencyService());
+
+      // Rodada 1: adapter "primário" saudável.
+      const barsPrimarioSaudavel = new BarsGenerationService(
+        new ModelRouterService(new AuditLogService(), new AdapterSaudavel('anthropic'), new AdapterFalho('openai')),
+        guideService,
+        { pool: appPool } as DatabaseService,
+      );
+      const draft1 = await tenantContext.run(tenantId, (client) =>
+        barsPrimarioSaudavel.gerarRascunho(client, { tenantId: tenantId!, jobId: job.rows[0].id, tituloVaga: 'x', textoRequisicao: 'y' }),
+      );
+      expect(draft1.id).toBeDefined();
+
+      // Rodada 2: MESMO código de BarsGenerationService -- só o adapter
+      // injetado no router muda. Primário agora falha, o fallback assume.
+      const barsComFallback = new BarsGenerationService(
+        new ModelRouterService(new AuditLogService(), new AdapterFalho('anthropic'), new AdapterSaudavel('openai')),
+        guideService,
+        { pool: appPool } as DatabaseService,
+      );
+      const draft2 = await tenantContext.run(tenantId, (client) =>
+        barsComFallback.gerarRascunho(client, { tenantId: tenantId!, jobId: job.rows[0].id, tituloVaga: 'x', textoRequisicao: 'y' }),
+      );
+      expect(draft2.id).toBeDefined();
+
+      const providerLog = await tenantContext.run(tenantId, (client) =>
+        client.query<{ provider: string }>(
+          `SELECT provider FROM llm_call_log WHERE tenant_id = $1 AND prompt_id = 'bars-generation' ORDER BY occurred_at`,
+          [tenantId],
         ),
-      ).rejects.toThrow();
+      );
+      expect(providerLog.rows.map((r) => r.provider)).toEqual(['anthropic', 'openai']);
     } finally {
       if (tenantId) {
+        await adminPool.query('DELETE FROM interview_guide WHERE tenant_id = $1', [tenantId]);
+        await adminPool.query('DELETE FROM competency WHERE tenant_id = $1', [tenantId]);
         await adminPool.query('DELETE FROM llm_call_log WHERE tenant_id = $1', [tenantId]);
+        await adminPool.query('DELETE FROM audit_log_entry WHERE tenant_id = $1', [tenantId]);
+        await adminPool.query('DELETE FROM job WHERE tenant_id = $1', [tenantId]);
+        await adminPool.query('DELETE FROM requisition WHERE tenant_id = $1', [tenantId]);
+        await adminPool.query('DELETE FROM org_unit WHERE tenant_id = $1', [tenantId]);
         await adminPool.query('DELETE FROM tenant WHERE id = $1', [tenantId]);
       }
     }

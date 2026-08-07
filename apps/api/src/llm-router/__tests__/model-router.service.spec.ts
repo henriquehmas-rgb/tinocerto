@@ -31,6 +31,17 @@ class AdapterFixo implements ProviderAdapter {
   }
 }
 
+// [Fix 1 da revisão final] Adapter cuja saída NÃO respeita o schema pedido
+// (campo `resposta` como number em vez de string) -- simula um adapter que
+// não passa pelo enforcement de saída estruturada do SDK real (hoje só os
+// doubles de teste, amanhã um fornecedor futuro sem esse mecanismo).
+class AdapterSchemaInvalido implements ProviderAdapter {
+  constructor(public readonly name: 'anthropic' | 'openai') {}
+  async complete<T>() {
+    return { data: { resposta: 123 } as unknown as T, modelId: 'modelo-invalido', inputTokens: 10, outputTokens: 5 };
+  }
+}
+
 describe('ModelRouterService', () => {
   const adminPool = new Pool({ connectionString: process.env.DATABASE_URL });
   const appUrl = new URL(process.env.DATABASE_URL!);
@@ -99,6 +110,85 @@ describe('ModelRouterService', () => {
         }),
       ),
     ).rejects.toBeInstanceOf(ModelRouterUnavailableError);
+  });
+
+  // [Fix 1 da revisão final] Prova que uma resposta do primário que viola o
+  // schema pedido (não uma exceção -- um objeto que simplesmente não bate
+  // com `input.schema`) é tratada como falha do fornecedor e cai para o
+  // fallback, em vez de ser aceita como está ou explodir com um ZodError
+  // não tratado até a camada de storage.
+  it('quando o primário devolve dados que violam o schema, cai para o fallback em vez de aceitar ou explodir sem tratamento', async () => {
+    const router = new ModelRouterService(new AuditLogService(), new AdapterSchemaInvalido('anthropic'), new AdapterFixo('openai', 'gpt-5-mini'));
+
+    const output = await tenantContext.run(tenantId, (client) =>
+      router.complete({
+        client,
+        tier: 'tier2',
+        schema: RespostaSchema,
+        system: 'teste',
+        messages: [{ role: 'user', content: 'oi' }],
+        metadata: { promptId: 'teste-schema-invalido', promptVersion: 'v1', tenantId },
+      }),
+    );
+
+    expect(output.provider).toBe('openai');
+    expect(output.data.resposta).toBe('ok');
+  });
+
+  // [Fix 6 da revisão final] Quando o chamador fornece `logOutputAs`, o que
+  // fica gravado em llm_call_log.output_summary é o resultado do
+  // summarizer, não o `data` bruto devolvido pelo fornecedor -- prova a
+  // minimização de dados sem depender de nenhuma chamada real.
+  it('quando logOutputAs é fornecido, output_summary grava o resumo do summarizer, não o data bruto', async () => {
+    const router = new ModelRouterService(new AuditLogService(), new AdapterFixo('anthropic', 'claude-haiku-5'), new AdapterFixo('openai', 'gpt-5-mini'));
+
+    await tenantContext.run(tenantId, (client) =>
+      router.complete({
+        client,
+        tier: 'tier2',
+        schema: RespostaSchema,
+        system: 'teste',
+        messages: [{ role: 'user', content: 'oi' }],
+        metadata: { promptId: 'teste-log-output-as', promptVersion: 'v1', tenantId },
+        logOutputAs: (data) => ({ tamanhoResposta: data.resposta.length }),
+      }),
+    );
+
+    const logRows = await tenantContext.run(tenantId, (client) =>
+      client.query<{ output_summary: unknown }>(
+        `SELECT output_summary FROM llm_call_log WHERE tenant_id = $1 AND prompt_id = 'teste-log-output-as'`,
+        [tenantId],
+      ),
+    );
+    expect(logRows.rows).toHaveLength(1);
+    expect(logRows.rows[0].output_summary).toEqual({ tamanhoResposta: 2 });
+  });
+
+  // [Fix 6 da revisão final] Sem `logOutputAs` (todos os testes acima e a
+  // maioria dos consumidores hoje), comportamento inalterado: output_summary
+  // continua sendo o `data` inteiro.
+  it('sem logOutputAs, output_summary continua gravando o data inteiro (comportamento inalterado)', async () => {
+    const router = new ModelRouterService(new AuditLogService(), new AdapterFixo('anthropic', 'claude-haiku-5'), new AdapterFixo('openai', 'gpt-5-mini'));
+
+    await tenantContext.run(tenantId, (client) =>
+      router.complete({
+        client,
+        tier: 'tier2',
+        schema: RespostaSchema,
+        system: 'teste',
+        messages: [{ role: 'user', content: 'oi' }],
+        metadata: { promptId: 'teste-sem-log-output-as', promptVersion: 'v1', tenantId },
+      }),
+    );
+
+    const logRows = await tenantContext.run(tenantId, (client) =>
+      client.query<{ output_summary: unknown }>(
+        `SELECT output_summary FROM llm_call_log WHERE tenant_id = $1 AND prompt_id = 'teste-sem-log-output-as'`,
+        [tenantId],
+      ),
+    );
+    expect(logRows.rows).toHaveLength(1);
+    expect(logRows.rows[0].output_summary).toEqual({ resposta: 'ok' });
   });
 
   it('construir OpenAiAdapter sem OPENAI_API_KEY no ambiente não lança -- só lança se .complete() for de fato chamado', () => {

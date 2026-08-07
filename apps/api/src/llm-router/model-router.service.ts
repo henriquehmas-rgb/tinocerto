@@ -21,12 +21,24 @@ export class ModelRouterService {
     let result: { data: T; modelId: string; inputTokens: number; outputTokens: number };
     let providerName: 'anthropic' | 'openai';
 
+    // A validação contra `input.schema` acontece AQUI, dentro de cada try,
+    // não só dentro do adapter -- hoje só o enforcement de saída
+    // estruturada do SDK de cada fornecedor garante conformidade com o
+    // schema; qualquer adapter que não passe pelo SDK real (os doubles de
+    // teste hoje, um adapter futuro sem SDK amanhã) podia devolver `data`
+    // violando `input.schema` e o router aceitava sem checar. Tratar uma
+    // violação de schema como falha do fornecedor (dispara fallback) fecha
+    // essa lacuna -- é o mesmo motivo que tornava redundante o
+    // `.parse()` explícito que bars-generation.service.ts fazia por conta
+    // própria como workaround.
     try {
-      result = await this.primary.complete(input.tier, input.schema, input.system, input.messages);
+      const primaryResult = await this.primary.complete(input.tier, input.schema, input.system, input.messages);
+      result = { ...primaryResult, data: input.schema.parse(primaryResult.data) };
       providerName = this.primary.name;
     } catch (primaryErr) {
       try {
-        result = await this.fallback.complete(input.tier, input.schema, input.system, input.messages);
+        const fallbackResult = await this.fallback.complete(input.tier, input.schema, input.system, input.messages);
+        result = { ...fallbackResult, data: input.schema.parse(fallbackResult.data) };
         providerName = this.fallback.name;
       } catch (fallbackErr) {
         throw new ModelRouterUnavailableError(input.tier, primaryErr, fallbackErr);
@@ -40,6 +52,14 @@ export class ModelRouterService {
     const inputHash = createHash('sha256')
       .update(JSON.stringify({ system: input.system, messages: input.messages }))
       .digest('hex');
+
+    // [Fix 6 da revisão final] Minimização de dados -- se o chamador
+    // forneceu `logOutputAs`, gravamos o resumo estrutural dele em vez do
+    // `data` bruto (que pode carregar dado pessoal, ex.: citações
+    // verbatim de currículo). Sem `logOutputAs` (a maioria dos
+    // consumidores hoje, incluindo bars-generation), comportamento
+    // idêntico ao anterior: grava `data` inteiro.
+    const outputParaLog = input.logOutputAs ? input.logOutputAs(result.data) : result.data;
 
     const llmCallId = randomUUID();
     await input.client.query(
@@ -58,7 +78,7 @@ export class ModelRouterService {
         input.metadata.promptId,
         input.metadata.promptVersion,
         inputHash,
-        JSON.stringify(result.data),
+        JSON.stringify(outputParaLog),
         costUsd,
         latencyMs,
       ],

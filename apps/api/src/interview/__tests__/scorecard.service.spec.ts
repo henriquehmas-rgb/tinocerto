@@ -4,7 +4,7 @@ import { CerbosService } from '../../authz/cerbos.service';
 import { CompetencyService } from '../competency.service';
 import { InterviewGuideService } from '../interview-guide.service';
 import { InterviewScheduleService } from '../interview-schedule.service';
-import { ScorecardService } from '../scorecard.service';
+import { ScorecardService, ScorecardJaSubmetidoError } from '../scorecard.service';
 
 describe('ScorecardService — visibilidade oculta até submissão própria', () => {
   const adminPool = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -107,7 +107,12 @@ describe('ScorecardService — visibilidade oculta até submissão própria', ()
     await appPool.end();
   });
 
-  it('avaliador sempre vê a própria nota, submetida ou não', async () => {
+  // [Minor 6 da revisão final] Título anterior alegava cobrir "submetida ou
+  // não", mas um scorecard sem submissão nunca existe como linha alcançável
+  // por este serviço -- submeter() sempre grava submetido_em (e, após o
+  // Fix 7, uma segunda submissão é rejeitada em vez de reabrir o registro).
+  // Título corrigido para descrever só o que este teste de fato exercita.
+  it('avaliador sempre vê a própria nota', async () => {
     await tenantContext.run(tenantId, (client) =>
       scorecardService.submeter(client, {
         tenantId,
@@ -167,6 +172,63 @@ describe('ScorecardService — visibilidade oculta até submissão própria', ()
       ),
     ).rejects.toThrow(/não está cadastrado como interview_evaluator/);
     await adminPool.query('DELETE FROM user_account WHERE id = $1', [intruso.rows[0].id]);
+  });
+
+  // [Fix 7 da revisão final -- decisão de produto] Scorecard imutável após
+  // submissão: um segundo submeter() do MESMO avaliador para a MESMA
+  // entrevista deve rejeitar com ScorecardJaSubmetidoError, e o registro
+  // gravado (notas e submetido_em) deve permanecer exatamente o da
+  // primeira submissão -- prova tanto a rejeição quanto que nenhuma escrita
+  // silenciosa aconteceu por trás dela. Usa um avaliador isolado (E), numa
+  // entrevista própria, para não interferir com o estado usado pelos
+  // outros testes deste arquivo.
+  it('scorecard fica imutável após submetido -- reenvio do mesmo avaliador é rejeitado e a nota original não muda', async () => {
+    const avaliadorE = await adminPool.query<{ id: string }>(
+      `INSERT INTO user_account (tenant_id, email) VALUES ($1, 'avaliadore@example.com') RETURNING id`,
+      [tenantId],
+    );
+    const avaliadorEId = avaliadorE.rows[0].id;
+
+    await adminPool.query(
+      `INSERT INTO interview_evaluator (tenant_id, interview_schedule_id, user_id) VALUES ($1, $2, $3)`,
+      [tenantId, scheduleId, avaliadorEId],
+    );
+
+    await tenantContext.run(tenantId, (client) =>
+      scorecardService.submeter(client, {
+        tenantId,
+        interviewScheduleId: scheduleId,
+        avaliadorId: avaliadorEId,
+        notasPorCompetencia: { comunicacao: 5 },
+        comentario: 'Nota original',
+      }),
+    );
+
+    const linhaAposPrimeiraSubmissao = await adminPool.query<{ notas_por_competencia: Record<string, number>; submetido_em: string }>(
+      `SELECT notas_por_competencia, submetido_em FROM scorecard WHERE tenant_id = $1 AND interview_schedule_id = $2 AND avaliador_id = $3`,
+      [tenantId, scheduleId, avaliadorEId],
+    );
+    const submetidoEmOriginal = linhaAposPrimeiraSubmissao.rows[0].submetido_em;
+    expect(linhaAposPrimeiraSubmissao.rows[0].notas_por_competencia).toEqual({ comunicacao: 5 });
+
+    await expect(
+      tenantContext.run(tenantId, (client) =>
+        scorecardService.submeter(client, {
+          tenantId,
+          interviewScheduleId: scheduleId,
+          avaliadorId: avaliadorEId,
+          notasPorCompetencia: { comunicacao: 1 },
+          comentario: 'Tentativa de reenvio depois de ver a nota de um colega',
+        }),
+      ),
+    ).rejects.toThrow(ScorecardJaSubmetidoError);
+
+    const linhaAposTentativaDeReenvio = await adminPool.query<{ notas_por_competencia: Record<string, number>; submetido_em: string }>(
+      `SELECT notas_por_competencia, submetido_em FROM scorecard WHERE tenant_id = $1 AND interview_schedule_id = $2 AND avaliador_id = $3`,
+      [tenantId, scheduleId, avaliadorEId],
+    );
+    expect(linhaAposTentativaDeReenvio.rows[0].notas_por_competencia).toEqual({ comunicacao: 5 });
+    expect(linhaAposTentativaDeReenvio.rows[0].submetido_em).toEqual(submetidoEmOriginal);
   });
 
   // Achado da mutação do Passo 6: nenhum dos 4 testes acima de fato passa
@@ -231,5 +293,29 @@ describe('ScorecardService — visibilidade oculta até submissão própria', ()
       scorecardService.listarPorEntrevista(client, tenantId, scheduleId, { id: avaliadorCId, roles: principalRoles }),
     );
     expect(vistoPorCDepois.find((r) => r.avaliadorId === avaliadorDId)?.notasPorCompetencia).toEqual({ comunicacao: 3 });
+  });
+
+  // [Fix 4 da revisão final] Prova que a regra explícita com o guard `in`
+  // em resource_scorecard.yaml é o mecanismo real negando acesso a um
+  // principal que NUNCA é avaliador desta entrevista -- não apenas um
+  // acidente de erro de avaliação do CEL absorvido. Um recrutador que
+  // nunca foi adicionado a interview_evaluator não tem chave nenhuma em
+  // submetido_por, para nenhuma linha -- a lista retornada deve ficar
+  // vazia mesmo com scorecards já submetidos por A, B, C e D acima.
+  it('um principal que nunca é avaliador desta entrevista (ex.: recrutador) nunca vê nenhuma linha de scorecard', async () => {
+    const recrutador = await adminPool.query<{ id: string }>(
+      `INSERT INTO user_account (tenant_id, email) VALUES ($1, 'recrutador-nao-avaliador@example.com') RETURNING id`,
+      [tenantId],
+    );
+
+    const vistoPeloRecrutador = await tenantContext.run(tenantId, (client) =>
+      scorecardService.listarPorEntrevista(client, tenantId, scheduleId, {
+        id: recrutador.rows[0].id,
+        roles: ['recrutador'],
+      }),
+    );
+    expect(vistoPeloRecrutador).toEqual([]);
+
+    await adminPool.query('DELETE FROM user_account WHERE id = $1', [recrutador.rows[0].id]);
   });
 });

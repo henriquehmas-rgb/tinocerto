@@ -12,7 +12,12 @@ export class AnthropicAdapter implements ProviderAdapter {
 
   private getClient(): Anthropic {
     if (!this.client) {
-      this.client = new Anthropic();
+      // [Fix 2 da revisão final] Timeout explícito -- o default do SDK
+      // (~10 min) deixaria um socket travado do fornecedor prender uma
+      // conexão do pool de Postgres (e o advisory lock de audit-log do
+      // tenant) pelo tempo que o SDK decidir, não por um limite que
+      // alguém escolheu.
+      this.client = new Anthropic({ timeout: 60_000 });
     }
     return this.client;
   }
@@ -49,7 +54,10 @@ export class OpenAiAdapter implements ProviderAdapter {
 
   private getClient(): OpenAI {
     if (!this.client) {
-      this.client = new OpenAI();
+      // [Fix 2 da revisão final] Mesmo motivo do timeout em AnthropicAdapter
+      // acima -- socket travado não deve poder prender uma conexão do pool
+      // indefinidamente.
+      this.client = new OpenAI({ timeout: 60_000 });
     }
     return this.client;
   }
@@ -63,6 +71,11 @@ export class OpenAiAdapter implements ProviderAdapter {
     const model = TIER_CONFIG[tier].openai;
     const response = await this.getClient().chat.completions.parse({
       model,
+      // Simétrico ao max_tokens: 4096 do AnthropicAdapter acima --
+      // max_completion_tokens é o parâmetro atual do SDK da OpenAI
+      // (max_tokens está deprecated a favor dele, ver openai/resources/
+      // chat/completions/completions.d.ts na versão instalada).
+      max_completion_tokens: 4096,
       messages: [{ role: 'system', content: system }, ...messages],
       response_format: zodResponseFormat(schema, 'resultado'),
     });

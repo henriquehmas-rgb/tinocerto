@@ -7,6 +7,7 @@ import { ProviderAdapter } from '../../llm-router/model-router.types';
 import { CompetencyService } from '../competency.service';
 import { InterviewGuideService } from '../interview-guide.service';
 import { BarsGenerationService } from '../bars-generation.service';
+import { DatabaseService } from '../../database/database.service';
 
 class AdapterComRoteiroFixo implements ProviderAdapter {
   readonly name = 'anthropic' as const;
@@ -82,7 +83,11 @@ describe('BarsGenerationService', () => {
   it('gera um interview_guide em rascunho com as competências e âncoras sugeridas, e loga a chamada', async () => {
     const router = new ModelRouterService(new AuditLogService(), new AdapterComRoteiroFixo(), new AdapterComRoteiroFixo());
     const guideService = new InterviewGuideService(new CompetencyService());
-    const barsService = new BarsGenerationService(router, guideService);
+    // Construção direta (não via Nest DI) -- passamos um objeto mínimo que
+    // satisfaz a única propriedade que BarsGenerationService de fato usa de
+    // DatabaseService (`.pool`), reaproveitando o appPool real já em
+    // escopo neste arquivo.
+    const barsService = new BarsGenerationService(router, guideService, { pool: appPool } as DatabaseService);
 
     const { id: guideId } = await tenantContext.run(tenantId, (client) =>
       barsService.gerarRascunho(client, {
@@ -105,6 +110,45 @@ describe('BarsGenerationService', () => {
     expect(log.rows).toHaveLength(1);
   });
 
+  // [Fix 2 da revisão final] Prova que a chamada de IA (router.complete,
+  // que grava llm_call_log dentro da SUA PRÓPRIA transação) sobrevive
+  // mesmo quando a escrita seguinte (guideService.criarRascunho, na
+  // transação do chamador) falha -- aqui forçada por um jobId que não
+  // existe para o tenant, violando a FK de interview_guide.job_id. Antes
+  // do Fix 2, as duas escritas compartilhavam a mesma transação e o
+  // rollback de criarRascunho apagava também o log da chamada real e
+  // faturada ao provedor.
+  it('mantém o registro em llm_call_log mesmo quando a escrita seguinte (criarRascunho) falha', async () => {
+    const router = new ModelRouterService(new AuditLogService(), new AdapterComRoteiroFixo(), new AdapterComRoteiroFixo());
+    const guideService = new InterviewGuideService(new CompetencyService());
+    const barsService = new BarsGenerationService(router, guideService, { pool: appPool } as DatabaseService);
+
+    const jobIdInexistente = '00000000-0000-0000-0000-000000000000';
+
+    await expect(
+      tenantContext.run(tenantId, (client) =>
+        barsService.gerarRascunho(client, {
+          tenantId,
+          jobId: jobIdInexistente,
+          tituloVaga: 'Vaga Inexistente',
+          textoRequisicao: 'Requisição qualquer.',
+        }),
+      ),
+    ).rejects.toThrow();
+
+    const log = await tenantContext.run(tenantId, (client) =>
+      client.query(
+        `SELECT prompt_id FROM llm_call_log WHERE tenant_id = $1 AND prompt_id = 'bars-generation'`,
+        [tenantId],
+      ),
+    );
+    // A chamada da PRIMEIRA it() deste describe já grava 1 linha; esta
+    // segunda chamada (que falha em criarRascunho) deve adicionar mais 1,
+    // não 0 -- se a transação fosse compartilhada, o rollback de
+    // criarRascunho apagaria esta segunda linha e o total continuaria 1.
+    expect(log.rows.length).toBe(2);
+  });
+
   const hasAnthropicKey = Boolean(process.env.ANTHROPIC_API_KEY);
   const hasOpenAiKey = Boolean(process.env.OPENAI_API_KEY);
   const maybeIt = hasAnthropicKey && hasOpenAiKey ? it : it.skip;
@@ -115,7 +159,7 @@ describe('BarsGenerationService', () => {
   maybeIt('chamada real gera sempre as 5 âncoras por competência sugerida', async () => {
     const router = new ModelRouterService(new AuditLogService(), new AnthropicAdapter(), new OpenAiAdapter());
     const guideService = new InterviewGuideService(new CompetencyService());
-    const barsService = new BarsGenerationService(router, guideService);
+    const barsService = new BarsGenerationService(router, guideService, { pool: appPool } as DatabaseService);
 
     const { id: guideId } = await tenantContext.run(tenantId, (client) =>
       barsService.gerarRascunho(client, {

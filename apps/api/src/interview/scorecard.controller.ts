@@ -1,11 +1,11 @@
-import { Body, Controller, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, ConflictException, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
 import { IsObject, IsOptional, IsString } from 'class-validator';
 import { Request } from 'express';
 import { TenantContext } from '../database/tenant-context';
 import { DatabaseService } from '../database/database.service';
 import { CerbosGuard } from '../authz/cerbos.guard';
 import { CerbosCheck } from '../authz/cerbos-check.decorator';
-import { ScorecardService } from './scorecard.service';
+import { ScorecardService, ScorecardJaSubmetidoError } from './scorecard.service';
 
 class SubmeterScorecardDto {
   @IsObject() notasPorCompetencia!: Record<string, number>;
@@ -41,15 +41,23 @@ export class ScorecardController {
     @Param('scheduleId') scheduleId: string,
     @Body() dto: SubmeterScorecardDto,
   ) {
-    return this.tenantContext.run(req.tenantId, (client) =>
-      this.scorecardService.submeter(client, {
-        tenantId: req.tenantId,
-        interviewScheduleId: scheduleId,
-        avaliadorId: req.userId,
-        notasPorCompetencia: dto.notasPorCompetencia,
-        comentario: dto.comentario,
-      }),
-    );
+    try {
+      return await this.tenantContext.run(req.tenantId, (client) =>
+        this.scorecardService.submeter(client, {
+          tenantId: req.tenantId,
+          interviewScheduleId: scheduleId,
+          avaliadorId: req.userId,
+          notasPorCompetencia: dto.notasPorCompetencia,
+          comentario: dto.comentario,
+        }),
+      );
+    } catch (err) {
+      // [Fix 7 da revisão final] Reenvio após já ter submetido é um
+      // conflito do cliente com o estado atual do recurso (409), não um
+      // erro genérico de servidor (500).
+      if (err instanceof ScorecardJaSubmetidoError) throw new ConflictException(err.message);
+      throw err;
+    }
   }
 
   @Get()

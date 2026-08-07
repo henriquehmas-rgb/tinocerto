@@ -24,11 +24,25 @@ interface PrincipalMinimo {
   roles: string[];
 }
 
+// [Fix 7 da revisão final -- decisão de produto] Scorecard fica imutável
+// após submetido: um avaliador não pode reenviar com notas diferentes
+// depois de ter espiado a nota já submetida de um colega (a UPSERT
+// incondicional de antes permitia isso silenciosamente, inclusive
+// sobrescrevendo submetido_em sem deixar rastro).
+export class ScorecardJaSubmetidoError extends Error {}
+
 @Injectable()
 export class ScorecardService {
   constructor(private readonly cerbosService: CerbosService) {}
 
   async submeter(client: PoolClient, input: ScorecardSubmissaoInput): Promise<{ id: string }> {
+    // [Fix 7 da revisão final] `DO UPDATE ... WHERE scorecard.submetido_em
+    // IS NULL` em vez de um SELECT-então-decide: Postgres pula o UPDATE (e
+    // omite a linha de RETURNING) atomicamente quando a condição falha,
+    // fechando a race que um check-then-write deixaria aberta sob
+    // tentativas concorrentes de submissão. Num INSERT novo (sem conflito
+    // ainda) o WHERE nem se aplica -- só rege o ramo de conflito/update --
+    // então RETURNING sempre produz uma linha para um insert genuíno.
     const result = await client.query<{ id: string }>(
       `INSERT INTO scorecard (tenant_id, interview_schedule_id, avaliador_id, notas_por_competencia, comentario, submetido_em)
        VALUES ($1, $2, $3, $4, $5, now())
@@ -36,6 +50,7 @@ export class ScorecardService {
        DO UPDATE SET notas_por_competencia = EXCLUDED.notas_por_competencia,
                       comentario = EXCLUDED.comentario,
                       submetido_em = now()
+       WHERE scorecard.submetido_em IS NULL
        RETURNING id`,
       [
         input.tenantId,
@@ -45,6 +60,11 @@ export class ScorecardService {
         input.comentario ?? null,
       ],
     );
+    if (result.rows.length === 0) {
+      throw new ScorecardJaSubmetidoError(
+        `scorecard do avaliador ${input.avaliadorId} para a entrevista ${input.interviewScheduleId} já foi submetido e não pode ser alterado`,
+      );
+    }
     return { id: result.rows[0].id };
   }
 
@@ -73,9 +93,14 @@ export class ScorecardService {
       [tenantId, interviewScheduleId],
     );
 
-    // Mapa COMPLETO -- uma entrada por avaliador desta entrevista, nunca
-    // esparso (indexar chave ausente de mapa em CEL do Cerbos lança erro
-    // em runtime em vez de devolver falso -- ver resource_scorecard.yaml).
+    // [Fix 4 da revisão final] Mapa com uma entrada por avaliador DESTA
+    // entrevista -- nunca esparso em relação aos avaliadores, mas também
+    // nunca vai conter uma entrada para um principal que não seja avaliador
+    // (ex.: um recrutador consultando esta lista). A policy
+    // (resource_scorecard.yaml) usa o operador `in` do CEL para checar
+    // pertencimento antes de indexar por request.principal.id -- é isso
+    // que torna a expressão bem definida (total) para qualquer principal
+    // que alcance esta checagem, não só para avaliadores.
     const submetidoPor: Record<string, boolean> = {};
     for (const row of rows.rows) {
       submetidoPor[row.avaliador_id] = row.submetido_em != null;

@@ -9,6 +9,13 @@ export interface InterviewGuideCriarInput {
   competencias: CompetenciaComAncorasInput[];
 }
 
+// [Minor 1/2 da revisão final] Erros discriminados por classe -- antes
+// publicar() e editarRascunho() lançavam `Error` genérico para casos que
+// merecem respostas HTTP diferentes (404 vs 400). O controller mapeia cada
+// classe para a exception do Nest correspondente.
+export class InterviewGuideNotFoundError extends Error {}
+export class InterviewGuidePublishEmptyError extends Error {}
+
 @Injectable()
 export class InterviewGuideService {
   constructor(private readonly competencyService: CompetencyService) {}
@@ -30,10 +37,18 @@ export class InterviewGuideService {
     competencias: CompetenciaComAncorasInput[],
   ): Promise<void> {
     const snapshot = await this.competencyService.resolverParaSnapshot(client, tenantId, competencias);
-    await client.query(
+    const result = await client.query(
       `UPDATE interview_guide SET competencias_rascunho = $3, atualizado_em = now() WHERE tenant_id = $1 AND id = $2`,
       [tenantId, guideId, JSON.stringify(snapshot)],
     );
+    // [Minor 2 da revisão final] Sem esta checagem, um id inexistente ou de
+    // outro tenant (bloqueado pela RLS, então zero linhas afetadas) fazia
+    // este método retornar void silenciosamente como se tivesse editado
+    // algo -- o chamador (controller) não tinha como distinguir sucesso de
+    // no-op.
+    if (result.rowCount === 0) {
+      throw new InterviewGuideNotFoundError(`interview_guide ${guideId} não encontrado para o tenant`);
+    }
   }
 
   async publicar(
@@ -47,11 +62,11 @@ export class InterviewGuideService {
       [tenantId, guideId],
     );
     if (guide.rows.length === 0) {
-      throw new Error(`interview_guide ${guideId} não encontrado para o tenant`);
+      throw new InterviewGuideNotFoundError(`interview_guide ${guideId} não encontrado para o tenant`);
     }
     const competencias = guide.rows[0].competencias_rascunho;
     if (!Array.isArray(competencias) || competencias.length === 0) {
-      throw new Error('Não é possível publicar um roteiro sem nenhuma competência');
+      throw new InterviewGuidePublishEmptyError('Não é possível publicar um roteiro sem nenhuma competência');
     }
 
     const ultimaVersao = await client.query<{ versao: number }>(
