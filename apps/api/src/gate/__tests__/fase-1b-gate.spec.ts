@@ -10,12 +10,22 @@ describe('Gate consolidado — Fase 1b (Experiência Pública do Candidato)', ()
     await adminPool.end();
   });
 
+  // [Fase 3d] candidate_application_summary SAIU desta lista --
+  // resume_0006__candidate_application_summary_tenant_id.sql reintroduz
+  // tenant_id deliberadamente (CandidateEvaluationViewService precisa
+  // resolver o tenant de uma application_id antes de ler
+  // decision/offer/pipeline_stage_transition, todas tenant-scoped com RLS
+  // FORCE). A remoção original (resume_0005, Fase 1b) foi correta para o
+  // problema daquele momento -- a coluna nunca era lida de volta; o
+  // cálculo muda porque agora existe um consumidor real. Ver a migration
+  // resume_0006 e a design spec da Fase 3d (Decisão 6) para o raciocínio
+  // completo -- não é a mesma dívida voltando, é a mesma disciplina de
+  // "remover o que não é usado" aplicada ao inverso quando o uso aparece.
   const GLOBAL_TABLES_SEM_TENANT_ID = [
     'candidate_account',
     'candidate_refresh_token',
     'candidate_password_reset_token',
     'resume_upload',
-    'candidate_application_summary',
   ];
 
   it.each(GLOBAL_TABLES_SEM_TENANT_ID)('%s é global de propósito (sem tenant_id) — exceção documentada', async (table) => {
