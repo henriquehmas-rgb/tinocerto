@@ -4,6 +4,7 @@ import { ApplicationService } from '../../hiring/application.service';
 import { DatabaseService } from '../../database/database.service';
 import { ApiKeyGuard } from '../api-key.guard';
 import { CerbosGuard } from '../../authz/cerbos.guard';
+import { RateLimitGuard } from '../rate-limit.guard';
 import { encodeCursor } from '../cursor-pagination';
 
 describe('PlatformApplicationController', () => {
@@ -20,6 +21,8 @@ describe('PlatformApplicationController', () => {
       .overrideGuard(ApiKeyGuard)
       .useValue({ canActivate: () => true })
       .overrideGuard(CerbosGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(RateLimitGuard)
       .useValue({ canActivate: () => true })
       .compile();
     return moduleRef.get(PlatformApplicationController);

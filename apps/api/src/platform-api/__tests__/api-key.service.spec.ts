@@ -47,7 +47,7 @@ describe('ApiKeyService', () => {
     expect(issued.prefixo.length).toBeGreaterThan(0);
 
     const resolved = await apiKeyService.authenticate(issued.rawKey);
-    expect(resolved).toEqual({ tenantId, serviceAccountId, escopos: ['applications:read'] });
+    expect(resolved).toEqual({ apiKeyId: issued.id, tenantId, serviceAccountId, escopos: ['applications:read'] });
   });
 
   it('chave com prefixo válido mas sufixo errado (hash não bate) devolve null, não lança', async () => {

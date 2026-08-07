@@ -18,6 +18,7 @@ export interface IssuedApiKey {
 }
 
 export interface AuthenticatedApiKey {
+  apiKeyId: string; // NOVO -- necessario para o bucket de rate limit (Fase 4b) ser por chave, nao por service_account
   tenantId: string;
   serviceAccountId: string;
   escopos: string[];
@@ -90,6 +91,6 @@ export class ApiKeyService {
     const presentedHash = hashApiKey(rawKey);
     if (!safeCompare(presentedHash, row.hash)) return null;
 
-    return { tenantId: row.tenant_id, serviceAccountId: row.service_account_id, escopos: row.escopos };
+    return { apiKeyId: row.id, tenantId: row.tenant_id, serviceAccountId: row.service_account_id, escopos: row.escopos };
   }
 }
