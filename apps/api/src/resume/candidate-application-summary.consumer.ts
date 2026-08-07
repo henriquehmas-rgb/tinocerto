@@ -15,6 +15,11 @@ export interface DomainEvent {
 @Injectable()
 export class CandidateApplicationSummaryConsumer implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(CandidateApplicationSummaryConsumer.name);
+  // Sinaliza para consumeLoop() parar de tentar usar pool/redis já
+  // encerrados por onModuleDestroy() -- sem isso, o laco for(;;) segue
+  // tentando indefinidamente (retry a cada 5s) contra uma pool já fechada
+  // pelo teste que instanciou este consumer diretamente, nunca convergindo.
+  private destroyed = false;
   private readonly redis: Redis;
 
   constructor(private readonly pool: Pool) {
@@ -34,6 +39,7 @@ export class CandidateApplicationSummaryConsumer implements OnModuleInit, OnModu
   // provider via Nest DI (`ResumeModule`), o Nest chama este hook
   // automaticamente em app.close()/shutdown.
   async onModuleDestroy(): Promise<void> {
+    this.destroyed = true;
     await this.redis.quit();
   }
 
@@ -58,6 +64,7 @@ export class CandidateApplicationSummaryConsumer implements OnModuleInit, OnModu
 
   private async consumeLoop(): Promise<void> {
     for (;;) {
+      if (this.destroyed) return;
       // [Fix round 1, achado #2 do revisor independente da Task 17]
       // Corpo inteiro envolto em try/catch: sem isso, QUALQUER exceção
       // aqui dentro (Postgres, Redis, ou -- caso concreto reproduzido ao

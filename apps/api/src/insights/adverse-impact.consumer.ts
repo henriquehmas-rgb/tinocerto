@@ -30,6 +30,11 @@ export interface DomainEvent {
 @Injectable()
 export class AdverseImpactConsumer implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(AdverseImpactConsumer.name);
+  // Sinaliza para consumeLoop() parar de tentar usar pool/redis já
+  // encerrados por onModuleDestroy() -- sem isso, o laco for(;;) segue
+  // tentando indefinidamente (retry a cada 5s) contra uma pool já fechada
+  // pelo teste que instanciou este consumer diretamente, nunca convergindo.
+  private destroyed = false;
   private readonly redis: Redis;
   private readonly pool: Pool;
   private readonly tenantContext: TenantContext;
@@ -48,6 +53,7 @@ export class AdverseImpactConsumer implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleDestroy(): Promise<void> {
+    this.destroyed = true;
     await this.redis.quit();
   }
 
@@ -57,6 +63,7 @@ export class AdverseImpactConsumer implements OnModuleInit, OnModuleDestroy {
 
   private async consumeLoop(): Promise<void> {
     for (;;) {
+      if (this.destroyed) return;
       try {
         const tenantIds = await this.listTenantIds();
         for (const tenantId of tenantIds) {

@@ -24,6 +24,11 @@ function withOffset<T extends { citacaoVerbatim: string }>(texto: string, item: 
 @Injectable()
 export class ResumeParsingConsumer implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(ResumeParsingConsumer.name);
+  // Sinaliza para consumeLoop() parar de tentar usar pool/redis já
+  // encerrados por onModuleDestroy() -- sem isso, o laco for(;;) segue
+  // tentando indefinidamente (retry a cada 5s) contra uma pool já fechada
+  // pelo teste que instanciou este consumer diretamente, nunca convergindo.
+  private destroyed = false;
   private readonly redis: Redis;
   private readonly tenantContext: TenantContext;
 
@@ -48,6 +53,7 @@ export class ResumeParsingConsumer implements OnModuleInit, OnModuleDestroy {
   // Quando registrado como provider via Nest DI (Task 14), o Nest chama
   // este hook automaticamente em app.close()/shutdown.
   async onModuleDestroy(): Promise<void> {
+    this.destroyed = true;
     await this.redis.quit();
   }
 
@@ -76,6 +82,7 @@ export class ResumeParsingConsumer implements OnModuleInit, OnModuleDestroy {
 
   private async consumeLoop(): Promise<void> {
     for (;;) {
+      if (this.destroyed) return;
       // [Fix round 1, achado #2 do revisor independente da Task 17]
       // Corpo inteiro envolto em try/catch: sem isso, QUALQUER exceção
       // aqui dentro (Postgres, Redis, ou -- caso concreto reproduzido ao
