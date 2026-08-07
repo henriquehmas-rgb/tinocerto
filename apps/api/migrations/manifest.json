@@ -88,6 +88,8 @@
     "platform_0006__webhook_endpoint.sql",
     "platform_0007__webhook_delivery.sql",
     "platform_0008__service_account_crp_link.sql",
-    "platform_0009__api_key_rotation.sql"
+    "platform_0009__api_key_rotation.sql",
+    "public_0003__tenant_slug_resolution_filters_status.sql",
+    "platform_0010__idempotency_key_pronto.sql"
   ]
 }

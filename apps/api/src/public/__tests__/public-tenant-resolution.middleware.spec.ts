@@ -58,4 +58,23 @@ describe('PublicTenantResolutionMiddleware', () => {
     await expect(middleware.use(req, {} as any, next)).rejects.toThrow(NotFoundException);
     expect(next).not.toHaveBeenCalled();
   });
+
+  it('lança NotFoundException para tenant existente porém inativo (mesma resposta que slug inexistente)', async () => {
+    const inactive = await adminPool.query<{ id: string; slug: string }>(
+      `INSERT INTO tenant (razao_social, cnpj, slug, status) VALUES ('Empresa Public MW Inativa', '00000000000041', 'empresa-public-mw-inativa-test', 'inativo') RETURNING id, slug`,
+    );
+    const inactiveTenantId = inactive.rows[0].id;
+    const inactiveSlug = inactive.rows[0].slug;
+
+    try {
+      const middleware = new PublicTenantResolutionMiddleware(appPool);
+      const req: any = { params: { tenantSlug: inactiveSlug } };
+      const next = jest.fn();
+
+      await expect(middleware.use(req, {} as any, next)).rejects.toThrow(NotFoundException);
+      expect(next).not.toHaveBeenCalled();
+    } finally {
+      await adminPool.query('DELETE FROM tenant WHERE id = $1', [inactiveTenantId]);
+    }
+  });
 });
