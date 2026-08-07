@@ -1,4 +1,13 @@
-import { BadRequestException, Controller, Param, Post, Req, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import {
+  BadRequestException,
+  Controller,
+  Param,
+  Post,
+  Req,
+  UploadedFile,
+  UseGuards,
+  UseInterceptors,
+} from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Request } from 'express';
 import { TenantContext } from '../database/tenant-context';
@@ -13,6 +22,17 @@ interface RequestWithTenantAndCandidate extends Request {
   personId: string;
   body: { respostasInscricao?: string };
 }
+
+// Achado da revisão consolidada: memory storage do Multer (default do
+// NestJS) buferiza o arquivo inteiro em memória do processo Node antes de
+// qualquer validação -- sem limite, um upload gigante derruba o processo
+// por exaustão de memória. 10MB é generoso o bastante para qualquer
+// currículo real em PDF, mesmo com imagens. NestJS já converte o
+// MulterError de LIMIT_FILE_SIZE numa PayloadTooLargeException (413) via
+// @nestjs/platform-express/multer/multer.utils.ts (transformException) --
+// confirmado lendo o pacote instalado (v10.4.22) -- então nenhum filtro
+// de exceção extra é necessário aqui para evitar um 500 genérico.
+export const CURRICULO_MAX_BYTES = 10 * 1024 * 1024;
 
 @Controller('v1/public/careers/:tenantSlug')
 export class PublicApplicationController {
@@ -31,7 +51,7 @@ export class PublicApplicationController {
   @IpRateLimit({ escopo: 'public-application-apply', limit: 20, windowSeconds: 60 })
   @Post('jobs/:jobId/apply')
   @UseGuards(CandidateAuthGuard, IpRateLimitGuard)
-  @UseInterceptors(FileInterceptor('curriculo'))
+  @UseInterceptors(FileInterceptor('curriculo', { limits: { fileSize: CURRICULO_MAX_BYTES } }))
   async apply(
     @Req() req: RequestWithTenantAndCandidate,
     @Param('jobId') jobId: string,

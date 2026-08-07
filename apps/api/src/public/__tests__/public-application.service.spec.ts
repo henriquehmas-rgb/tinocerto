@@ -100,7 +100,7 @@ describe('PublicApplicationService', () => {
         tenantId,
         jobId,
         personId,
-        curriculo: { buffer: Buffer.from('conteúdo fake de pdf'), originalname: 'curriculo.pdf', mimetype: 'application/pdf' },
+        curriculo: { buffer: Buffer.from('%PDF-1.4\nconteúdo fake de pdf'), originalname: 'curriculo.pdf', mimetype: 'application/pdf' },
         respostasInscricao: [{ jobCustomFieldId: inscricaoFieldId, valor: 'R$ 5.000' }],
       }),
     );
@@ -138,6 +138,30 @@ describe('PublicApplicationService', () => {
           jobId,
           personId,
           curriculo: { buffer: Buffer.from('não é pdf'), originalname: 'curriculo.docx', mimetype: 'application/msword' },
+          respostasInscricao: [],
+        }),
+      ),
+    ).rejects.toThrow(/PDF/);
+  });
+
+  // Achado da revisão consolidada: mimetype vem do Content-Type que o
+  // cliente controla livremente na parte multipart -- um cliente malicioso
+  // pode alegar 'application/pdf' num arquivo que não é PDF de verdade.
+  it('rejeita upload com mimetype forjado como PDF mas sem os magic bytes de um PDF real', async () => {
+    const ctx = new TenantContext(appPool);
+    const service = buildService();
+
+    await expect(
+      ctx.run(tenantId, (client) =>
+        service.apply(client, {
+          tenantId,
+          jobId,
+          personId,
+          curriculo: {
+            buffer: Buffer.from('isto não começa com a assinatura de um PDF'),
+            originalname: 'curriculo.pdf',
+            mimetype: 'application/pdf',
+          },
           respostasInscricao: [],
         }),
       ),

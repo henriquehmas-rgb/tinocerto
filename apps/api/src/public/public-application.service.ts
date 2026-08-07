@@ -10,6 +10,7 @@ import { OutboxService } from '../outbox/outbox.service';
 import { nextOutboxSequence } from '../outbox/next-outbox-sequence';
 
 const RESUME_BUCKET = process.env.MINIO_RESUME_BUCKET ?? 'curriculos';
+const PDF_MAGIC_BYTES = Buffer.from('%PDF-', 'ascii');
 
 export interface UploadedFileLike {
   buffer: Buffer;
@@ -38,6 +39,14 @@ export class PublicApplicationService {
 
   async apply(client: PoolClient, input: ApplyInput): Promise<{ applicationId: string }> {
     if (input.curriculo.mimetype !== 'application/pdf') {
+      throw new Error('Currículo precisa ser um arquivo PDF');
+    }
+    // Achado da revisão consolidada: mimetype vem do Content-Type que o
+    // cliente controla livremente na parte multipart -- não é prova de
+    // que o conteúdo é de fato um PDF. Confere os magic bytes reais do
+    // arquivo (todo PDF começa com a assinatura ASCII "%PDF-") antes de
+    // aceitar, mesmo quando o mimetype alegado pelo cliente já bateu.
+    if (!input.curriculo.buffer.subarray(0, PDF_MAGIC_BYTES.length).equals(PDF_MAGIC_BYTES)) {
       throw new Error('Currículo precisa ser um arquivo PDF');
     }
 
