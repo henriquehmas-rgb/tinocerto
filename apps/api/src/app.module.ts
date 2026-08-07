@@ -9,11 +9,14 @@ import { ResumeModule } from './resume/resume.module';
 import { AssessmentModule } from './assessment/assessment.module';
 import { MatchingModule } from './matching/matching.module';
 import { InsightsModule } from './insights/insights.module';
+import { LlmRouterModule } from './llm-router/llm-router.module';
+import { InterviewModule } from './interview/interview.module';
 
 @Module({
   imports: [
     DatabaseModule,
     AuthzModule,
+    LlmRouterModule,
     HiringModule,
     CandidateAuthModule,
     PublicModule,
@@ -21,6 +24,7 @@ import { InsightsModule } from './insights/insights.module';
     AssessmentModule,
     MatchingModule,
     InsightsModule,
+    InterviewModule,
   ],
 })
 export class AppModule implements NestModule {
