@@ -23,6 +23,7 @@ const CONSUMER_NAME = 'webhook-delivery-consumer-1';
 @Injectable()
 export class WebhookDeliveryConsumer implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(WebhookDeliveryConsumer.name);
+  private destroyed = false;
   private readonly redis: Redis;
   private readonly pool: Pool;
   private readonly tenantContext: TenantContext;
@@ -41,6 +42,7 @@ export class WebhookDeliveryConsumer implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleDestroy(): Promise<void> {
+    this.destroyed = true;
     await this.redis.quit();
   }
 
@@ -50,6 +52,7 @@ export class WebhookDeliveryConsumer implements OnModuleInit, OnModuleDestroy {
 
   private async consumeLoop(): Promise<void> {
     for (;;) {
+      if (this.destroyed) return;
       try {
         const tenantIds = await this.listTenantIds();
         for (const tenantId of tenantIds) {
