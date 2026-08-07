@@ -26,3 +26,11 @@ resourcePolicy:
 
     # create fica de fora do ALLOW acima de propósito -- ver nota original
     # da Fase 1b sobre o fluxo público de candidatura.
+
+    - name: "leitura-via-api-key"
+      actions: ["read"]
+      effect: EFFECT_ALLOW
+      roles: ["service_account"]
+      condition:
+        match:
+          expr: "'applications:read' in request.principal.attr.scopes"

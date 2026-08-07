@@ -1,0 +1,33 @@
+root:
+  post:
+    operationId: openRequisition
+    summary: Abre uma nova requisição de vaga.
+    x-tinocerto-auth: session-only
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: '../components/schemas/hiring.yaml#/schemas/RequisitionOpenRequest' }
+    responses:
+      '201':
+        description: Requisição criada.
+        content:
+          application/json:
+            schema: { $ref: '../components/schemas/common.yaml#/schemas/IdResponse' }
+
+approve:
+  post:
+    operationId: approveRequisition
+    summary: Aprova uma requisição aberta.
+    x-tinocerto-auth: session-only
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    responses:
+      '200':
+        description: Requisição aprovada.
+        content:
+          application/json:
+            schema: { $ref: '../components/schemas/hiring.yaml#/schemas/RequisitionApproveResponse' }

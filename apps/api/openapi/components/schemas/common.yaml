@@ -1,0 +1,29 @@
+schemas:
+  Problem:
+    type: object
+    description: RFC 9457 (Problem Details for HTTP APIs).
+    required: [type, title, status, detail, instance, trace_id]
+    properties:
+      type:
+        type: string
+        format: uri
+        example: https://developers.tinocerto.com.br/problems/credenciais-invalidas
+      title:
+        type: string
+      status:
+        type: integer
+      detail:
+        type: string
+      instance:
+        type: string
+      trace_id:
+        type: string
+    additionalProperties: true # extensões por type, ex.: required_scope, rate_limit_reason (Fase 4b)
+
+  IdResponse:
+    type: object
+    required: [id]
+    properties:
+      id:
+        type: string
+        format: uuid

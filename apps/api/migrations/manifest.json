@@ -80,6 +80,9 @@
     "hiring_0015__offer.sql",
     "hiring_0016__application_started_work.sql",
     "hiring_0017__decision_revisao_solicitada_em.sql",
-    "resume_0006__candidate_application_summary_tenant_id.sql"
+    "resume_0006__candidate_application_summary_tenant_id.sql",
+    "platform_0003__api_key.sql",
+    "platform_0004__idempotency_key.sql",
+    "hiring_0018__application_tenant_criado_id_index.sql"
   ]
 }

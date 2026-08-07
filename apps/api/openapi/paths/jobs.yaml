@@ -1,0 +1,60 @@
+root:
+  post:
+    operationId: createJob
+    summary: Cria uma vaga a partir de uma requisição aprovada.
+    x-tinocerto-auth: session-only
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: '../components/schemas/hiring.yaml#/schemas/JobCreateRequest' }
+    responses:
+      '201':
+        description: Vaga criada (rascunho).
+        content:
+          application/json:
+            schema: { $ref: '../components/schemas/common.yaml#/schemas/IdResponse' }
+
+publish:
+  post:
+    operationId: publishJob
+    summary: Publica a vaga nos canais informados.
+    x-tinocerto-auth: session-only
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: '../components/schemas/hiring.yaml#/schemas/JobPublishRequest' }
+    responses:
+      '200':
+        description: Vaga publicada.
+        content:
+          application/json:
+            schema: { $ref: '../components/schemas/hiring.yaml#/schemas/JobPublishResponse' }
+
+declararHabilidadesExigidas:
+  post:
+    operationId: declareJobRequiredSkills
+    summary: Declara as habilidades exigidas da vaga (usado pelo score de aderência).
+    x-tinocerto-auth: session-only
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: '../components/schemas/hiring.yaml#/schemas/JobDeclararHabilidadesRequest' }
+    responses:
+      '200':
+        description: Habilidades atualizadas.
+        content:
+          application/json:
+            schema: { $ref: '../components/schemas/hiring.yaml#/schemas/JobDeclararHabilidadesResponse' }

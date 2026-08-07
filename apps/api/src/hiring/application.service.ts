@@ -22,6 +22,26 @@ export interface ApplicationWithPersonView {
   };
 }
 
+export interface ApplicationListItem {
+  id: string;
+  jobId: string;
+  candidateId: string;
+  stage: string;
+  createdAt: Date;
+}
+
+export interface ListByCursorInput {
+  jobId?: string;
+  stage?: string;
+  limit: number;
+  cursor?: { sortValue: string; id: string };
+}
+
+export interface ListByCursorResult {
+  items: ApplicationListItem[];
+  hasMore: boolean;
+}
+
 @Injectable()
 export class ApplicationService {
   constructor(private readonly outbox: OutboxService) {}
@@ -94,5 +114,70 @@ export class ApplicationService {
     }
     await client.query(`UPDATE application SET etapa_funil = $1 WHERE id = $2`, [newStage, id]);
     return { tenantId: current.rows[0].tenant_id, previousStage: current.rows[0].etapa_funil };
+  }
+
+  // Superfície pública da Plataforma API (GET /v1/applications, Fase 4a).
+  // Devolve só id/job_id/candidate_id/stage/created_at -- NUNCA nome/e-mail
+  // do candidato (ver PersonView em findByIdWithPersonView acima; aqui nem
+  // isso, só o person_id como "candidate_id" de referência, mesmo shape do
+  // exemplo do doc 04 §2.2). adherence_score/assessment_status/source do
+  // exemplo aspiracional do doc 04 ficam de fora -- dependem de outros
+  // domínios (Matching/Assessment/candidate_touchpoint) que esta fatia não
+  // toca; documentado como extensão futura aditiva na design spec.
+  //
+  // Sem parâmetro tenantId de propósito -- mesma convenção de
+  // findByIdWithPersonView acima: é uma LEITURA, a RLS do `client` (já
+  // escopado por TenantContext.run antes de chegar aqui) é a única
+  // fronteira de tenant que a query precisa. tenantId só aparece como
+  // parâmetro em métodos de ESCRITA (ex.: create), porque um INSERT
+  // precisa do valor explícito para a coluna, RLS não supre isso sozinha.
+  async listByCursor(client: PoolClient, input: ListByCursorInput): Promise<ListByCursorResult> {
+    const conditions: string[] = [];
+    const values: unknown[] = [];
+
+    if (input.jobId) {
+      values.push(input.jobId);
+      conditions.push(`a.job_id = $${values.length}`);
+    }
+    if (input.stage) {
+      values.push(input.stage);
+      conditions.push(`a.etapa_funil = $${values.length}`);
+    }
+    if (input.cursor) {
+      values.push(input.cursor.sortValue, input.cursor.id);
+      conditions.push(`(a.criado_em, a.id) > ($${values.length - 1}::timestamptz, $${values.length}::uuid)`);
+    }
+
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    values.push(input.limit + 1); // busca 1 a mais para saber has_more sem COUNT(*)
+
+    const result = await client.query<{
+      id: string;
+      job_id: string;
+      candidate_id: string;
+      stage: string;
+      criado_em: Date;
+    }>(
+      `SELECT a.id, a.job_id, a.person_id AS candidate_id, a.etapa_funil AS stage, a.criado_em
+         FROM application a
+         ${where}
+        ORDER BY a.criado_em ASC, a.id ASC
+        LIMIT $${values.length}`,
+      values,
+    );
+
+    const hasMore = result.rows.length > input.limit;
+    const rows = result.rows.slice(0, input.limit);
+
+    return {
+      items: rows.map((row) => ({
+        id: row.id,
+        jobId: row.job_id,
+        candidateId: row.candidate_id,
+        stage: row.stage,
+        createdAt: row.criado_em,
+      })),
+      hasMore,
+    };
   }
 }

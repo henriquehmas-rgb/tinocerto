@@ -7,6 +7,7 @@ interface RequestWithAuthContext {
   tenantId: string;
   userId: string;
   userRoles: string[];
+  apiKeyScopes?: string[]; // presente só em requisições autenticadas por API key (ApiKeyGuard, Fase 4a)
   params: Record<string, string>;
 }
 
@@ -31,7 +32,11 @@ export class CerbosGuard implements CanActivate {
     const resourceId = req.params?.id ?? 'new';
 
     const decision = await this.cerbosService.check(
-      { id: req.userId, roles: req.userRoles, attr: { tenant_id: req.tenantId } },
+      {
+        id: req.userId,
+        roles: req.userRoles,
+        attr: { tenant_id: req.tenantId, ...(req.apiKeyScopes ? { scopes: req.apiKeyScopes } : {}) },
+      },
       { kind: metadata.resourceKind, id: resourceId, attr: { tenant_id: req.tenantId } },
       [metadata.action],
     );
