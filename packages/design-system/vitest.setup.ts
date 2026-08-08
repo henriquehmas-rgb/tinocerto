@@ -39,15 +39,22 @@ document.addEventListener(
   'click',
   (event) => {
     const target = event.target as Element | null;
-    if (target && typeof target.dispatchEvent === 'function') {
-      target.dispatchEvent(
-        new window.PointerEvent('pointerdown', {
-          bubbles: true,
-          cancelable: true,
-          button: 0,
-        }),
-      );
-    }
+    if (!target || typeof target.dispatchEvent !== 'function') return;
+    // Não sintetiza pointerdown para cliques em itens já dentro de um popup
+    // Radix aberto (menuitem, option, etc.) -- o Select do Radix processa a
+    // seleção do item no próprio ciclo pointerdown/pointerup nativo do
+    // 'click', e um pointerdown sintético extra ali interfere com essa
+    // lógica interna (fecha o listbox antes da seleção ser registrada).
+    // É necessário apenas para ABRIR o trigger (DropdownMenu/Select), que
+    // dispara no pointerdown e não reage ao 'click' isolado do jsdom.
+    if (target.closest('[role="menuitem"], [role="option"]')) return;
+    target.dispatchEvent(
+      new window.PointerEvent('pointerdown', {
+        bubbles: true,
+        cancelable: true,
+        button: 0,
+      }),
+    );
   },
   true,
 );
