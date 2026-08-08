@@ -1,0 +1,22 @@
+-- Achado C3 da revisão final da feature de autenticação de staff/onboarding/
+-- MFA: `user_account` só tem `UNIQUE (tenant_id, email)` (identity_0003) --
+-- único POR TENANT, não globalmente. `StaffOnboardingService.onboard` só
+-- checava CNPJ duplicado, nunca e-mail -- o mesmo e-mail podia virar
+-- admin_tenant de vários tenants diferentes.
+--
+-- Consequência prática: `resolve_staff_login_by_email` (identity_0011,
+-- SECURITY DEFINER, usado por `StaffAccountService.login`) faz
+-- `WHERE lower(email) = lower(p_email)` sem `LIMIT`/`ORDER BY`, e o service
+-- pega `result.rows[0]` cegamente -- com o e-mail duplicado entre tenants,
+-- qual linha volta em primeiro é arbitrário (ordem física de armazenamento,
+-- não determinística), então login com a senha CERTA podia
+-- intermitentemente falhar (autenticando contra o hash de senha do tenant
+-- errado).
+--
+-- Índice único global sobre `lower(email)` -- mesma normalização de case já
+-- usada em `resolve_staff_login_by_email` -- fecha o problema na origem:
+-- impede o segundo INSERT/UPDATE que criaria a duplicata, não só mitiga o
+-- sintoma do lado do login. `StaffOnboardingService.onboard` (código, não
+-- esta migration) passa a capturar a violação desse índice e devolver
+-- ConflictException, mesmo padrão já usado para `tenant_cnpj_key`.
+CREATE UNIQUE INDEX uq_user_account_email_global ON user_account (lower(email));

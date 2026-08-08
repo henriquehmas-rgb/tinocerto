@@ -66,6 +66,29 @@ describe('StaffOnboardingService.onboard', () => {
     ).rejects.toThrow();
   });
 
+  // Achado C3 da revisão final: `user_account` só tinha
+  // `UNIQUE (tenant_id, email)` -- único POR TENANT, não globalmente. Sem
+  // este teste, o mesmo e-mail podia virar admin_tenant de um SEGUNDO tenant
+  // (CNPJ diferente, então o pre-check de CNPJ acima não pega este caso),
+  // deixando `resolve_staff_login_by_email` (sem `LIMIT`/`ORDER BY`) devolver
+  // uma linha arbitrária entre as duas contas -- login não-determinístico.
+  it('rejeita e-mail já cadastrado em OUTRO tenant, mesmo com CNPJ novo (índice único global, identity_0014)', async () => {
+    await expect(
+      service.onboard({
+        nomeEmpresa: 'Empresa Email Duplicado Ltda',
+        cnpj: '00000000000228',
+        emailAdmin: 'admin-onboarding-210@example.com',
+        senhaAdmin: 'outra-senha-forte-123',
+      }),
+    ).rejects.toThrow(new ConflictException('Este e-mail já está cadastrado em outra conta'));
+
+    // O tenant NÃO deve ter sido criado -- a violação do índice único de
+    // e-mail acontece dentro da MESMA transação do onboarding, então o
+    // ROLLBACK desfaz também o INSERT em `tenant` que já tinha rodado antes.
+    const tenantRows = await adminPool.query('SELECT id FROM tenant WHERE cnpj = $1', ['00000000000228']);
+    expect(tenantRows.rows).toHaveLength(0);
+  });
+
   // Reproduz a corrida real (não o caminho do pre-check acima, que só pega o
   // caso sequencial): duas chamadas de onboard() com o MESMO CNPJ novo, com
   // sobreposição FORÇADA deterministicamente -- mesma técnica usada em

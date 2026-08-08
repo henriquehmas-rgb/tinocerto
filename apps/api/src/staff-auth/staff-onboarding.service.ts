@@ -74,11 +74,29 @@ export class StaffOnboardingService {
       }
 
       const senhaHash = await this.passwordService.hash(input.senhaAdmin);
-      const userResult = await client.query<{ id: string }>(
-        `INSERT INTO user_account (tenant_id, email, senha_hash) VALUES ($1, $2, $3) RETURNING id`,
-        [tenantId, input.emailAdmin, senhaHash],
-      );
-      const userId = userResult.rows[0].id;
+      // Achado C3 da revisão final: `user_account` só tinha
+      // `UNIQUE (tenant_id, email)` (identity_0003) -- único POR TENANT, não
+      // globalmente. O mesmo e-mail virando admin_tenant de vários tenants
+      // deixava `resolve_staff_login_by_email` (SECURITY DEFINER, sem
+      // `LIMIT`/`ORDER BY`) devolver uma linha arbitrária, tornando login
+      // não-determinístico. `uq_user_account_email_global` (identity_0014)
+      // fecha isso na origem -- mesmo raciocínio de pre-check + catch de
+      // 23505 já usado acima para `tenant_cnpj_key`, mas aqui sem pre-check
+      // separado (não há necessidade de reduzir a corrida com uma consulta
+      // antes -- a única fonte de verdade é o índice único em si).
+      let userId: string;
+      try {
+        const userResult = await client.query<{ id: string }>(
+          `INSERT INTO user_account (tenant_id, email, senha_hash) VALUES ($1, $2, $3) RETURNING id`,
+          [tenantId, input.emailAdmin, senhaHash],
+        );
+        userId = userResult.rows[0].id;
+      } catch (err) {
+        if (isUniqueViolation(err, 'uq_user_account_email_global')) {
+          throw new ConflictException('Este e-mail já está cadastrado em outra conta');
+        }
+        throw err;
+      }
 
       const roleResult = await client.query<{ id: string }>(`SELECT id FROM role WHERE nome = 'admin_tenant' AND tenant_id IS NULL`);
       // scope_path 'matriz' é a convenção de escopo raiz usada para o
