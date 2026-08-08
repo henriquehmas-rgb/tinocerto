@@ -4,6 +4,7 @@ import { TenantResolutionMiddleware } from './database/tenant-transaction.middle
 import { AuthzModule } from './authz/authz.module';
 import { HiringModule } from './hiring/hiring.module';
 import { CandidateAuthModule } from './candidate-auth/candidate-auth.module';
+import { StaffAuthModule } from './staff-auth/staff-auth.module';
 import { PublicModule } from './public/public.module';
 import { ResumeModule } from './resume/resume.module';
 import { AssessmentModule } from './assessment/assessment.module';
@@ -21,6 +22,7 @@ import { PlatformApiModule } from './platform-api/platform-api.module';
     LlmRouterModule,
     HiringModule,
     CandidateAuthModule,
+    StaffAuthModule,
     PublicModule,
     ResumeModule,
     AssessmentModule,
@@ -63,6 +65,21 @@ export class AppModule implements NestModule {
         'v1/developer/docs',
         'v1/developer/docs/(.*)',
         'v1/developer/openapi-spec/(.*)',
+        // Task 7 (StaffAuthModule) -- só estas duas rotas de
+        // `StaffAuthController` rodam ANTES de haver tenant/usuário
+        // resolvidos: `onboarding` cria o tenant do zero, e `login`/
+        // `login/mfa` ainda não sabem a qual tenant o usuário pertence
+        // (mesmo raciocínio de `PLACEHOLDER_TENANT` em
+        // `candidate-auth.controller.ts`). `refresh`/`logout`/`mfa/setup`/
+        // `mfa/verify` continuam cobertas pelo middleware normalmente --
+        // exigem tenant/usuário já resolvidos (ver
+        // `staff-auth.controller.ts`). Entradas exatas, não
+        // `v1/staff/auth/login(.*)`, para não arriscar casar
+        // acidentalmente alguma rota futura sob esse prefixo que venha
+        // a exigir tenant resolvido.
+        'v1/staff/auth/onboarding',
+        'v1/staff/auth/login',
+        'v1/staff/auth/login/mfa',
       )
       .forRoutes('*');
   }

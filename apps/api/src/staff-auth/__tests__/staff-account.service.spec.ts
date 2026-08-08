@@ -80,4 +80,74 @@ describe('StaffAccountService', () => {
       ),
     ).rejects.toThrow(/credenciais inválidas/i);
   });
+
+  // Task 7 -- métodos extraídos/adicionados para StaffAuthController.
+  it('getRoles devolve os papéis atuais do usuário no tenant', async () => {
+    const ctx = new TenantContext(appPool);
+    const service = new StaffAccountService(new PasswordService());
+
+    const roles = await ctx.run(tenantId, (client) => service.getRoles(client, userId, tenantId));
+
+    expect(roles).toEqual(['admin_tenant']);
+  });
+
+  it('setMfaSecret grava o secret cifrado e getMfaSecret o devolve de volta (sem habilitar MFA)', async () => {
+    const ctx = new TenantContext(appPool);
+    const service = new StaffAccountService(new PasswordService());
+    const secretCifrado = { ciphertext: 'ct', iv: 'iv', authTag: 'tag', wrappedDek: 'dek' };
+
+    await ctx.run(tenantId, (client) => service.setMfaSecret(client, userId, secretCifrado));
+    const lido = await ctx.run(tenantId, (client) => service.getMfaSecret(client, userId));
+
+    expect(lido).toEqual(secretCifrado);
+
+    const habilitado = await adminPool.query<{ mfa_habilitado: boolean }>(
+      `SELECT mfa_habilitado FROM user_account WHERE id = $1`,
+      [userId],
+    );
+    // setMfaSecret sozinho nunca habilita MFA -- só enableMfa faz isso.
+    // A linha de fixture já nasceu com mfa_habilitado=true (beforeAll acima),
+    // então esta asserção confirma que setMfaSecret não MEXEU nesse campo,
+    // não que ele seja false.
+    expect(habilitado.rows[0].mfa_habilitado).toBe(true);
+  });
+
+  it('getMfaSecret devolve null quando o usuário nunca configurou MFA', async () => {
+    const ctx = new TenantContext(appPool);
+    const service = new StaffAccountService(new PasswordService());
+    const passwordService = new PasswordService();
+    const outroUser = await adminPool.query<{ id: string }>(
+      `INSERT INTO user_account (tenant_id, email, senha_hash) VALUES ($1, 'sem-mfa@staff-account-test.com', $2) RETURNING id`,
+      [tenantId, await passwordService.hash('qualquer-senha')],
+    );
+
+    const lido = await ctx.run(tenantId, (client) => service.getMfaSecret(client, outroUser.rows[0].id));
+
+    expect(lido).toBeNull();
+
+    await adminPool.query('DELETE FROM user_account WHERE id = $1', [outroUser.rows[0].id]);
+  });
+
+  it('enableMfa seta mfa_habilitado=true e grava os backup codes cifrados', async () => {
+    const ctx = new TenantContext(appPool);
+    const service = new StaffAccountService(new PasswordService());
+    const passwordService = new PasswordService();
+    const novoUser = await adminPool.query<{ id: string }>(
+      `INSERT INTO user_account (tenant_id, email, senha_hash) VALUES ($1, 'enable-mfa@staff-account-test.com', $2) RETURNING id`,
+      [tenantId, await passwordService.hash('qualquer-senha')],
+    );
+    const novoUserId = novoUser.rows[0].id;
+    const backupCodesCifrados = [{ ciphertext: 'a', iv: 'b', authTag: 'c', wrappedDek: 'd' }];
+
+    await ctx.run(tenantId, (client) => service.enableMfa(client, novoUserId, backupCodesCifrados));
+
+    const row = await adminPool.query<{ mfa_habilitado: boolean; mfa_backup_codes_cifrados: unknown }>(
+      `SELECT mfa_habilitado, mfa_backup_codes_cifrados FROM user_account WHERE id = $1`,
+      [novoUserId],
+    );
+    expect(row.rows[0].mfa_habilitado).toBe(true);
+    expect(row.rows[0].mfa_backup_codes_cifrados).toEqual(backupCodesCifrados);
+
+    await adminPool.query('DELETE FROM user_account WHERE id = $1', [novoUserId]);
+  });
 });

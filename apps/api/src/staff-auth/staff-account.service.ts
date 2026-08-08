@@ -1,5 +1,6 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { PoolClient } from 'pg';
+import { EncryptedPayload } from '../talent/envelope-encryption.service';
 import { PasswordService } from './password.service';
 
 export interface LoginInput {
@@ -57,16 +58,59 @@ export class StaffAccountService {
     // início dela, porque só agora o tenant_id correto é conhecido.
     await client.query(`SELECT set_config('app.tenant_id', $1, true)`, [row.tenant_id]);
 
-    const rolesResult = await client.query<{ nome: string }>(
-      `SELECT r.nome FROM role_assignment ra JOIN role r ON r.id = ra.role_id WHERE ra.user_id = $1 AND ra.tenant_id = $2`,
-      [row.id, row.tenant_id],
-    );
+    const roles = await this.getRoles(client, row.id, row.tenant_id);
 
     return {
       userId: row.id,
       tenantId: row.tenant_id,
-      roles: rolesResult.rows.map((r) => r.nome),
+      roles,
       mfaHabilitado: row.mfa_habilitado,
     };
+  }
+
+  // Extraído de `login` (Task 5) para reúso em `StaffAuthController` (Task
+  // 7): tanto `POST /login/mfa` (depois de validar o código TOTP, com o
+  // tenant já resolvido pelo mfaChallengeToken) quanto `POST /refresh`
+  // (depois de `StaffTokenService.rotate` devolver o par userId/tenantId)
+  // precisam da mesma lista de papéis para assinar o access token, sem
+  // duplicar a query em cada um.
+  async getRoles(client: PoolClient, userId: string, tenantId: string): Promise<string[]> {
+    const rolesResult = await client.query<{ nome: string }>(
+      `SELECT r.nome FROM role_assignment ra JOIN role r ON r.id = ra.role_id WHERE ra.user_id = $1 AND ra.tenant_id = $2`,
+      [userId, tenantId],
+    );
+    return rolesResult.rows.map((r) => r.nome);
+  }
+
+  // Task 7: MfaService.gerarSetup/gerarBackupCodes cifram o segredo/códigos
+  // TOTP, mas quem persiste em `user_account` é este service -- único ponto
+  // de acesso a essa tabela, mesmo padrão de todo outro controller do
+  // projeto (nunca faz `client.query` direto, sempre delega a um service --
+  // ver OfferController/DecisionController).
+  async getMfaSecret(client: PoolClient, userId: string): Promise<EncryptedPayload | null> {
+    const result = await client.query<{ mfa_secret_cifrado: EncryptedPayload | null }>(
+      `SELECT mfa_secret_cifrado FROM user_account WHERE id = $1`,
+      [userId],
+    );
+    return result.rows[0]?.mfa_secret_cifrado ?? null;
+  }
+
+  // Grava o secret recém-gerado sem habilitar MFA ainda -- `mfa_habilitado`
+  // só vira `true` em `enableMfa`, depois que `POST /mfa/verify` confirmar
+  // que o usuário configurou o authenticator corretamente (ver design spec,
+  // seção de rotas). `JSON.stringify` explícito porque a coluna é `jsonb` --
+  // mesmo padrão de `PersonService.criar` para `cpf_encriptado`.
+  async setMfaSecret(client: PoolClient, userId: string, secretCifrado: EncryptedPayload): Promise<void> {
+    await client.query(`UPDATE user_account SET mfa_secret_cifrado = $1 WHERE id = $2`, [
+      JSON.stringify(secretCifrado),
+      userId,
+    ]);
+  }
+
+  async enableMfa(client: PoolClient, userId: string, backupCodesCifrados: EncryptedPayload[]): Promise<void> {
+    await client.query(`UPDATE user_account SET mfa_habilitado = true, mfa_backup_codes_cifrados = $1 WHERE id = $2`, [
+      JSON.stringify(backupCodesCifrados),
+      userId,
+    ]);
   }
 }
