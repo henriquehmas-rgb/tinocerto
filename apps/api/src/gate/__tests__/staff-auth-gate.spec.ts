@@ -114,11 +114,32 @@ describe('Gate consolidado — Autenticação de staff, onboarding e MFA (Tasks 
         });
         expect(respReplayRefreshAntigo.status).toBe(401);
 
-        // Resto do fluxo usa os tokens RENOVADOS a partir daqui -- também serve como
-        // prova de que o novo access token funciona numa rota autenticada real
-        // (mfa/setup, abaixo), não só que o payload do refresh "parece" válido.
-        const accessTokenSemMfa = corpoRefresh.accessToken;
-        const refreshTokenSemMfa = corpoRefresh.refreshToken;
+        // --- 2c. O reuso detectado acima aciona `revokeAll(userId)` em
+        // `StaffTokenService.rotate` -- isso revoga TODOS os refresh tokens
+        // vivos do usuário, inclusive o que acabou de ser emitido pelo
+        // `/refresh` legítimo (`corpoRefresh.refreshToken`) alguns passos
+        // atrás. Se o resto do fluxo (steps 3-4b) reusasse esse token, a
+        // prova de revogação do `logout` no step 4b estaria contaminada:
+        // o 401 esperado ali já teria sido causado por ESTA revogação em
+        // massa, não pelo `logout`. Login de novo aqui para obter um par de
+        // tokens genuinamente vivo, emitido DEPOIS do `revokeAll` acima, e
+        // usar esses tokens no resto do fluxo (inclusive no replay pós-logout
+        // do step 4b).
+        const respLoginPosReuso = await fetch(`${serverUrl}/v1/staff/auth/login`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ email: emailAdmin, senha: senhaAdmin }),
+        });
+        expect(respLoginPosReuso.status).toBe(201);
+        const corpoLoginPosReuso = (await respLoginPosReuso.json()) as { accessToken: string; refreshToken: string };
+        expect(corpoLoginPosReuso.accessToken).toEqual(expect.any(String));
+        expect(corpoLoginPosReuso.refreshToken).toEqual(expect.any(String));
+
+        // Resto do fluxo usa estes tokens -- também serve como prova de que o
+        // novo access token funciona numa rota autenticada real (mfa/setup,
+        // abaixo), não só que o payload do login "parece" válido.
+        const accessTokenSemMfa = corpoLoginPosReuso.accessToken;
+        const refreshTokenSemMfa = corpoLoginPosReuso.refreshToken;
 
         // --- 3. Habilita MFA: mfa/setup grava o secret pendente, mfa/verify confirma com TOTP real ---
         const respMfaSetup = await fetch(`${serverUrl}/v1/staff/auth/mfa/setup`, {
