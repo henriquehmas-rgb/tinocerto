@@ -3,6 +3,7 @@ import { RequisitionController } from './requisition.controller';
 import { RequisitionService } from './requisition.service';
 import { JobController } from './job.controller';
 import { JobService } from './job.service';
+import { JobRecrutadorService } from './job-recrutador.service';
 import { JobCustomFieldService } from './job-custom-field.service';
 import { ApplicationController } from './application.controller';
 import { ApplicationService } from './application.service';
@@ -24,6 +25,7 @@ import { OutboxService } from '../outbox/outbox.service';
   providers: [
     RequisitionService,
     JobService,
+    JobRecrutadorService,
     JobCustomFieldService,
     ApplicationService,
     PipelineStageTransitionService,

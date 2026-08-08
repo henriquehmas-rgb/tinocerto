@@ -2,6 +2,7 @@ import { Pool } from 'pg';
 import { TenantContext } from '../../database/tenant-context';
 import { RequisitionService } from '../requisition.service';
 import { JobService } from '../job.service';
+import { JobRecrutadorService } from '../job-recrutador.service';
 import { JobCustomFieldService } from '../job-custom-field.service';
 import { LiaDocumentService } from '../lia-document.service';
 
@@ -44,7 +45,7 @@ describe('JobService.publish — exige LIA quando base legal é legítimo intere
 
   it('bloqueia publish com base legal "legitimo_interesse" sem LIA gerado', async () => {
     const ctx = new TenantContext(appPool);
-    const jobService = new JobService(new RequisitionService());
+    const jobService = new JobService(new RequisitionService(), new JobRecrutadorService());
     const customFieldService = new JobCustomFieldService();
 
     const { id: jobId } = await ctx.run(tenantId, (client) =>
@@ -66,7 +67,7 @@ describe('JobService.publish — exige LIA quando base legal é legítimo intere
 
   it('permite publish quando o LIA foi gerado para o campo', async () => {
     const ctx = new TenantContext(appPool);
-    const jobService = new JobService(new RequisitionService());
+    const jobService = new JobService(new RequisitionService(), new JobRecrutadorService());
     const customFieldService = new JobCustomFieldService();
     const liaService = new LiaDocumentService();
 

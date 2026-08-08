@@ -5,6 +5,7 @@ import { OutboxService } from '../outbox/outbox.service';
 import { nextOutboxSequence } from '../outbox/next-outbox-sequence';
 import { generateSeoSlug } from './seo-slug';
 import { RequisitionService } from './requisition.service';
+import { JobRecrutadorService } from './job-recrutador.service';
 import { classifySensitiveCategories } from './compliance/sensitive-category-linter';
 
 export interface CreateJobInput {
@@ -12,13 +13,38 @@ export interface CreateJobInput {
   requisitionId: string;
   titulo: string;
   habilidadesExigidas?: string[];
+  recrutadorIds?: string[];
+}
+
+export interface ListarJobsInput {
+  tenantId: string;
+  userId: string;
+  userRoles: string[];
+}
+
+export interface JobResumo {
+  id: string;
+  titulo: string;
+  publicadoEm: Date | null;
+  criadoEm: Date;
+}
+
+export interface EditarJobInput {
+  tenantId: string;
+  jobId: string;
+  titulo?: string;
+  descricao?: string;
+  habilidadesExigidas?: string[];
 }
 
 @Injectable()
 export class JobService {
   private readonly outbox = new OutboxService();
 
-  constructor(private readonly requisitionService: RequisitionService) {}
+  constructor(
+    private readonly requisitionService: RequisitionService,
+    private readonly jobRecrutadorService: JobRecrutadorService,
+  ) {}
 
   async create(client: PoolClient, input: CreateJobInput): Promise<{ id: string }> {
     const requisition = await this.requisitionService.findById(client, input.requisitionId);
@@ -45,7 +71,48 @@ export class JobService {
       [id, input.tenantId, input.requisitionId, input.titulo, seoSlug, input.habilidadesExigidas ?? []],
     );
 
+    await this.jobRecrutadorService.atribuir(client, {
+      tenantId: input.tenantId,
+      jobId: id,
+      recrutadorIds: input.recrutadorIds ?? [],
+    });
+
     return { id };
+  }
+
+  async listar(client: PoolClient, input: ListarJobsInput): Promise<JobResumo[]> {
+    const somenteRecrutador =
+      input.userRoles.includes('recrutador') &&
+      !input.userRoles.some((papel) => ['admin_tenant', 'gestor_vaga'].includes(papel));
+
+    const query = somenteRecrutador
+      ? `SELECT j.id, j.titulo, j.publicado_em, j.criado_em FROM job j
+         JOIN job_recrutador jr ON jr.job_id = j.id AND jr.tenant_id = j.tenant_id
+         WHERE j.tenant_id = $1 AND jr.staff_id = $2 ORDER BY j.criado_em DESC`
+      : `SELECT id, titulo, publicado_em, criado_em FROM job WHERE tenant_id = $1 ORDER BY criado_em DESC`;
+    const params = somenteRecrutador ? [input.tenantId, input.userId] : [input.tenantId];
+
+    const result = await client.query<{ id: string; titulo: string; publicado_em: Date | null; criado_em: Date }>(
+      query,
+      params,
+    );
+    return result.rows.map((row) => ({
+      id: row.id,
+      titulo: row.titulo,
+      publicadoEm: row.publicado_em,
+      criadoEm: row.criado_em,
+    }));
+  }
+
+  async editar(client: PoolClient, input: EditarJobInput): Promise<void> {
+    await client.query(
+      `UPDATE job SET
+         titulo = COALESCE($3, titulo),
+         descricao = COALESCE($4, descricao),
+         habilidades_exigidas = COALESCE($5, habilidades_exigidas)
+       WHERE id = $1 AND tenant_id = $2`,
+      [input.jobId, input.tenantId, input.titulo ?? null, input.descricao ?? null, input.habilidadesExigidas ?? null],
+    );
   }
 
   async declararHabilidadesExigidas(client: PoolClient, id: string, habilidades: string[]): Promise<void> {
