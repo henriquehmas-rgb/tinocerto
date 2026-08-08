@@ -1,4 +1,4 @@
-import { Body, Controller, Post, Req, UnauthorizedException } from '@nestjs/common';
+import { Body, Controller, Post, Req, UnauthorizedException, UseGuards } from '@nestjs/common';
 import { IsEmail, IsNotEmpty, IsString, MinLength } from 'class-validator';
 import { Request } from 'express';
 import { TenantContext } from '../database/tenant-context';
@@ -8,6 +8,8 @@ import { StaffAccountService } from './staff-account.service';
 import { StaffTokenService } from './staff-token.service';
 import { StaffJwtService } from './staff-jwt.service';
 import { MfaService } from './mfa.service';
+import { IpRateLimit } from '../security/ip-rate-limit.decorator';
+import { IpRateLimitGuard } from '../security/ip-rate-limit.guard';
 
 // Único endpoint deste módulo (junto com `login`/`login/mfa`/`refresh`) que
 // roda ANTES de haver tenant conhecido -- mesmo padrão de
@@ -104,6 +106,13 @@ export class StaffAuthController {
     this.tenantContext = new TenantContext(databaseService.pool);
   }
 
+  // Achado C2 da revisão final: nenhuma rota deste controller tinha limite
+  // de taxa (ao contrário de todo endpoint análogo de
+  // `CandidateAuthController`) -- onboarding self-service sem limite é
+  // superfície de spam de tenants/CNPJs. 5/min por IP, mesmo limite de
+  // `candidate-auth.controller.ts#register`.
+  @IpRateLimit({ escopo: 'staff-onboarding', limit: 5, windowSeconds: 60 })
+  @UseGuards(IpRateLimitGuard)
   @Post('onboarding')
   async onboarding(@Body() dto: OnboardingDto) {
     const { tenantId, userId } = await this.onboardingService.onboard(dto);
@@ -117,6 +126,12 @@ export class StaffAuthController {
     });
   }
 
+  // Achado C2 da revisão final: brute-force/credential-stuffing contra
+  // senha de staff não tinha nenhum obstáculo além do custo do Argon2id
+  // por tentativa. 10/min por IP, mesmo limite de
+  // `candidate-auth.controller.ts#login`.
+  @IpRateLimit({ escopo: 'staff-login', limit: 10, windowSeconds: 60 })
+  @UseGuards(IpRateLimitGuard)
   @Post('login')
   async login(@Body() dto: LoginDto) {
     return this.tenantContext.run(PLACEHOLDER_TENANT, async (client) => {
@@ -136,6 +151,16 @@ export class StaffAuthController {
     });
   }
 
+  // Achado C2 da revisão final -- este é o gap mais grave dos sete: sem
+  // limite, o código TOTP de 6 dígitos podia ser atacado por força bruta
+  // sem nenhum obstáculo durante toda a janela de 5min de vida do
+  // `mfaChallengeToken` (10^6 combinações, sem contador de tentativas nem
+  // invalidação do challenge). 10/min por IP -- não impede todo ataque
+  // dentro da janela de 5min, mas eleva o custo de ~10^6 tentativas
+  // livres para ~50 tentativas possíveis, e é o mesmo limite já aplicado
+  // a login/senha em todo o projeto.
+  @IpRateLimit({ escopo: 'staff-login-mfa', limit: 10, windowSeconds: 60 })
+  @UseGuards(IpRateLimitGuard)
   @Post('login/mfa')
   async loginMfa(@Body() dto: LoginMfaDto) {
     let challenge: { userId: string; tenantId: string };
@@ -194,6 +219,11 @@ export class StaffAuthController {
     return { qrCodeDataUri };
   }
 
+  // Achado C2 da revisão final: mesmo raciocínio de `login/mfa` -- código
+  // TOTP de 6 dígitos sem limite de taxa é atacável por força bruta.
+  // 10/min por IP.
+  @IpRateLimit({ escopo: 'staff-mfa-verify', limit: 10, windowSeconds: 60 })
+  @UseGuards(IpRateLimitGuard)
   @Post('mfa/verify')
   async mfaVerify(@Body() dto: MfaVerifyDto, @Req() req: RequestWithAuthContext) {
     return this.tenantContext.run(req.tenantId, async (client) => {

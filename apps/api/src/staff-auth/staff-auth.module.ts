@@ -11,6 +11,8 @@ import { PasswordService } from './password.service';
 import { MfaService } from './mfa.service';
 import { EnvelopeEncryptionService } from '../talent/envelope-encryption.service';
 import { TenantContext } from '../database/tenant-context';
+import { IpRateLimitService } from '../security/ip-rate-limit.service';
+import { IpRateLimitGuard } from '../security/ip-rate-limit.guard';
 
 @Module({
   imports: [DatabaseModule],
@@ -23,6 +25,11 @@ import { TenantContext } from '../database/tenant-context';
     PasswordService,
     MfaService,
     EnvelopeEncryptionService,
+    // Achado C2 da revisão final: `@IpRateLimit(...)` em
+    // `StaffAuthController` precisa de `IpRateLimitGuard`/`IpRateLimitService`
+    // no injetor deste módulo -- mesmo padrão de `CandidateAuthModule`.
+    IpRateLimitService,
+    IpRateLimitGuard,
     { provide: Pool, useFactory: (db: DatabaseService) => db.pool, inject: [DatabaseService] },
     // `StaffOnboardingService` injeta `TenantContext` diretamente (abre sua
     // própria transação para o INSERT de `tenant`, ver Task 4) -- só

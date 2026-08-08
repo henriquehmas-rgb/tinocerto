@@ -8,6 +8,7 @@ import { StaffTokenService } from '../staff-token.service';
 import { StaffJwtService } from '../staff-jwt.service';
 import { MfaService } from '../mfa.service';
 import { DatabaseService } from '../../database/database.service';
+import { IpRateLimitGuard } from '../../security/ip-rate-limit.guard';
 
 describe('StaffAuthController', () => {
   // Mesmo achado de `decision.controller.spec.ts`/`offer.controller.spec.ts`:
@@ -76,7 +77,17 @@ describe('StaffAuthController', () => {
         },
         { provide: DatabaseService, useValue: { pool } },
       ],
-    }).compile();
+    })
+      // Achado C2 da revisão final: `@UseGuards(IpRateLimitGuard)` nas rotas
+      // deste controller faz o `DependenciesScanner` do Nest registrar
+      // `IpRateLimitGuard` como injectable deste módulo de teste e
+      // instanciá-lo de verdade no `compile()` -- exigindo `IpRateLimitService`
+      // (que fala com Redis) mesmo esses testes nunca passando pelo pipeline
+      // HTTP de guards (chamam os métodos do controller diretamente). Mesmo
+      // padrão de `candidate-auth.controller.spec.ts`.
+      .overrideGuard(IpRateLimitGuard)
+      .useValue({ canActivate: () => true })
+      .compile();
 
     return moduleRef.get(StaffAuthController);
   }
