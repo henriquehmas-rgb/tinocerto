@@ -81,6 +81,7 @@ describe('Gate consolidado — Autenticação de staff, onboarding e MFA (Tasks 
         expect(corpoLoginSemMfa.refreshToken).toEqual(expect.any(String));
         expect(corpoLoginSemMfa.mfaChallengeToken).toBeUndefined();
         const accessTokenSemMfa = corpoLoginSemMfa.accessToken!;
+        const refreshTokenSemMfa = corpoLoginSemMfa.refreshToken!;
 
         // --- 3. Habilita MFA: mfa/setup grava o secret pendente, mfa/verify confirma com TOTP real ---
         const respMfaSetup = await fetch(`${serverUrl}/v1/staff/auth/mfa/setup`, {
@@ -117,6 +118,19 @@ describe('Gate consolidado — Autenticação de staff, onboarding e MFA (Tasks 
         });
         expect(respLogout.status).toBe(201);
         expect(await respLogout.json()).toEqual({ ok: true });
+
+        // --- 4b. Prova de que o logout REALMENTE revogou o refresh token (não só
+        // devolveu `{ ok: true }`): reapresentar o mesmo refresh token de antes do
+        // logout precisa cair no caminho de detecção de reuso de `StaffTokenService.rotate`
+        // (token já revogado) e ser rejeitado com 401 -- um handler de `logout` que
+        // devolvesse sucesso sem chamar `revokeAll` passaria pela asserção acima mas
+        // falharia aqui.
+        const respRefreshAposLogout = await fetch(`${serverUrl}/v1/staff/auth/refresh`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', authorization: `Bearer ${accessTokenSemMfa}` },
+          body: JSON.stringify({ refreshToken: refreshTokenSemMfa }),
+        });
+        expect(respRefreshAposLogout.status).toBe(401);
 
         // --- 5. Login agora exige o 2º fator: devolve só o mfaChallengeToken ---
         const respLoginComMfa = await fetch(`${serverUrl}/v1/staff/auth/login`, {
