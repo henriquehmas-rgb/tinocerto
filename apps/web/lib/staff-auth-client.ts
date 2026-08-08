@@ -22,6 +22,14 @@ function isMfaChallenge(result: StaffLoginResult): result is StaffMfaChallenge {
   return 'mfaChallengeToken' in result;
 }
 
+/**
+ * Lançado por `mfaSetup()` quando o usuário já tem MFA habilitado e o
+ * backend exige o código TOTP ATUAL para autorizar a reconfiguração (ver
+ * `MfaSetupDto`/`StaffAuthController.mfaSetup`). A UI usa esse tipo para
+ * distinguir "precisa pedir o código atual" de qualquer outra falha.
+ */
+export class MfaSetupPrecisaCodigoAtualError extends Error {}
+
 export const staffAuthClient = {
   isMfaChallenge,
 
@@ -74,10 +82,28 @@ export const staffAuthClient = {
     return tokens;
   },
 
-  async mfaSetup(): Promise<{ qrCodeDataUri: string }> {
-    const response = await this.authenticatedFetch('/v1/staff/auth/mfa/setup', { method: 'POST' });
+  /**
+   * Inicia (ou reinicia) a configuração de MFA. Na primeira configuração,
+   * chame sem argumentos. Se o usuário já tem MFA habilitado, o backend
+   * exige o código TOTP atual para autorizar a reconfiguração -- essa
+   * chamada sem `codigoTotp` lança `MfaSetupPrecisaCodigoAtualError`, e o
+   * chamador deve pedir o código atual ao usuário e chamar de novo com
+   * `{ codigoTotp }`.
+   */
+  async mfaSetup(input?: { codigoTotp?: string }): Promise<{ qrCodeDataUri: string }> {
+    const response = await this.authenticatedFetch('/v1/staff/auth/mfa/setup', {
+      method: 'POST',
+      headers: input?.codigoTotp ? { 'Content-Type': 'application/json' } : undefined,
+      body: input?.codigoTotp ? JSON.stringify({ codigoTotp: input.codigoTotp }) : undefined,
+    });
     if (!response.ok) {
-      throw new Error('Não foi possível iniciar a configuração de MFA');
+      const body = await response.json().catch(() => ({}));
+      if (response.status === 401 && !input?.codigoTotp) {
+        throw new MfaSetupPrecisaCodigoAtualError(
+          body.message ?? 'Código TOTP atual necessário para reconfigurar o MFA',
+        );
+      }
+      throw new Error(body.message ?? 'Não foi possível iniciar a configuração de MFA');
     }
     return response.json();
   },

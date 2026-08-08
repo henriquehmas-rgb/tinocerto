@@ -3,7 +3,7 @@
 import { useState, useEffect, FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { staffAuthClient } from '../../../../lib/staff-auth-client';
+import { staffAuthClient, MfaSetupPrecisaCodigoAtualError } from '../../../../lib/staff-auth-client';
 
 export default function MfaConfigurarPage() {
   const router = useRouter();
@@ -11,17 +11,48 @@ export default function MfaConfigurarPage() {
   const [carregando, setCarregando] = useState(false);
   const [qrCodeDataUri, setQrCodeDataUri] = useState<string | null>(null);
   const [backupCodes, setBackupCodes] = useState<string[] | null>(null);
+  // Usuário já tem MFA habilitado -- backend exige o código TOTP atual antes
+  // de gerar um novo secret. Enquanto true, mostramos o formulário de
+  // reautenticação em vez de tentar `mfaSetup()` de novo sozinhos.
+  const [precisaCodigoAtual, setPrecisaCodigoAtual] = useState(false);
+
+  function iniciarSetup(codigoTotp?: string) {
+    return staffAuthClient
+      .mfaSetup(codigoTotp ? { codigoTotp } : undefined)
+      .then(({ qrCodeDataUri: uri }) => {
+        setQrCodeDataUri(uri);
+        setPrecisaCodigoAtual(false);
+        setErro(null);
+      })
+      .catch((err) => {
+        if (err instanceof MfaSetupPrecisaCodigoAtualError) {
+          setPrecisaCodigoAtual(true);
+          setErro(null);
+          return;
+        }
+        setErro(err instanceof Error ? err.message : 'Erro ao iniciar a configuração de MFA');
+      });
+  }
 
   useEffect(() => {
     if (!staffAuthClient.isLoggedIn()) {
       router.push('/staff/entrar');
       return;
     }
-    staffAuthClient
-      .mfaSetup()
-      .then(({ qrCodeDataUri: uri }) => setQrCodeDataUri(uri))
-      .catch((err) => setErro(err instanceof Error ? err.message : 'Erro ao iniciar a configuração de MFA'));
+    void iniciarSetup();
   }, [router]);
+
+  async function handleReconfigurarSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setErro(null);
+    setCarregando(true);
+    const form = new FormData(event.currentTarget);
+    try {
+      await iniciarSetup(String(form.get('codigoTotpAtual')));
+    } finally {
+      setCarregando(false);
+    }
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -51,6 +82,35 @@ export default function MfaConfigurarPage() {
             <li key={codigo}>{codigo}</li>
           ))}
         </ul>
+      </main>
+    );
+  }
+
+  if (precisaCodigoAtual) {
+    return (
+      <main className="max-w-md mx-auto p-8">
+        <h1 className="font-display text-2xl mb-6">Reconfigurar autenticação em duas etapas</h1>
+        <p className="text-sm mb-4">
+          Você já tem o MFA habilitado nesta conta. Para gerar um novo código QR, confirme o código atual do seu
+          aplicativo autenticador.
+        </p>
+        {erro && <p className="text-sm mb-4" style={{ color: 'crimson' }}>{erro}</p>}
+        <form onSubmit={handleReconfigurarSubmit} className="space-y-4" autoComplete="off">
+          <input
+            name="codigoTotpAtual"
+            placeholder="Código atual de 6 dígitos"
+            required
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            className="w-full border border-border rounded-control p-2 bg-surface"
+          />
+          <button type="submit" disabled={carregando} className="rounded-control px-4 py-2 bg-accent text-on-accent font-ui text-sm font-medium">
+            {carregando ? 'Verificando...' : 'Continuar'}
+          </button>
+        </form>
+        <p className="text-sm mt-4">
+          <Link href="/" className="underline">Cancelar</Link>
+        </p>
       </main>
     );
   }
