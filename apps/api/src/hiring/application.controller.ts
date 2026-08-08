@@ -10,6 +10,9 @@ import { PipelineStageTransitionService } from './pipeline-stage-transition.serv
 import { DecisionService } from './decision.service';
 import { OfferService, OfertaPendenteExistenteError } from './offer.service';
 import { ApplicationStartedWorkService, NenhumaOfertaAceitaError, InicioTrabalhoJaRegistradoError } from './application-started-work.service';
+import { JobRecrutadorService } from './job-recrutador.service';
+import { ReportService } from '../assessment/report/report.service';
+import { AdherenceService } from '../matching/adherence.service';
 
 class MoveStageDto {
   @IsString()
@@ -87,6 +90,9 @@ export class ApplicationController {
     private readonly decisionService: DecisionService,
     private readonly offerService: OfferService,
     private readonly applicationStartedWorkService: ApplicationStartedWorkService,
+    private readonly jobRecrutadorService: JobRecrutadorService,
+    private readonly reportService: ReportService,
+    private readonly adherenceService: AdherenceService,
     databaseService: DatabaseService,
   ) {
     this.tenantContext = new TenantContext(databaseService.pool);
@@ -95,40 +101,128 @@ export class ApplicationController {
   @Get(':id')
   @CerbosCheck('application', 'read')
   async findOne(@Req() req: RequestWithAuthContext, @Param('id') id: string) {
-    const view = await this.tenantContext.run(req.tenantId, (client) =>
-      this.applicationService.findByIdWithPersonView(client, id),
-    );
-    if (!view) {
-      throw new NotFoundException(`Candidatura ${id} não encontrada`);
-    }
-    return view;
+    return this.tenantContext.run(req.tenantId, async (client) => {
+      const view = await this.applicationService.findByIdWithPersonView(client, id);
+      if (!view) {
+        throw new NotFoundException(`Candidatura ${id} não encontrada`);
+      }
+      // Guarda de posse por recrutador (Fase 5a, Task 4): mesma
+      // JobRecrutadorService.exigirAcesso usada pelas rotas de JobController
+      // (Task 3) -- papéis com acesso total (admin_tenant, gestor_vaga)
+      // passam sempre; papel recrutador só passa se atribuído a esta vaga
+      // via job_recrutador. 404 (não 403), mesmo raciocínio já documentado
+      // em exigirAcesso, para não revelar a existência da candidatura/vaga
+      // a quem não tem acesso.
+      await this.jobRecrutadorService.exigirAcesso(client, {
+        tenantId: req.tenantId,
+        jobId: view.jobId,
+        userId: req.userId,
+        userRoles: req.userRoles,
+      });
+      return view;
+    });
   }
 
   @Post(':id/actions/move-stage')
   @CerbosCheck('application', 'move-stage')
   async moveStage(@Req() req: RequestWithAuthContext, @Param('id') id: string, @Body() dto: MoveStageDto) {
-    // req.userId vem do payload do JWT de staff verificado por
-    // TenantResolutionMiddleware (StaffJwtService.verify -- Task 8), sempre
-    // um uuid genuíno emitido pelo próprio backend no login. Esta checagem
-    // sobrevive como defesa em profundidade: pipeline_stage_transition.actor_id
-    // é uuid NOT NULL, e um userId em formato inesperado (ex. dado de teste
-    // malformado) causaria um 22P02 não tratado do Postgres, virando 500 para
-    // uma ação de mover-etapa que deveria ser rotineira e permitida.
-    if (!isUUID(req.userId)) {
-      throw new BadRequestException('userId do token de autenticação deve ser um UUID válido para registrar a transição de etapa');
-    }
-    return this.tenantContext.run(req.tenantId, (client) =>
-      this.pipelineStageTransitionService.moveStage(client, {
+    return this.tenantContext.run(req.tenantId, async (client) => {
+      const view = await this.applicationService.findByIdWithPersonView(client, id);
+      if (!view) {
+        throw new NotFoundException(`Candidatura ${id} não encontrada`);
+      }
+      // Guarda de posse por recrutador (Fase 5a, Task 4) -- roda ANTES da
+      // checagem de UUID de req.userId abaixo, de propósito: uma tentativa
+      // de acesso sem posse deve sempre virar 404 (não revelar a
+      // existência da candidatura), independente de o userId do
+      // requisitante estar bem formado ou não. Mesma guarda de findOne
+      // acima -- ver comentário lá para o raciocínio completo.
+      await this.jobRecrutadorService.exigirAcesso(client, {
+        tenantId: req.tenantId,
+        jobId: view.jobId,
+        userId: req.userId,
+        userRoles: req.userRoles,
+      });
+      // req.userId vem do payload do JWT de staff verificado por
+      // TenantResolutionMiddleware (StaffJwtService.verify -- Task 8),
+      // sempre um uuid genuíno emitido pelo próprio backend no login. Esta
+      // checagem sobrevive como defesa em profundidade:
+      // pipeline_stage_transition.actor_id é uuid NOT NULL, e um userId em
+      // formato inesperado (ex. dado de teste malformado) causaria um
+      // 22P02 não tratado do Postgres, virando 500 para uma ação de
+      // mover-etapa que deveria ser rotineira e permitida.
+      if (!isUUID(req.userId)) {
+        throw new BadRequestException('userId do token de autenticação deve ser um UUID válido para registrar a transição de etapa');
+      }
+      return this.pipelineStageTransitionService.moveStage(client, {
         applicationId: id,
         toState: dto.toState,
         reasonCode: dto.reasonCode,
         actorId: req.userId,
         actorType: 'user',
-      }),
-    );
+      });
+    });
+  }
+
+  @Get(':id/assessment-report')
+  @CerbosCheck('application', 'read')
+  async assessmentReport(@Req() req: RequestWithAuthContext, @Param('id') id: string) {
+    return this.tenantContext.run(req.tenantId, async (client) => {
+      const application = await this.applicationService.findByIdWithPersonView(client, id);
+      if (!application) {
+        throw new NotFoundException(`Candidatura ${id} não encontrada`);
+      }
+      await this.jobRecrutadorService.exigirAcesso(client, {
+        tenantId: req.tenantId,
+        jobId: application.jobId,
+        userId: req.userId,
+        userRoles: req.userRoles,
+      });
+
+      // Versão simplificada e específica desta rota do predicado
+      // RESULT_GRANT_LIVE_EXISTS (apps/api/src/talent/result-grant-predicate.ts):
+      // não reutiliza a constante compartilhada diretamente porque ela
+      // assume o alias `r` de assessment_result no FROM do chamador (usado
+      // por ReportService.gerar/PsychReportService.obterIntegra, que já
+      // partem de um assessment_result_id conhecido), o que não se aplica
+      // aqui -- esta rota parte de application_id e ainda não sabe qual
+      // assessment_result_id (se algum) está associado. Mantém as mesmas 6
+      // condições de validade que o predicado documenta (tenant do grant,
+      // não revogado, não expirado, consent não revogado, consent dentro
+      // do ttl_meses, coerência de tenant entre grant e consent) para não
+      // reabrir a lacuna de segurança que RESULT_GRANT_LIVE_EXISTS existe
+      // para fechar.
+      const grantResult = await client.query<{ assessment_result_id: string }>(
+        `SELECT g.assessment_result_id
+         FROM result_grant g
+         JOIN consent c ON c.id = g.consent_id
+         WHERE g.tenant_id = $1
+           AND g.application_id = $2
+           AND g.revoked_at IS NULL
+           AND (g.expires_at IS NULL OR g.expires_at > now())
+           AND c.revoked_at IS NULL
+           AND (c.ttl_meses IS NULL OR c.granted_at + (c.ttl_meses * interval '1 month') > now())
+           AND (c.tenant_id IS NULL OR c.tenant_id = g.tenant_id)
+         LIMIT 1`,
+        [req.tenantId, id],
+      );
+
+      const relatorio =
+        grantResult.rows.length > 0 ? await this.reportService.gerar(client, grantResult.rows[0].assessment_result_id) : null;
+      const aderencia = await this.adherenceService.porCandidatura(client, id);
+
+      return { relatorio, aderencia };
+    });
   }
 
   @Post(':id/actions/reject')
+  // TODO(fase-5b?): esta rota (e extend-offer/offers/mark-started-work
+  // abaixo) ainda não tem a guarda de posse por recrutador aplicada em
+  // findOne/moveStage/assessment-report (Fase 5a, Task 4) -- ficaram fora
+  // do escopo desta task por não serem consumidas pelo painel nesta
+  // sub-fase. Replicar o mesmo padrão (buscar application.jobId via
+  // findByIdWithPersonView, chamar jobRecrutadorService.exigirAcesso, só
+  // então delegar) quando essas ações ganharem UI no painel.
   @CerbosCheck('application', 'reject')
   async reject(@Req() req: RequestWithAuthContext, @Param('id') id: string, @Body() dto: RejectApplicationDto) {
     try {

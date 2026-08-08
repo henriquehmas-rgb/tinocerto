@@ -6,8 +6,11 @@ import { PipelineStageTransitionService } from '../pipeline-stage-transition.ser
 import { DecisionService } from '../decision.service';
 import { OfferService } from '../offer.service';
 import { ApplicationStartedWorkService } from '../application-started-work.service';
+import { JobRecrutadorService } from '../job-recrutador.service';
 import { DatabaseService } from '../../database/database.service';
 import { CerbosGuard } from '../../authz/cerbos.guard';
+import { ReportService } from '../../assessment/report/report.service';
+import { AdherenceService } from '../../matching/adherence.service';
 
 describe('ApplicationController', () => {
   async function buildController(
@@ -15,13 +18,38 @@ describe('ApplicationController', () => {
     recordMock: jest.Mock = jest.fn(),
     offerServiceMock: { extend?: jest.Mock; listByApplication?: jest.Mock } = {},
     startedWorkServiceMock: { registrar?: jest.Mock } = {},
+    // JobRecrutadorService.exigirAcesso (Task 2/4) -- guarda de posse por
+    // recrutador em findOne/moveStage. Default resolve (não bloqueia) para
+    // não quebrar os testes pré-existentes acima que não exercitam a
+    // guarda; os testes de guarda abaixo passam seu próprio mock rejeitado.
+    exigirAcessoMock: jest.Mock = jest.fn().mockResolvedValue(undefined),
+    // Mocks extras (Task 4): permitem sobrescrever o ApplicationService
+    // padrão (usado por findOne/moveStage/assessmentReport para localizar
+    // application.jobId) e injetar ReportService/AdherenceService para o
+    // teste de GET :id/assessment-report.
+    extraServiceMocks: {
+      applicationServiceMock?: { findByIdWithPersonView?: jest.Mock };
+      reportServiceMock?: { gerar?: jest.Mock };
+      adherenceServiceMock?: { porCandidatura?: jest.Mock };
+    } = {},
   ) {
     const fakeClient = { query: jest.fn().mockResolvedValue({ rows: [] }), release: jest.fn() };
     const fakePool = { connect: jest.fn().mockResolvedValue(fakeClient) };
     const moduleRef = await Test.createTestingModule({
       controllers: [ApplicationController],
       providers: [
-        { provide: ApplicationService, useValue: { findByIdWithPersonView: jest.fn() } },
+        {
+          provide: ApplicationService,
+          useValue:
+            extraServiceMocks.applicationServiceMock ?? {
+              // Default resolve com um jobId presente -- necessário porque
+              // findOne/moveStage agora sempre buscam application.jobId
+              // antes de delegar; os testes pré-existentes de
+              // moveStage/reject/extend-offer/offers/mark-started-work não
+              // se importam com o conteúdo da view, só que ela exista.
+              findByIdWithPersonView: jest.fn().mockResolvedValue({ id: 'application-1', jobId: 'job-1' }),
+            },
+        },
         { provide: PipelineStageTransitionService, useValue: { moveStage: moveStageMock } },
         // DecisionService (Task 12) não é exercitado pelos testes de
         // move-stage -- mock vazio só para satisfazer o construtor do
@@ -40,6 +68,9 @@ describe('ApplicationController', () => {
         // mock vazio por padrão, os testes de mark-started-work abaixo
         // passam seu próprio mock de registrar.
         { provide: ApplicationStartedWorkService, useValue: { registrar: startedWorkServiceMock.registrar ?? jest.fn() } },
+        { provide: JobRecrutadorService, useValue: { exigirAcesso: exigirAcessoMock } },
+        { provide: ReportService, useValue: extraServiceMocks.reportServiceMock ?? { gerar: jest.fn() } },
+        { provide: AdherenceService, useValue: extraServiceMocks.adherenceServiceMock ?? { porCandidatura: jest.fn() } },
         { provide: DatabaseService, useValue: { pool: fakePool } },
       ],
     })
@@ -245,6 +276,138 @@ describe('ApplicationController', () => {
       await expect(controller.markStartedWork(req, 'application-1', { startDate: '2026-09-01' })).rejects.toBeInstanceOf(
         ConflictException,
       );
+    });
+  });
+
+  // [Fase 5a, Task 4] Guarda de posse por recrutador em GET :id e
+  // POST :id/actions/move-stage: um recrutador só pode ver/mover
+  // candidaturas de vagas às quais está atribuído (ou tem papel de acesso
+  // total). A guarda em si (quem tem acesso a qual vaga) já é testada
+  // exaustivamente em job-recrutador.service.spec.ts (Task 2); aqui só
+  // travamos que o controller consulta application.jobId via
+  // findByIdWithPersonView e propaga a rejeição de exigirAcesso sem
+  // executar a ação protegida.
+  describe('guarda de posse por recrutador (Fase 5a)', () => {
+    it('GET :id lança NotFoundException quando o recrutador não está atribuído à vaga da candidatura', async () => {
+      const exigirAcessoMock = jest.fn().mockRejectedValue(new NotFoundException('Vaga não encontrada'));
+      const controller = await buildController(jest.fn(), undefined, {}, {}, exigirAcessoMock);
+      const req = { tenantId: 'tenant-1', userId: 'recrutador-nao-atribuido', userRoles: ['recrutador'] } as any;
+
+      await expect(controller.findOne(req, 'application-1')).rejects.toThrow(NotFoundException);
+    });
+
+    it('POST :id/actions/move-stage lança NotFoundException quando o recrutador não está atribuído', async () => {
+      const exigirAcessoMock = jest.fn().mockRejectedValue(new NotFoundException('Vaga não encontrada'));
+      const moveStageMock = jest.fn();
+      const controller = await buildController(moveStageMock, undefined, {}, {}, exigirAcessoMock);
+      const req = { tenantId: 'tenant-1', userId: 'recrutador-nao-atribuido', userRoles: ['recrutador'] } as any;
+
+      await expect(
+        controller.moveStage(req, 'application-1', { toState: 'entrevista' } as any),
+      ).rejects.toThrow(NotFoundException);
+      expect(moveStageMock).not.toHaveBeenCalled();
+    });
+
+    it('GET :id retorna a view da candidatura quando o recrutador tem acesso', async () => {
+      const applicationServiceMock = {
+        findByIdWithPersonView: jest.fn().mockResolvedValue({ id: 'application-1', jobId: 'job-1', etapaFunil: 'triagem' }),
+      };
+      const exigirAcessoMock = jest.fn().mockResolvedValue(undefined);
+      const controller = await buildController(jest.fn(), undefined, {}, {}, exigirAcessoMock, { applicationServiceMock });
+      const req = { tenantId: 'tenant-1', userId: 'recrutador-1', userRoles: ['recrutador'] } as any;
+
+      const result = await controller.findOne(req, 'application-1');
+
+      expect(result).toEqual({ id: 'application-1', jobId: 'job-1', etapaFunil: 'triagem' });
+      expect(exigirAcessoMock).toHaveBeenCalledWith(expect.anything(), {
+        tenantId: 'tenant-1',
+        jobId: 'job-1',
+        userId: 'recrutador-1',
+        userRoles: ['recrutador'],
+      });
+    });
+
+    it('GET :id lança NotFoundException quando a candidatura não existe (sem sequer chamar exigirAcesso)', async () => {
+      const applicationServiceMock = { findByIdWithPersonView: jest.fn().mockResolvedValue(null) };
+      const exigirAcessoMock = jest.fn();
+      const controller = await buildController(jest.fn(), undefined, {}, {}, exigirAcessoMock, { applicationServiceMock });
+      const req = { tenantId: 'tenant-1', userId: 'recrutador-1', userRoles: ['recrutador'] } as any;
+
+      await expect(controller.findOne(req, 'application-inexistente')).rejects.toBeInstanceOf(NotFoundException);
+      expect(exigirAcessoMock).not.toHaveBeenCalled();
+    });
+  });
+
+  // [Fase 5a, Task 4] GET :id/assessment-report: combina o relatório por
+  // dimensão (Fase 2a, ReportService.gerar) com o score de aderência
+  // (Fase 2b, AdherenceService.porCandidatura). O relatório só é gerado
+  // quando existe um result_grant vivo (não revogado/expirado, com consent
+  // válido) para a candidatura -- sem grant, relatorio é null mas aderencia
+  // continua sendo calculada (aderência de skills não depende de consent de
+  // laudo).
+  describe('GET :id/assessment-report (Fase 5a)', () => {
+    it('retorna relatório por dimensão + score de aderência', async () => {
+      const applicationServiceMock = {
+        findByIdWithPersonView: jest.fn().mockResolvedValue({ id: 'app-1', jobId: 'job-1', person: { id: 'person-1' } }),
+      };
+      const reportServiceMock = { gerar: jest.fn().mockResolvedValue({ assessmentResultId: 'ar-1', secoes: [] }) };
+      const adherenceServiceMock = {
+        porCandidatura: jest.fn().mockResolvedValue({ scoreAderencia: 0.8, skillsBatidas: [], skillsFaltantes: [], totalExigidas: 0 }),
+      };
+      const controller = await buildController(jest.fn(), undefined, {}, {}, jest.fn(), {
+        applicationServiceMock,
+        reportServiceMock,
+        adherenceServiceMock,
+      });
+      const req = { tenantId: 'tenant-1', userId: 'admin-1', userRoles: ['admin_tenant'] } as any;
+
+      const result = await controller.assessmentReport(req, 'app-1');
+
+      expect(result.aderencia?.scoreAderencia).toBe(0.8);
+    });
+
+    it('lança NotFoundException quando a candidatura não existe', async () => {
+      const applicationServiceMock = { findByIdWithPersonView: jest.fn().mockResolvedValue(null) };
+      const controller = await buildController(jest.fn(), undefined, {}, {}, jest.fn(), { applicationServiceMock });
+      const req = { tenantId: 'tenant-1', userId: 'admin-1', userRoles: ['admin_tenant'] } as any;
+
+      await expect(controller.assessmentReport(req, 'app-inexistente')).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('lança NotFoundException quando o recrutador não está atribuído à vaga da candidatura', async () => {
+      const applicationServiceMock = {
+        findByIdWithPersonView: jest.fn().mockResolvedValue({ id: 'app-1', jobId: 'job-1', person: { id: 'person-1' } }),
+      };
+      const exigirAcessoMock = jest.fn().mockRejectedValue(new NotFoundException('Vaga não encontrada'));
+      const controller = await buildController(jest.fn(), undefined, {}, {}, exigirAcessoMock, { applicationServiceMock });
+      const req = { tenantId: 'tenant-1', userId: 'recrutador-nao-atribuido', userRoles: ['recrutador'] } as any;
+
+      await expect(controller.assessmentReport(req, 'app-1')).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('relatorio é null quando não existe result_grant vivo, mas aderência ainda é calculada', async () => {
+      const applicationServiceMock = {
+        findByIdWithPersonView: jest.fn().mockResolvedValue({ id: 'app-1', jobId: 'job-1', person: { id: 'person-1' } }),
+      };
+      const reportServiceMock = { gerar: jest.fn() };
+      const adherenceServiceMock = {
+        porCandidatura: jest.fn().mockResolvedValue({ scoreAderencia: 0.5, skillsBatidas: [], skillsFaltantes: [], totalExigidas: 2 }),
+      };
+      const controller = await buildController(jest.fn(), undefined, {}, {}, jest.fn(), {
+        applicationServiceMock,
+        reportServiceMock,
+        adherenceServiceMock,
+      });
+      const req = { tenantId: 'tenant-1', userId: 'admin-1', userRoles: ['admin_tenant'] } as any;
+
+      const result = await controller.assessmentReport(req, 'app-1');
+
+      // fakeClient.query (default do buildController) resolve { rows: [] }
+      // -- ou seja, nenhum result_grant encontrado -- então gerar() não
+      // deve nem ser chamado, e relatorio deve ser null.
+      expect(reportServiceMock.gerar).not.toHaveBeenCalled();
+      expect(result.relatorio).toBeNull();
+      expect(result.aderencia?.scoreAderencia).toBe(0.5);
     });
   });
 });
