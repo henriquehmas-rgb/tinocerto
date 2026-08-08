@@ -107,15 +107,15 @@ export class ApplicationController {
   @Post(':id/actions/move-stage')
   @CerbosCheck('application', 'move-stage')
   async moveStage(@Req() req: RequestWithAuthContext, @Param('id') id: string, @Body() dto: MoveStageDto) {
-    // req.userId vem do header x-user-id (TenantResolutionMiddleware), que só
-    // valida presença, não formato -- dívida técnica aceita na Task 6 até a
-    // autenticação real entrar. pipeline_stage_transition.actor_id, porém, é
-    // uuid NOT NULL: sem esta checagem, um x-user-id não-UUID (ex.: os
-    // próprios literais 'recrutador-1'/'user-1' usados nos fixtures de teste
-    // desta fase) causaria um 22P02 não tratado do Postgres, virando 500 para
+    // req.userId vem do payload do JWT de staff verificado por
+    // TenantResolutionMiddleware (StaffJwtService.verify -- Task 8), sempre
+    // um uuid genuíno emitido pelo próprio backend no login. Esta checagem
+    // sobrevive como defesa em profundidade: pipeline_stage_transition.actor_id
+    // é uuid NOT NULL, e um userId em formato inesperado (ex. dado de teste
+    // malformado) causaria um 22P02 não tratado do Postgres, virando 500 para
     // uma ação de mover-etapa que deveria ser rotineira e permitida.
     if (!isUUID(req.userId)) {
-      throw new BadRequestException('x-user-id deve ser um UUID válido para registrar a transição de etapa');
+      throw new BadRequestException('userId do token de autenticação deve ser um UUID válido para registrar a transição de etapa');
     }
     return this.tenantContext.run(req.tenantId, (client) =>
       this.pipelineStageTransitionService.moveStage(client, {

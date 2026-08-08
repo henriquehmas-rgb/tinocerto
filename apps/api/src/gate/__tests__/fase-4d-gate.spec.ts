@@ -5,6 +5,7 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { AppModule } from '../../app.module';
 import { TenantContext } from '../../database/tenant-context';
 import { ServiceAccountCrpLinkService } from '../../platform-api/service-account-crp-link.service';
+import { mintStaffJwt } from '../../staff-auth/__tests__/mint-staff-jwt';
 
 describe('Gate consolidado — Fase 4d (portal do desenvolvedor + service account com CRP)', () => {
   const adminPool = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -145,9 +146,7 @@ describe('Gate consolidado — Fase 4d (portal do desenvolvedor + service accoun
           method: 'POST',
           headers: {
             'content-type': 'application/json',
-            'x-tenant-id': tenantId,
-            'x-user-id': adminUser.rows[0].id,
-            'x-user-roles': 'admin_tenant',
+            authorization: `Bearer ${mintStaffJwt({ userId: adminUser.rows[0].id, tenantId: tenantId!, roles: ['admin_tenant'] })}`,
           },
           body: JSON.stringify({ nome: 'Integração Gate 4d', scopes: ['applications:read', 'psych:report.read'] }),
         });
@@ -160,9 +159,7 @@ describe('Gate consolidado — Fase 4d (portal do desenvolvedor + service accoun
           method: 'POST',
           headers: {
             'content-type': 'application/json',
-            'x-tenant-id': tenantId,
-            'x-user-id': recrutadorUser.rows[0].id,
-            'x-user-roles': 'recrutador',
+            authorization: `Bearer ${mintStaffJwt({ userId: recrutadorUser.rows[0].id, tenantId: tenantId!, roles: ['recrutador'] })}`,
           },
           body: JSON.stringify({ nome: 'Tentativa negada', scopes: ['applications:read'] }),
         });
@@ -256,9 +253,7 @@ describe('Gate consolidado — Fase 4d (portal do desenvolvedor + service accoun
           method: 'POST',
           headers: {
             'content-type': 'application/json',
-            'x-tenant-id': outroTenantId,
-            'x-user-id': outroAdmin.rows[0].id,
-            'x-user-roles': 'admin_tenant',
+            authorization: `Bearer ${mintStaffJwt({ userId: outroAdmin.rows[0].id, tenantId: outroTenantId!, roles: ['admin_tenant'] })}`,
           },
           body: JSON.stringify({ nome: 'Integração Outro Tenant', scopes: ['applications:read'] }),
         });

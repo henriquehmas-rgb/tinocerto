@@ -7,13 +7,27 @@ export interface StaffJwtPayload {
   roles: string[];
 }
 
+// Discriminador explícito do access token real -- mesma técnica de
+// `StaffMfaChallengePayload.tipo` abaixo, na direção oposta: sem isso,
+// `verify()` aceitava QUALQUER token assinado com o mesmo segredo,
+// inclusive um `mfa_challenge` de curta duração emitido por
+// `signMfaChallenge()` (confusão de tokens -- CRÍTICO, Task 8 review).
+// `sign()` estampa `tipo: 'access'` sozinho (nenhum call site precisa
+// passar isso) e `verify()` exige exatamente esse valor.
+interface StaffAccessTokenPayload extends StaffJwtPayload {
+  tipo: 'access';
+}
+
 // Payload do token de desafio de MFA (Task 7) -- assinado/verificado pelo
 // MESMO StaffJwtService (mesmo segredo) que o access token, mas NUNCA deve
 // ser aceito como access token. `tipo: 'mfa_challenge'` é o discriminador
 // explícito: `verifyMfaChallenge` rejeita qualquer token sem esse campo
-// (inclusive um access token real, que nunca carrega `tipo`), fechando a
-// confusão de tokens (um access token de vida longa sendo reapresentado a
-// `login/mfa` como se fosse o desafio de curta duração, ou vice-versa).
+// (inclusive um access token real, que nunca carrega `tipo: 'mfa_challenge'`),
+// e `verify` (abaixo) rejeita qualquer token sem `tipo: 'access'` -- fechando
+// a confusão de tokens nos dois sentidos (um access token de vida longa
+// sendo reapresentado a `login/mfa` como se fosse o desafio de curta
+// duração, OU um desafio de MFA sendo reapresentado a qualquer rota
+// autenticada normal como se fosse um access token completo).
 export interface StaffMfaChallengePayload {
   tipo: 'mfa_challenge';
   userId: string;
@@ -33,11 +47,26 @@ export class StaffJwtService {
   }
 
   sign(payload: StaffJwtPayload, expiresIn: jwt.SignOptions['expiresIn'] = '15m'): string {
-    return jwt.sign(payload, this.secret, { expiresIn });
+    const accessPayload: StaffAccessTokenPayload = { ...payload, tipo: 'access' };
+    return jwt.sign(accessPayload, this.secret, { expiresIn });
   }
 
+  // Rejeita (lança, no mesmo estilo de uma falha nativa de `jwt.verify` --
+  // assinatura inválida/expirada) qualquer token que não seja um access
+  // token genuíno: falta de `tipo: 'access'` (ex. um `mfa_challenge`
+  // reapresentado aqui) ou `roles` que não seja de fato um array (nunca
+  // repassa `undefined` silenciosamente para `StaffJwtPayload.roles`, que é
+  // consumido rio abaixo como `string[]` por `CerbosGuard`/etc). O
+  // try/catch de `TenantResolutionMiddleware` já converte qualquer exceção
+  // daqui em 401 -- nenhum tratamento novo necessário no middleware.
   verify(token: string): StaffJwtPayload {
     const decoded = jwt.verify(token, this.secret) as jwt.JwtPayload;
+    if (decoded.tipo !== 'access') {
+      throw new Error('Token não é um access token válido');
+    }
+    if (!Array.isArray(decoded.roles)) {
+      throw new Error('Token de access sem roles válidas (esperado array)');
+    }
     return { userId: decoded.userId, tenantId: decoded.tenantId, roles: decoded.roles };
   }
 

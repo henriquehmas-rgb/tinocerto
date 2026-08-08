@@ -1,3 +1,4 @@
+import jwt from 'jsonwebtoken';
 import { StaffJwtService } from '../staff-jwt.service';
 
 describe('StaffJwtService', () => {
@@ -45,16 +46,29 @@ describe('StaffJwtService', () => {
     expect(() => service.verifyMfaChallenge(accessToken)).toThrow();
   });
 
-  it('verify (access token) não é enganado por um mfa_challenge -- o discriminador não vaza para o shape de StaffJwtPayload, mas o token continua criptograficamente válido; a checagem de tipo fica a cargo de quem consome cada método', () => {
+  // Task 8 (CRÍTICO, corrigido nesta task) -- confusão de tokens no sentido
+  // inverso do teste acima: um `mfa_challenge` (emitido só depois da senha
+  // correta, ANTES do segundo fator) nunca pode ser aceito por `verify`
+  // como se fosse um access token completo. Antes da correção, `verify` não
+  // checava discriminador nenhum e devolvia normalmente
+  // `{ userId, tenantId, roles: undefined }` para um `mfa_challenge` --
+  // `TenantResolutionMiddleware` aceitava esse token como autenticação
+  // completa, permitindo a um atacante que só sabe a senha da vítima
+  // sequestrar o segundo fator dela via `mfa/setup`/`mfa/verify`.
+  it('verify (access token) rejeita um mfaChallengeToken -- discriminador tipo:access ausente', () => {
     const service = new StaffJwtService();
     const challenge = service.signMfaChallenge({ userId: 'user-1', tenantId: 'tenant-1' });
-    // `verify` não faz a checagem de discriminador (só `verifyMfaChallenge`
-    // faz) -- por isso o controller SEMPRE chama `verifyMfaChallenge` em
-    // `login/mfa`, nunca `verify`, para um token vindo desse campo.
-    const decoded = service.verify(challenge);
-    expect(decoded.userId).toBe('user-1');
-    expect(decoded.tenantId).toBe('tenant-1');
-    expect(decoded.roles).toBeUndefined();
+    expect(() => service.verify(challenge)).toThrow();
+  });
+
+  it('verify rejeita um token cujo payload tem roles que não é array (defesa contra req.userRoles=undefined vazando para downstream)', () => {
+    const service = new StaffJwtService();
+    const tokenSemRolesArray = jwt.sign(
+      { userId: 'user-1', tenantId: 'tenant-1', tipo: 'access' },
+      process.env.STAFF_JWT_SECRET as string,
+      { expiresIn: '15m' },
+    );
+    expect(() => service.verify(tokenSemRolesArray)).toThrow();
   });
 
   it('rejeita mfaChallengeToken expirado', () => {
