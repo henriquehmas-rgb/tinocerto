@@ -11,12 +11,19 @@ export interface KanbanColumnProps<T> {
   onMoverItem: (item: T, novaColuna: string) => void;
 }
 
-export function KanbanColumn<T>({ titulo, itens, colunasDestino, renderItem, labelMover, onMoverItem }: KanbanColumnProps<T>) {
+export function KanbanColumn<T extends { id: string | number }>({
+  titulo,
+  itens,
+  colunasDestino,
+  renderItem,
+  labelMover,
+  onMoverItem,
+}: KanbanColumnProps<T>) {
   return (
     <div className="flex flex-col gap-2 min-w-[240px]">
       <h3 className="font-ui text-sm font-medium text-text-secondary">{titulo}</h3>
-      {itens.map((item, index) => (
-        <Card key={index}>
+      {itens.map((item) => (
+        <Card key={item.id}>
           <div className="flex items-center justify-between gap-2">
             <div>{renderItem(item)}</div>
             <DropdownMenu.Root>

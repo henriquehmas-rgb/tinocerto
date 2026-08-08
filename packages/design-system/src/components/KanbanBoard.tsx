@@ -6,9 +6,16 @@ export interface KanbanBoardProps<T> {
   itens: Record<string, T[]>;
   renderItem: (item: T) => React.ReactNode;
   onMoverItem: (item: T, novaColuna: string) => void;
+  labelMover?: (item: T) => string;
 }
 
-export function KanbanBoard<T extends { nome?: string }>({ colunas, itens, renderItem, onMoverItem }: KanbanBoardProps<T>) {
+export function KanbanBoard<T extends { id: string | number; nome?: string }>({
+  colunas,
+  itens,
+  renderItem,
+  onMoverItem,
+  labelMover,
+}: KanbanBoardProps<T>) {
   return (
     <div className="flex gap-4 overflow-x-auto">
       {colunas.map((coluna) => (
@@ -18,7 +25,7 @@ export function KanbanBoard<T extends { nome?: string }>({ colunas, itens, rende
           itens={itens[coluna.chave] ?? []}
           colunasDestino={colunas.filter((c) => c.chave !== coluna.chave)}
           renderItem={renderItem}
-          labelMover={(item) => `Mover ${(item as any).nome ?? 'item'}`}
+          labelMover={labelMover ?? ((item) => `Mover ${(item as any).nome ?? 'item'}`)}
           onMoverItem={onMoverItem}
         />
       ))}
