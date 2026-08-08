@@ -14,6 +14,10 @@ const config: Config = {
         'text-secondary': 'var(--pr-text-secondary)',
         accent: 'var(--pr-accent)',
         'on-accent': 'var(--pr-on-accent)',
+        'success-bg': 'var(--pr-state-success-bg)',
+        'success-text': 'var(--pr-state-success)',
+        'warning-bg': 'var(--pr-state-warning-bg)',
+        'warning-text': 'var(--pr-state-warning)',
       },
       borderRadius: {
         control: 'var(--pr-r-control)',
