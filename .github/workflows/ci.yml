@@ -37,6 +37,8 @@ jobs:
       APP_DATABASE_URL: postgresql://app_runtime:app_runtime_dev_only@localhost:5432/tinocerto
       REDIS_URL: redis://localhost:6379
       CERBOS_HTTP_URL: http://localhost:3592
+      CANDIDATE_JWT_SECRET: segredo-de-teste-nao-usar-em-producao
+      STAFF_JWT_SECRET: segredo-de-teste-nao-usar-em-producao
 
     steps:
       - uses: actions/checkout@v4
