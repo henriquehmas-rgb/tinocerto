@@ -25,13 +25,14 @@ interface RequestWithSessionAuth extends Request {
   userRoles: string[];
 }
 
-// Rota de SESSÃO (x-tenant-id/x-user-id via TenantResolutionMiddleware,
-// sem exclusão -- diferente de GET /v1/applications e do psych-report,
-// que são para integradores externos). Um usuário logado cria chave para
-// o PRÓPRIO tenant -- não dá pra criar a primeira chave com uma chave que
-// ainda não existe (design spec, decisão 1). Erros seguem a convenção
-// padrão do Nest, não RFC 9457 -- RFC 9457 é só para as rotas autenticadas
-// por API key (mesma lógica da decisão 4 da 4a).
+// Rota de SESSÃO (JWT de staff verificado por TenantResolutionMiddleware --
+// StaffJwtService.verify, Task 8 -- popula req.tenantId/req.userId, sem
+// exclusão -- diferente de GET /v1/applications e do psych-report, que são
+// para integradores externos). Um usuário logado cria chave para o PRÓPRIO
+// tenant -- não dá pra criar a primeira chave com uma chave que ainda não
+// existe (design spec, decisão 1). Erros seguem a convenção padrão do
+// Nest, não RFC 9457 -- RFC 9457 é só para as rotas autenticadas por API
+// key (mesma lógica da decisão 4 da 4a).
 @Controller('v1/developer/api-keys')
 @UseGuards(CerbosGuard)
 export class DeveloperApiKeyController {

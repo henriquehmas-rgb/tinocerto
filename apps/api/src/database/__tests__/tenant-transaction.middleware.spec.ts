@@ -1,5 +1,6 @@
 import { Pool } from 'pg';
 import jwt from 'jsonwebtoken';
+import { UnauthorizedException } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { TenantContext } from '../tenant-context';
 import { TenantResolutionMiddleware } from '../tenant-transaction.middleware';
@@ -99,17 +100,22 @@ describe('TenantResolutionMiddleware', () => {
     expect(next).toHaveBeenCalledTimes(1);
   });
 
-  it('lança 401 quando o JWT tem assinatura inválida (assinado com segredo diferente do configurado)', () => {
+  it('lança UnauthorizedException quando o JWT tem assinatura inválida (assinado com segredo diferente do configurado)', () => {
     const middleware = new TenantResolutionMiddleware(new StaffJwtService());
     const tokenComSegredoErrado = jwt.sign(
-      { userId: 'user-1', tenantId: 'tenant-1', roles: ['admin_tenant'] },
+      { userId: 'user-1', tenantId: 'tenant-1', roles: ['admin_tenant'], tipo: 'access' },
       'segredo-errado-nao-e-o-configurado',
       { expiresIn: '1h' },
     );
     const req = buildRequest({ authorization: `Bearer ${tokenComSegredoErrado}` });
     const next = jest.fn();
 
-    expect(() => middleware.use(req, {} as Response, next)).toThrow();
+    // Assinatura específica em `UnauthorizedException` (não só `.toThrow()`
+    // genérico) -- um `.toThrow()` sem tipo/mensagem continuaria passando
+    // mesmo se o try/catch que traduz a falha de `verify()` em 401 fosse
+    // removido inteiramente e outra exceção qualquer vazasse no lugar dele.
+    expect(() => middleware.use(req, {} as Response, next)).toThrow(UnauthorizedException);
+    expect(() => middleware.use(req, {} as Response, next)).toThrow('Token inválido ou expirado');
     expect(next).not.toHaveBeenCalled();
   });
 
@@ -119,6 +125,40 @@ describe('TenantResolutionMiddleware', () => {
     const next = jest.fn();
 
     expect(() => middleware.use(req, {} as Response, next)).toThrow('Bearer token ausente');
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  // Task 8 (CRÍTICO) -- prova de fechamento no nível do middleware, não só
+  // de `StaffJwtService.verify` isoladamente: um `mfaChallengeToken`
+  // (emitido por `POST /v1/staff/auth/login` quando o usuário tem MFA
+  // habilitado, ANTES do segundo fator ser verificado) apresentado como
+  // `Authorization: Bearer <challenge>` em QUALQUER rota protegida por este
+  // middleware (ex. `mfa/setup`, que não tem guard nenhum além dele) tem
+  // que ser rejeitado com 401, nunca aceito como autenticação completa da
+  // vítima.
+  it('lança UnauthorizedException quando o Bearer é um mfaChallengeToken (confusão de tokens -- não pode autenticar rotas normais)', () => {
+    const staffJwtService = new StaffJwtService();
+    const middleware = new TenantResolutionMiddleware(staffJwtService);
+    const mfaChallengeToken = staffJwtService.signMfaChallenge({ userId: 'vitima-1', tenantId: 'tenant-1' });
+    const req = buildRequest({ authorization: `Bearer ${mfaChallengeToken}` });
+    const next = jest.fn();
+
+    expect(() => middleware.use(req, {} as Response, next)).toThrow(UnauthorizedException);
+    expect(() => middleware.use(req, {} as Response, next)).toThrow('Token inválido ou expirado');
+    expect(next).not.toHaveBeenCalled();
+    expect(req.userId).toBeUndefined();
+    expect(req.tenantId).toBeUndefined();
+  });
+
+  it('lança UnauthorizedException quando o access token está expirado', () => {
+    const staffJwtService = new StaffJwtService();
+    const middleware = new TenantResolutionMiddleware(staffJwtService);
+    const tokenExpirado = staffJwtService.sign({ userId: 'user-1', tenantId: 'tenant-1', roles: ['admin_tenant'] }, '0s');
+    const req = buildRequest({ authorization: `Bearer ${tokenExpirado}` });
+    const next = jest.fn();
+
+    expect(() => middleware.use(req, {} as Response, next)).toThrow(UnauthorizedException);
+    expect(() => middleware.use(req, {} as Response, next)).toThrow('Token inválido ou expirado');
     expect(next).not.toHaveBeenCalled();
   });
 });

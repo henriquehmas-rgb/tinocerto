@@ -102,8 +102,9 @@ export class AuditLogService {
     // falso positivo de adulteracao. Pelo mesmo motivo, a CHAVE do advisory
     // lock abaixo (achado [Critical] da 1a rodada) tambem precisa ser
     // canonica: dois requests do mesmo tenant chegando com case diferente
-    // no uuid (plausivel -- tenant-transaction.middleware.ts le
-    // req.header("x-tenant-id") sem normalizar) pegariam chaves de
+    // no uuid (plausivel -- tenant-transaction.middleware.ts extrai
+    // tenantId do payload do JWT de staff verificado, Task 8, sem
+    // normalizar) pegariam chaves de
     // hashtext() DIFERENTES, e a serializacao que deveria prevenir a
     // bifurcacao da cadeia simplesmente nao aconteceria para esse par.
     //
