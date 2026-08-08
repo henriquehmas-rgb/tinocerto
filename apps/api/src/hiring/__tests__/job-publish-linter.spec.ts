@@ -2,6 +2,7 @@ import { Pool } from 'pg';
 import { TenantContext } from '../../database/tenant-context';
 import { RequisitionService } from '../requisition.service';
 import { JobService } from '../job.service';
+import { JobRecrutadorService } from '../job-recrutador.service';
 import { JobCustomFieldService } from '../job-custom-field.service';
 
 describe('JobService.publish — bloqueio do linter de categoria sensível', () => {
@@ -42,7 +43,7 @@ describe('JobService.publish — bloqueio do linter de categoria sensível', () 
 
   it('bloqueia publish se houver campo sensível sem base legal declarada', async () => {
     const ctx = new TenantContext(appPool);
-    const jobService = new JobService(new RequisitionService());
+    const jobService = new JobService(new RequisitionService(), new JobRecrutadorService());
     const customFieldService = new JobCustomFieldService();
 
     const { id: jobId } = await ctx.run(tenantId, (client) =>
@@ -64,7 +65,7 @@ describe('JobService.publish — bloqueio do linter de categoria sensível', () 
 
   it('permite publish quando o campo sensível TEM base legal declarada', async () => {
     const ctx = new TenantContext(appPool);
-    const jobService = new JobService(new RequisitionService());
+    const jobService = new JobService(new RequisitionService(), new JobRecrutadorService());
     const customFieldService = new JobCustomFieldService();
 
     const { id: jobId } = await ctx.run(tenantId, (client) =>
@@ -86,7 +87,7 @@ describe('JobService.publish — bloqueio do linter de categoria sensível', () 
 
   it('permite publish quando não há nenhum campo sensível', async () => {
     const ctx = new TenantContext(appPool);
-    const jobService = new JobService(new RequisitionService());
+    const jobService = new JobService(new RequisitionService(), new JobRecrutadorService());
     const customFieldService = new JobCustomFieldService();
 
     const { id: jobId } = await ctx.run(tenantId, (client) =>

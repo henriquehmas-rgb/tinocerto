@@ -2,6 +2,7 @@ import { Pool } from 'pg';
 import { TenantContext } from '../../database/tenant-context';
 import { RequisitionService } from '../requisition.service';
 import { JobService } from '../job.service';
+import { JobRecrutadorService } from '../job-recrutador.service';
 
 describe('JobService', () => {
   const url = new URL(process.env.DATABASE_URL!);
@@ -42,7 +43,7 @@ describe('JobService', () => {
 
   it('cria uma vaga em rascunho com seo_slug único e sem publicado_em', async () => {
     const ctx = new TenantContext(appPool);
-    const service = new JobService(new RequisitionService());
+    const service = new JobService(new RequisitionService(), new JobRecrutadorService());
 
     const { id } = await ctx.run(tenantId, (client) =>
       service.create(client, { tenantId, requisitionId, titulo: 'Analista de Operações Pleno' }),
@@ -55,7 +56,7 @@ describe('JobService', () => {
 
   it('publica uma vaga e grava job.published com os canais informados', async () => {
     const ctx = new TenantContext(appPool);
-    const service = new JobService(new RequisitionService());
+    const service = new JobService(new RequisitionService(), new JobRecrutadorService());
 
     const { id } = await ctx.run(tenantId, (client) =>
       service.create(client, { tenantId, requisitionId, titulo: 'Vaga a Publicar' }),
@@ -80,7 +81,7 @@ describe('JobService', () => {
       `INSERT INTO tenant (razao_social, cnpj, slug) VALUES ('Empresa Job Outro', '00000000000019', 'test-tenant-00000000000019') RETURNING id`,
     );
     const ctx = new TenantContext(appPool);
-    const service = new JobService(new RequisitionService());
+    const service = new JobService(new RequisitionService(), new JobRecrutadorService());
 
     await expect(
       ctx.run(outroTenant.rows[0].id, (client) =>
@@ -123,7 +124,7 @@ describe('JobService', () => {
 
   it('cria uma vaga com habilidades_exigidas quando informado, e com array vazio quando omitido', async () => {
     const ctx = new TenantContext(appPool);
-    const service = new JobService(new RequisitionService());
+    const service = new JobService(new RequisitionService(), new JobRecrutadorService());
 
     const { id: comHabilidades } = await ctx.run(tenantId, (client) =>
       service.create(client, {
@@ -147,7 +148,7 @@ describe('JobService', () => {
 
   it('declararHabilidadesExigidas substitui a lista de skills exigidas de uma vaga existente', async () => {
     const ctx = new TenantContext(appPool);
-    const service = new JobService(new RequisitionService());
+    const service = new JobService(new RequisitionService(), new JobRecrutadorService());
 
     const { id } = await ctx.run(tenantId, (client) =>
       service.create(client, { tenantId, requisitionId, titulo: 'Vaga a Editar Skills' }),
@@ -161,7 +162,7 @@ describe('JobService', () => {
 
   it('declararHabilidadesExigidas rejeita vaga inexistente', async () => {
     const ctx = new TenantContext(appPool);
-    const service = new JobService(new RequisitionService());
+    const service = new JobService(new RequisitionService(), new JobRecrutadorService());
 
     await expect(
       ctx.run(tenantId, (client) =>
@@ -170,4 +171,101 @@ describe('JobService', () => {
     ).rejects.toThrow(/não encontrada/);
   });
 
+  describe('listar', () => {
+    let vagaAtribuidaId: string;
+    let vagaNaoAtribuidaId: string;
+    let recrutadorId: string;
+    // Não existe em user_account -- listar() só usa userId como parâmetro de
+    // query quando o papel é "recrutador puro"; para admin_tenant/gestor_vaga
+    // o userId nunca entra na query, então não precisa existir de fato.
+    const adminId = '00000000-0000-0000-0000-000000000099';
+
+    beforeAll(async () => {
+      const jobA = await adminPool.query<{ id: string }>(
+        `INSERT INTO job (tenant_id, requisition_id, titulo, seo_slug) VALUES ($1, $2, 'Vaga Listar Atribuída', 'vaga-listar-atribuida-0018') RETURNING id`,
+        [tenantId, requisitionId],
+      );
+      vagaAtribuidaId = jobA.rows[0].id;
+      const jobB = await adminPool.query<{ id: string }>(
+        `INSERT INTO job (tenant_id, requisition_id, titulo, seo_slug) VALUES ($1, $2, 'Vaga Listar Não Atribuída', 'vaga-listar-nao-atribuida-0018') RETURNING id`,
+        [tenantId, requisitionId],
+      );
+      vagaNaoAtribuidaId = jobB.rows[0].id;
+      const staff = await adminPool.query<{ id: string }>(
+        `INSERT INTO user_account (tenant_id, email) VALUES ($1, 'recrutador-listar@empresa-018.example') RETURNING id`,
+        [tenantId],
+      );
+      recrutadorId = staff.rows[0].id;
+      await adminPool.query(`INSERT INTO job_recrutador (job_id, tenant_id, staff_id) VALUES ($1, $2, $3)`, [
+        vagaAtribuidaId,
+        tenantId,
+        recrutadorId,
+      ]);
+    });
+
+    afterAll(async () => {
+      await adminPool.query('DELETE FROM job_recrutador WHERE tenant_id = $1 AND staff_id = $2', [
+        tenantId,
+        recrutadorId,
+      ]);
+      await adminPool.query('DELETE FROM user_account WHERE id = $1', [recrutadorId]);
+      await adminPool.query('DELETE FROM job WHERE id = ANY($1)', [[vagaAtribuidaId, vagaNaoAtribuidaId]]);
+    });
+
+    it('retorna todas as vagas do tenant para admin_tenant', async () => {
+      const ctx = new TenantContext(appPool);
+      const service = new JobService(new RequisitionService(), new JobRecrutadorService());
+
+      const vagas = await ctx.run(tenantId, (client) =>
+        service.listar(client, { tenantId, userId: adminId, userRoles: ['admin_tenant'] }),
+      );
+
+      // O tenant já acumula outras vagas criadas pelos testes acima nesta
+      // mesma suíte (mesmo tenantId compartilhado) -- por isso
+      // arrayContaining em vez de toHaveLength(2) como no brief, que
+      // assumia um fixture isolado por describe.
+      expect(vagas.map((v) => v.id)).toEqual(expect.arrayContaining([vagaAtribuidaId, vagaNaoAtribuidaId]));
+    });
+
+    it('retorna só as vagas atribuídas para um recrutador puro', async () => {
+      const ctx = new TenantContext(appPool);
+      const service = new JobService(new RequisitionService(), new JobRecrutadorService());
+
+      const vagas = await ctx.run(tenantId, (client) =>
+        service.listar(client, { tenantId, userId: recrutadorId, userRoles: ['recrutador'] }),
+      );
+
+      expect(vagas.map((v) => v.id)).toEqual([vagaAtribuidaId]);
+    });
+  });
+
+  describe('editar', () => {
+    it('atualiza titulo, descricao e habilidadesExigidas da vaga', async () => {
+      const ctx = new TenantContext(appPool);
+      const service = new JobService(new RequisitionService(), new JobRecrutadorService());
+
+      const { id } = await ctx.run(tenantId, (client) =>
+        service.create(client, { tenantId, requisitionId, titulo: 'Vaga a Editar' }),
+      );
+
+      await ctx.run(tenantId, (client) =>
+        service.editar(client, {
+          tenantId,
+          jobId: id,
+          titulo: 'Engenheiro de Dados Sênior',
+          descricao: 'Nova descrição',
+          habilidadesExigidas: ['SQL', 'Python'],
+        }),
+      );
+
+      const result = await adminPool.query('SELECT titulo, descricao, habilidades_exigidas FROM job WHERE id = $1', [
+        id,
+      ]);
+      expect(result.rows[0]).toEqual({
+        titulo: 'Engenheiro de Dados Sênior',
+        descricao: 'Nova descrição',
+        habilidades_exigidas: ['SQL', 'Python'],
+      });
+    });
+  });
 });
