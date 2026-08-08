@@ -71,21 +71,26 @@ export class AppModule implements NestModule {
         'v1/developer/docs',
         'v1/developer/docs/(.*)',
         'v1/developer/openapi-spec/(.*)',
-        // Task 7 (StaffAuthModule) -- só estas duas rotas de
+        // Task 7 (StaffAuthModule) -- só estas rotas de
         // `StaffAuthController` rodam ANTES de haver tenant/usuário
-        // resolvidos: `onboarding` cria o tenant do zero, e `login`/
+        // resolvidos: `onboarding` cria o tenant do zero, `login`/
         // `login/mfa` ainda não sabem a qual tenant o usuário pertence
         // (mesmo raciocínio de `PLACEHOLDER_TENANT` em
-        // `candidate-auth.controller.ts`). `refresh`/`logout`/`mfa/setup`/
-        // `mfa/verify` continuam cobertas pelo middleware normalmente --
-        // exigem tenant/usuário já resolvidos (ver
-        // `staff-auth.controller.ts`). Entradas exatas, não
-        // `v1/staff/auth/login(.*)`, para não arriscar casar
-        // acidentalmente alguma rota futura sob esse prefixo que venha
-        // a exigir tenant resolvido.
+        // `candidate-auth.controller.ts`), e `refresh` (achado C1 da
+        // revisão final) só sabe o tenant DEPOIS de resolver o refresh
+        // token opaco apresentado no corpo -- exigir um access token válido
+        // (e não expirado) só para alcançar `/refresh` inutilizava o
+        // próprio propósito da rota, que existe justamente para quando o
+        // access token JÁ expirou. `logout`/`mfa/setup`/`mfa/verify`
+        // continuam cobertas pelo middleware normalmente -- exigem
+        // tenant/usuário já resolvidos (ver `staff-auth.controller.ts`).
+        // Entradas exatas, não `v1/staff/auth/login(.*)`, para não
+        // arriscar casar acidentalmente alguma rota futura sob esse
+        // prefixo que venha a exigir tenant resolvido.
         'v1/staff/auth/onboarding',
         'v1/staff/auth/login',
         'v1/staff/auth/login/mfa',
+        'v1/staff/auth/refresh',
       )
       .forRoutes('*');
   }

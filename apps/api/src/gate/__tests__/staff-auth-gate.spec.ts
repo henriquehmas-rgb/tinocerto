@@ -80,8 +80,45 @@ describe('Gate consolidado — Autenticação de staff, onboarding e MFA (Tasks 
         expect(corpoLoginSemMfa.accessToken).toEqual(expect.any(String));
         expect(corpoLoginSemMfa.refreshToken).toEqual(expect.any(String));
         expect(corpoLoginSemMfa.mfaChallengeToken).toBeUndefined();
-        const accessTokenSemMfa = corpoLoginSemMfa.accessToken!;
-        const refreshTokenSemMfa = corpoLoginSemMfa.refreshToken!;
+        // --- 2b. Prova positiva de refresh (achado I3 da revisão final): o único
+        // `/refresh` que existia antes neste gate testava uma FALHA (401 pós-logout),
+        // que passaria igualmente estivesse `/refresh` funcionando ou completamente
+        // quebrado (achado C1: a rota nem era alcançável em produção, exigia access
+        // token válido). Prova real aqui: refresh SEM Authorization (o refresh token
+        // opaco no corpo é a própria credencial -- `PLACEHOLDER_TENANT` + achado C1)
+        // devolve tokens NOVOS e diferentes dos antigos; o access token novo funciona
+        // numa rota autenticada real (mfa/setup, logo abaixo); e o refresh token
+        // ANTIGO -- já rotacionado -- é rejeitado ao ser reapresentado (prova de
+        // rotação, não só de "devolveu algo").
+        const respRefresh = await fetch(`${serverUrl}/v1/staff/auth/refresh`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ refreshToken: corpoLoginSemMfa.refreshToken }),
+        });
+        expect(respRefresh.status).toBe(201);
+        const corpoRefresh = (await respRefresh.json()) as { accessToken: string; refreshToken: string };
+        expect(corpoRefresh.accessToken).toEqual(expect.any(String));
+        expect(corpoRefresh.refreshToken).toEqual(expect.any(String));
+        // Só o refreshToken tem garantia de ser diferente do anterior -- é gerado
+        // com bytes aleatórios (ver `StaffTokenService.issue`). O accessToken é um
+        // JWT determinístico a partir das claims (userId/tenantId/roles) + `iat`
+        // em segundos: emitido dentro do mesmo segundo do login anterior, com as
+        // MESMAS claims, ele pode legitimamente ser byte-a-byte idêntico -- não é
+        // sinal de rotação quebrada, só de resolução de segundo do `iat`.
+        expect(corpoRefresh.refreshToken).not.toBe(corpoLoginSemMfa.refreshToken);
+
+        const respReplayRefreshAntigo = await fetch(`${serverUrl}/v1/staff/auth/refresh`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ refreshToken: corpoLoginSemMfa.refreshToken }),
+        });
+        expect(respReplayRefreshAntigo.status).toBe(401);
+
+        // Resto do fluxo usa os tokens RENOVADOS a partir daqui -- também serve como
+        // prova de que o novo access token funciona numa rota autenticada real
+        // (mfa/setup, abaixo), não só que o payload do refresh "parece" válido.
+        const accessTokenSemMfa = corpoRefresh.accessToken;
+        const refreshTokenSemMfa = corpoRefresh.refreshToken;
 
         // --- 3. Habilita MFA: mfa/setup grava o secret pendente, mfa/verify confirma com TOTP real ---
         const respMfaSetup = await fetch(`${serverUrl}/v1/staff/auth/mfa/setup`, {

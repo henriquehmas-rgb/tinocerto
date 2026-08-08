@@ -41,12 +41,21 @@ export class StaffTokenService {
     presentedToken: string,
   ): Promise<{ token: string; userId: string; tenantId: string }> {
     const presentedHash = hashToken(presentedToken);
+    // `resolve_staff_refresh_token_by_hash` (SECURITY DEFINER, identity_0013)
+    // em vez de um SELECT direto -- achado C1 da revisão final: `refresh`
+    // agora abre a transação com `PLACEHOLDER_TENANT` (mesmo padrão de
+    // `StaffAccountService.login`), então `app.tenant_id` ainda não é o
+    // tenant DONO deste token -- a policy RESTRICTIVE `tenant_isolation` de
+    // `staff_refresh_token` (identity_0009/0012) faria este SELECT devolver
+    // sempre 0 linhas se filtrado normalmente. A function bypassa isso de
+    // forma estreita (só as colunas necessárias), exatamente como
+    // `resolve_staff_login_by_email` já faz para `user_account`.
     const result = await client.query<{
       id: string;
       user_id: string;
       tenant_id: string;
       expira_em: Date;
-    }>(`SELECT id, user_id, tenant_id, expira_em FROM staff_refresh_token WHERE token_hash = $1`, [presentedHash]);
+    }>(`SELECT id, user_id, tenant_id, expira_em FROM resolve_staff_refresh_token_by_hash($1)`, [presentedHash]);
 
     if (result.rows.length === 0) {
       // UnauthorizedException (não `Error` genérico) -- revisão de código
@@ -57,6 +66,12 @@ export class StaffTokenService {
       throw new UnauthorizedException('Refresh token não encontrado');
     }
     const row = result.rows[0];
+
+    // Agora que o tenant dono do token é conhecido, atualiza o GUC de sessão
+    // dentro da MESMA transação/client antes de qualquer escrita (UPDATE de
+    // revogação abaixo, ou `issue` no fim) -- mesmo mecanismo que
+    // `StaffAccountService.login` usa para o mesmo problema.
+    await client.query(`SELECT set_config('app.tenant_id', $1, true)`, [row.tenant_id]);
 
     // Transição atômica revogado_em: NULL -> now(), condicionada ao estado
     // anterior no próprio UPDATE (não num SELECT separado feito antes). Isto

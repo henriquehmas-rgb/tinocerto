@@ -208,11 +208,11 @@ describe('StaffAuthController', () => {
 
     const controller = await build({ tokenService: { rotate }, accountService: { getRoles }, jwtService: { sign } });
 
-    const result = await controller.refresh({ refreshToken: 'refresh-antigo' } as never, {
-      tenantId: 'tenant-1',
-      userId: 'user-1',
-      userRoles: [],
-    } as never);
+    // Achado C1 da revisão final: `refresh` não recebe mais `@Req()` -- não
+    // depende de `req.tenantId`/`req.userId` (a rota saiu do escopo do
+    // `TenantResolutionMiddleware`, ver `app.module.ts`). O tenant/usuário
+    // dono do token vêm de `StaffTokenService.rotate`, mockado acima.
+    const result = await controller.refresh({ refreshToken: 'refresh-antigo' } as never);
 
     expect(rotate).toHaveBeenCalledWith(expect.anything(), 'refresh-antigo');
     expect(result).toEqual({ accessToken: 'access-abc', refreshToken: 'refresh-novo' });

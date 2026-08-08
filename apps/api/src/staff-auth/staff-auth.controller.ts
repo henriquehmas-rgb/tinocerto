@@ -9,15 +9,16 @@ import { StaffTokenService } from './staff-token.service';
 import { StaffJwtService } from './staff-jwt.service';
 import { MfaService } from './mfa.service';
 
-// Único endpoint deste módulo (junto com `login`/`login/mfa`) que roda ANTES
-// de haver tenant conhecido -- mesmo padrão de `PLACEHOLDER_TENANT` em
-// `candidate-auth.controller.ts`, mas aqui `onboarding` cria o tenant de
-// verdade (não usa o placeholder, gera o UUID real dentro de
-// `StaffOnboardingService.onboard`). `login`/`login/mfa` usam o placeholder
-// porque, como `CandidateAuthController.login`, o tenant do usuário só é
-// conhecido DEPOIS do lookup por e-mail (`login`) ou da decodificação do
-// `mfaChallengeToken` (`login/mfa`) -- nenhum dos dois tem tenant disponível
-// antes disso.
+// Único endpoint deste módulo (junto com `login`/`login/mfa`/`refresh`) que
+// roda ANTES de haver tenant conhecido -- mesmo padrão de
+// `PLACEHOLDER_TENANT` em `candidate-auth.controller.ts`, mas aqui
+// `onboarding` cria o tenant de verdade (não usa o placeholder, gera o UUID
+// real dentro de `StaffOnboardingService.onboard`). `login`/`login/mfa`/
+// `refresh` usam o placeholder porque, como `CandidateAuthController.login`,
+// o tenant do usuário só é conhecido DEPOIS do lookup por e-mail (`login`),
+// da decodificação do `mfaChallengeToken` (`login/mfa`), ou do lookup do
+// refresh token apresentado pelo hash (`refresh`) -- nenhum dos três tem
+// tenant disponível antes disso.
 const PLACEHOLDER_TENANT = '00000000-0000-0000-0000-000000000000';
 
 class OnboardingDto {
@@ -68,14 +69,20 @@ class MfaVerifyDto {
   codigoTotp!: string;
 }
 
-// `refresh`/`logout`/`mfa/setup`/`mfa/verify` NÃO entram no `.exclude(...)`
-// de `TenantResolutionMiddleware` em `AppModule` -- ao contrário de
-// `onboarding`/`login`/`login/mfa`, essas quatro rotas exigem tenant/usuário
-// já resolvidos (o cliente já guarda o tenantId de uma sessão anterior,
-// mesmo quando o access token expirou e é hora de renová-lo via `refresh`),
-// então o middleware já popula `req.tenantId`/`req.userId`/`req.userRoles`
-// antes do controller ser chamado -- mesmo padrão de `DecisionController`/
-// `OfferController`.
+// `logout`/`mfa/setup`/`mfa/verify` NÃO entram no `.exclude(...)` de
+// `TenantResolutionMiddleware` em `AppModule` -- exigem tenant/usuário já
+// resolvidos a partir de um access token válido, então o middleware já
+// popula `req.tenantId`/`req.userId`/`req.userRoles` antes do controller ser
+// chamado -- mesmo padrão de `DecisionController`/`OfferController`.
+//
+// `refresh` FOI removida dessa lista (achado C1 da revisão final): exigir
+// access token válido para alcançar `/refresh` inutilizava o próprio
+// propósito da rota, que existe justamente para quando o access token JÁ
+// expirou. `refresh` agora entra no `.exclude(...)` junto com
+// `onboarding`/`login`/`login/mfa` -- o refresh token opaco apresentado no
+// corpo (não o access token) é a credencial, e `StaffTokenService.rotate`
+// resolve `userId`/`tenantId` a partir da própria linha do banco (ver
+// `resolve_staff_refresh_token_by_hash`, identity_0013).
 interface RequestWithAuthContext extends Request {
   tenantId: string;
   userId: string;
@@ -153,8 +160,14 @@ export class StaffAuthController {
   }
 
   @Post('refresh')
-  async refresh(@Body() dto: RefreshDto, @Req() req: RequestWithAuthContext) {
-    return this.tenantContext.run(req.tenantId, async (client) => {
+  async refresh(@Body() dto: RefreshDto) {
+    // Igual a `login`/`login/mfa`: o tenant do dono do refresh token não é
+    // conhecido até `StaffTokenService.rotate` achar a linha pelo hash do
+    // token apresentado (ver `resolve_staff_refresh_token_by_hash`,
+    // identity_0013) -- abre com o mesmo `PLACEHOLDER_TENANT`, e `rotate`
+    // faz `set_config('app.tenant_id', ...)` assim que o tenant real é
+    // conhecido, antes de qualquer escrita.
+    return this.tenantContext.run(PLACEHOLDER_TENANT, async (client) => {
       const rotated = await this.tokenService.rotate(client, dto.refreshToken);
       // Papéis atuais, não os do momento da última emissão -- se o usuário
       // ganhou/perdeu papel entre um refresh e outro, o novo access token
