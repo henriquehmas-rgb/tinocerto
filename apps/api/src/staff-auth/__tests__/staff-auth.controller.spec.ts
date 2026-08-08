@@ -228,4 +228,71 @@ describe('StaffAuthController', () => {
     expect(revokeAll).toHaveBeenCalledWith(expect.anything(), 'user-1');
     expect(result).toEqual({ ok: true });
   });
+
+  it('mfa/setup delega para MfaService.gerarSetup e StaffAccountService.setMfaSecret, devolve o QR code', async () => {
+    const gerarSetup = jest
+      .fn()
+      .mockResolvedValue({ secretCifrado: { ciphertext: 'x', iv: 'y', authTag: 'z', wrappedDek: 'w' }, qrCodeDataUri: 'data:image/png;base64,abc' });
+    const setMfaSecret = jest.fn().mockResolvedValue(undefined);
+
+    const controller = await build({
+      mfaService: { gerarSetup },
+      accountService: { setMfaSecret },
+    });
+
+    const result = await controller.mfaSetup({ tenantId: 'tenant-1', userId: 'user-1', userRoles: [] } as never);
+
+    expect(gerarSetup).toHaveBeenCalled();
+    expect(setMfaSecret).toHaveBeenCalledWith(
+      expect.anything(),
+      'user-1',
+      { ciphertext: 'x', iv: 'y', authTag: 'z', wrappedDek: 'w' },
+    );
+    expect(result).toEqual({ qrCodeDataUri: 'data:image/png;base64,abc' });
+  });
+
+  it('mfa/verify com código certo habilita MFA e devolve os backup codes', async () => {
+    const getMfaSecret = jest.fn().mockResolvedValue({ ciphertext: 'x', iv: 'y', authTag: 'z', wrappedDek: 'w' });
+    const verificarCodigo = jest.fn().mockResolvedValue(true);
+    const gerarBackupCodes = jest
+      .fn()
+      .mockReturnValue({ codigos: ['abc123', 'def456'], cifrados: ['cif1', 'cif2'] });
+    const enableMfa = jest.fn().mockResolvedValue(undefined);
+
+    const controller = await build({
+      accountService: { getMfaSecret, enableMfa },
+      mfaService: { verificarCodigo, gerarBackupCodes },
+    });
+
+    const result = await controller.mfaVerify(
+      { codigoTotp: '123456' } as never,
+      { tenantId: 'tenant-1', userId: 'user-1', userRoles: [] } as never,
+    );
+
+    expect(verificarCodigo).toHaveBeenCalledWith(
+      { ciphertext: 'x', iv: 'y', authTag: 'z', wrappedDek: 'w' },
+      '123456',
+    );
+    expect(enableMfa).toHaveBeenCalledWith(expect.anything(), 'user-1', ['cif1', 'cif2']);
+    expect(result).toEqual({ backupCodes: ['abc123', 'def456'] });
+  });
+
+  it('mfa/verify com código errado lança 401', async () => {
+    const getMfaSecret = jest.fn().mockResolvedValue({ ciphertext: 'x', iv: 'y', authTag: 'z', wrappedDek: 'w' });
+    const verificarCodigo = jest.fn().mockResolvedValue(false);
+    const enableMfa = jest.fn();
+
+    const controller = await build({
+      accountService: { getMfaSecret, enableMfa },
+      mfaService: { verificarCodigo },
+    });
+
+    await expect(
+      controller.mfaVerify(
+        { codigoTotp: '000000' } as never,
+        { tenantId: 'tenant-1', userId: 'user-1', userRoles: [] } as never,
+      ),
+    ).rejects.toThrow(UnauthorizedException);
+    expect(enableMfa).not.toHaveBeenCalled();
+  });
 });
