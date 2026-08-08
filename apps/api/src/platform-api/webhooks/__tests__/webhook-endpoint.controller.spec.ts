@@ -4,6 +4,7 @@ import { Test } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Pool } from 'pg';
 import { AppModule } from '../../../app.module';
+import { mintStaffJwt } from '../../../staff-auth/__tests__/mint-staff-jwt';
 
 describe('WebhookEndpointController', () => {
   const adminPool = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -65,15 +66,17 @@ describe('WebhookEndpointController', () => {
       // Desvio do plano original (deviation documentado): a versão literal
       // deste teste no plano de execução (2026-08-07-fase-4c-webhooks.md,
       // Task 4 Step 5) omitia o header x-user-roles. TenantResolutionMiddleware
-      // (src/database/tenant-transaction.middleware.ts) exige x-tenant-id
-      // E x-user-id E x-user-roles -- sem o terceiro, toda requisição desta
-      // suite falharia com 401 'x-user-roles ausente' antes mesmo de chegar
-      // ao CerbosGuard, tornando as asserções de 400/201 abaixo inalcançáveis.
-      // Confirmado contra route-topology.spec.ts (Fase 4a) e
-      // tenant-transaction.middleware.ts, que exigem os três headers.
-      // Corrigido aqui adicionando x-user-roles: 'admin_tenant' (o papel
-      // atribuído ao usuário de fixture acima).
-      headers: { 'content-type': 'application/json', 'x-tenant-id': tenantId, 'x-user-id': userId, 'x-user-roles': 'admin_tenant' },
+      // (src/database/tenant-transaction.middleware.ts) exige um papel na
+      // identidade autenticada -- sem ele, toda requisição desta suite
+      // falharia antes mesmo de chegar ao CerbosGuard, tornando as
+      // asserções de 400/201 abaixo inalcançáveis. Corrigido aqui incluindo
+      // 'admin_tenant' (o papel atribuído ao usuário de fixture acima) no
+      // JWT assinado por mintStaffJwt.
+      //
+      // Task 8: TenantResolutionMiddleware trocou os headers de confiança
+      // (x-tenant-id/x-user-id/x-user-roles) por JWT verificado -- headers()
+      // abaixo assina esse JWT com StaffJwtService via mintStaffJwt.
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${mintStaffJwt({ userId, tenantId, roles: ['admin_tenant'] })}` },
       body: JSON.stringify({ url: 'http://inseguro.com.br', eventosFiltro: [] }),
     });
     expect(resposta.status).toBe(400);
@@ -82,7 +85,7 @@ describe('WebhookEndpointController', () => {
   it('POST /v1/webhook-endpoints com url https:// válida cria o endpoint e devolve o segredo em claro', async () => {
     const resposta = await fetch(`${serverUrl}/v1/webhook-endpoints`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-tenant-id': tenantId, 'x-user-id': userId, 'x-user-roles': 'admin_tenant' },
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${mintStaffJwt({ userId, tenantId, roles: ['admin_tenant'] })}` },
       body: JSON.stringify({ url: 'https://exemplo.com.br/webhooks', eventosFiltro: ['application.created'] }),
     });
     expect(resposta.status).toBe(201);
@@ -95,7 +98,7 @@ describe('WebhookEndpointController', () => {
   // o recurso real para confirmar posse), então um :id inexistente nunca é
   // barrado pela policy Cerbos -- só o 404 explícito do service (RLS +
   // rows.length/rowCount === 0) protege esses casos.
-  const headers = () => ({ 'content-type': 'application/json', 'x-tenant-id': tenantId, 'x-user-id': userId, 'x-user-roles': 'admin_tenant' });
+  const headers = () => ({ 'content-type': 'application/json', authorization: `Bearer ${mintStaffJwt({ userId, tenantId, roles: ['admin_tenant'] })}` });
 
   it('GET /v1/webhook-endpoints/:id com id existente devolve os dados do endpoint', async () => {
     const criado = await fetch(`${serverUrl}/v1/webhook-endpoints`, {

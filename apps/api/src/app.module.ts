@@ -32,6 +32,12 @@ import { PlatformApiModule } from './platform-api/platform-api.module';
     CopilotModule,
     PlatformApiModule,
   ],
+  // TenantResolutionMiddleware (Task 8) agora injeta StaffJwtService via
+  // construtor -- NestMiddleware com DI exige que a classe seja um provider
+  // resolvivel neste módulo. StaffJwtService já é exportado por
+  // StaffAuthModule (importado acima), então só falta declarar o próprio
+  // middleware como provider aqui para o Nest conseguir instanciá-lo.
+  providers: [TenantResolutionMiddleware],
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
