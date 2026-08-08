@@ -120,6 +120,18 @@ describe('unicidade de CNPJ de fixture entre arquivos de spec', () => {
     expect(uses.size).toBeGreaterThan(20);
   });
 
+  // Arquivos de PRODUÇÃO que inserem em `tenant` com um CNPJ genuinamente
+  // dinâmico (dado real de usuário, não fixture de teste) -- a premissa
+  // inteira desta guarda (todo CNPJ que entra em `tenant` durante os testes
+  // devia ser um literal reservável) não se aplica aqui: não há nenhum
+  // literal correto para colar, porque o valor só existe em produção. Lista
+  // explícita e reduzida de propósito -- cada entrada precisa do MESMO
+  // escrutínio de uma exceção de segurança, nunca adicionada só para calar
+  // a guarda. StaffOnboardingService (Task 4 da autenticação de staff) é a
+  // primeira -- e até aqui, única -- rota de produção que cria tenant; toda
+  // criação de tenant antes disso era só teste/SQL manual.
+  const PRODUCAO_CNPJ_DINAMICO = new Set(['staff-auth/staff-onboarding.service.ts']);
+
   it('todo arquivo que cria tenant tem pelo menos um CNPJ visível à varredura', () => {
     // A guarda de vacuidade acima é AGREGADA, e por isso não protege nada:
     // 46 arquivos visíveis escondem 1 invisível sem mover o número. Esta é
@@ -133,11 +145,14 @@ describe('unicidade de CNPJ de fixture entre arquivos de spec', () => {
     // vistos. O que NÃO pode é montar o CNPJ em tempo de execução
     // (concatenação, contador, random): um valor que só existe durante a
     // rodada é, por construção, invisível a qualquer varredura estática e
-    // reabre exatamente este buraco.
+    // reabre exatamente este buraco. A única exceção legítima é código de
+    // PRODUÇÃO com CNPJ dinâmico de verdade (ver PRODUCAO_CNPJ_DINAMICO
+    // acima) -- um spec de teste NUNCA se qualifica para essa lista.
     const cegos = arquivos()
       .filter(({ texto }) => CRIA_TENANT.test(texto))
       .filter(({ texto }) => cnpjsDoArquivo(texto).size === 0)
       .map(({ rel }) => rel)
+      .filter((rel) => !PRODUCAO_CNPJ_DINAMICO.has(rel))
       .sort();
 
     expect(cegos).toEqual([]);

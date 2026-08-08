@@ -16,7 +16,7 @@ describe('StaffAccountService', () => {
 
   beforeAll(async () => {
     const tenant = await adminPool.query<{ id: string }>(
-      `INSERT INTO tenant (razao_social, cnpj, slug) VALUES ('Empresa Staff Account', '00000000000090', 'test-tenant-00000000000090') RETURNING id`,
+      `INSERT INTO tenant (razao_social, cnpj, slug) VALUES ('Empresa Staff Account', '00000000000237', 'test-tenant-00000000000237') RETURNING id`,
     );
     tenantId = tenant.rows[0].id;
 

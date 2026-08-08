@@ -93,6 +93,7 @@
     "platform_0010__idempotency_key_pronto.sql",
     "identity_0009__staff_credentials_and_refresh_token.sql",
     "identity_0010__staff_refresh_token_composite_fk.sql",
-    "identity_0011__resolve_staff_login_by_email.sql"
+    "identity_0011__resolve_staff_login_by_email.sql",
+    "identity_0012__staff_refresh_token_nullif_fail_closed.sql"
   ]
 }
