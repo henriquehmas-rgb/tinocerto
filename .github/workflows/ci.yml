@@ -39,6 +39,10 @@ jobs:
       CERBOS_HTTP_URL: http://localhost:3592
       CANDIDATE_JWT_SECRET: segredo-de-teste-nao-usar-em-producao
       STAFF_JWT_SECRET: segredo-de-teste-nao-usar-em-producao
+      CPF_HASH_PEPPER: segredo-de-teste-nao-usar-em-producao
+      API_KEY_HASH_PEPPER: segredo-de-teste-nao-usar-em-producao
+      ENVELOPE_ENCRYPTION_KEK: ***REMOVED-SECRET***
+      WEBHOOK_SECRET_ENCRYPTION_KEY: ***REMOVED-SECRET***
 
     steps:
       - uses: actions/checkout@v4
