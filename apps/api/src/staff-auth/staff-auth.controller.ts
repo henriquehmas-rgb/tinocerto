@@ -1,5 +1,5 @@
 import { Body, Controller, Post, Req, UnauthorizedException, UseGuards } from '@nestjs/common';
-import { IsEmail, IsNotEmpty, IsString, MinLength } from 'class-validator';
+import { IsEmail, IsNotEmpty, IsOptional, IsString, MinLength } from 'class-validator';
 import { Request } from 'express';
 import { TenantContext } from '../database/tenant-context';
 import { DatabaseService } from '../database/database.service';
@@ -54,6 +54,13 @@ class LoginMfaDto {
   @IsNotEmpty()
   mfaChallengeToken!: string;
 
+  // Achado I2 da revisão final: aceita TANTO um código TOTP de 6 dígitos
+  // QUANTO um backup code (formato diferente, ver `MfaService.gerarBackupCodes`)
+  // no mesmo campo -- `StaffAuthController.loginMfa` tenta TOTP primeiro e
+  // cai para backup code se a verificação de TOTP falhar. Mesmo campo (não
+  // um campo novo) porque é exatamente o que o frontend já envia hoje (ver
+  // `apps/web/app/staff/mfa/*`), sem exigir nenhuma mudança de contrato do
+  // lado do cliente.
   @IsString()
   @IsNotEmpty()
   codigoTotp!: string;
@@ -63,6 +70,15 @@ class RefreshDto {
   @IsString()
   @IsNotEmpty()
   refreshToken!: string;
+}
+
+class MfaSetupDto {
+  // Achado I1 da revisão final: só é exigido quando o usuário JÁ tem MFA
+  // habilitado (reconfiguração) -- na primeira configuração (`mfa_habilitado`
+  // ainda `false`) este campo é ignorado, mesmo comportamento de antes.
+  @IsOptional()
+  @IsString()
+  codigoTotp?: string;
 }
 
 class MfaVerifyDto {
@@ -172,7 +188,28 @@ export class StaffAuthController {
 
     return this.tenantContext.run(challenge.tenantId, async (client) => {
       const secretCifrado = await this.accountService.getMfaSecret(client, challenge.userId);
-      const codigoValido = secretCifrado ? await this.mfaService.verificarCodigo(secretCifrado, dto.codigoTotp) : false;
+      let codigoValido = secretCifrado ? await this.mfaService.verificarCodigo(secretCifrado, dto.codigoTotp) : false;
+
+      // Achado I2 da revisão final: `MfaService.verificarBackupCode` existia
+      // e era testado em unidade, mas nenhum controller o chamava -- o
+      // frontend promete literalmente que backup codes destravam o login se
+      // o authenticator for perdido (ver `apps/web/app/staff/mfa/configurar/
+      // page.tsx`), uma promessa que o sistema não conseguia cumprir. TOTP
+      // primeiro (caminho comum); só consulta/tenta backup code se o TOTP
+      // falhar -- evita o custo de decifrar a lista de backup codes na
+      // maioria dos logins.
+      if (!codigoValido) {
+        const backupCifrados = await this.accountService.getBackupCodes(client, challenge.userId);
+        const backupResult = this.mfaService.verificarBackupCode(backupCifrados, dto.codigoTotp);
+        if (backupResult.valido) {
+          codigoValido = true;
+          // Consome o backup code usado -- persiste a lista já SEM ele, para
+          // que não possa ser reapresentado (uso único, como prometido ao
+          // usuário na tela de configuração de MFA).
+          await this.accountService.updateBackupCodes(client, challenge.userId, backupResult.restantes);
+        }
+      }
+
       if (!codigoValido) {
         throw new UnauthorizedException('Código TOTP inválido');
       }
@@ -210,13 +247,33 @@ export class StaffAuthController {
   }
 
   @Post('mfa/setup')
-  async mfaSetup(@Req() req: RequestWithAuthContext) {
-    const { secretCifrado, qrCodeDataUri } = await this.mfaService.gerarSetup();
-    // Não habilita MFA ainda -- só grava o secret pendente. `mfa_habilitado`
-    // só vira `true` em `mfa/verify`, depois de confirmar que o usuário
-    // configurou o authenticator corretamente.
-    await this.tenantContext.run(req.tenantId, (client) => this.accountService.setMfaSecret(client, req.userId, secretCifrado));
-    return { qrCodeDataUri };
+  async mfaSetup(@Body() dto: MfaSetupDto, @Req() req: RequestWithAuthContext) {
+    return this.tenantContext.run(req.tenantId, async (client) => {
+      // Achado I1 da revisão final: sem isto, `mfa/setup` sobrescrevia
+      // `mfa_secret_cifrado` incondicionalmente, mesmo com MFA já habilitado
+      // -- uma tentativa de re-setup abandonada, ou qualquer um de posse de
+      // um access token roubado, podia silenciosamente substituir o segundo
+      // fator de um usuário já configurado. Só exige o TOTP ATUAL quando já
+      // existe um MFA habilitado (reconfiguração); a primeira configuração
+      // continua sem essa exigência -- não há segredo anterior contra o qual
+      // provar posse.
+      const estadoAtual = await this.accountService.getMfaState(client, req.userId);
+      if (estadoAtual.habilitado) {
+        const codigoAtualValido = estadoAtual.secretCifrado
+          ? await this.mfaService.verificarCodigo(estadoAtual.secretCifrado, dto.codigoTotp ?? '')
+          : false;
+        if (!codigoAtualValido) {
+          throw new UnauthorizedException('Código TOTP atual necessário para reconfigurar o MFA');
+        }
+      }
+
+      const { secretCifrado, qrCodeDataUri } = await this.mfaService.gerarSetup();
+      // Não habilita MFA ainda -- só grava o secret pendente. `mfa_habilitado`
+      // só vira `true` em `mfa/verify`, depois de confirmar que o usuário
+      // configurou o authenticator corretamente.
+      await this.accountService.setMfaSecret(client, req.userId, secretCifrado);
+      return { qrCodeDataUri };
+    });
   }
 
   // Achado C2 da revisão final: mesmo raciocínio de `login/mfa` -- código

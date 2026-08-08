@@ -95,6 +95,23 @@ export class StaffAccountService {
     return result.rows[0]?.mfa_secret_cifrado ?? null;
   }
 
+  // Achado I1 da revisão final: `mfa/setup` sobrescrevia `mfa_secret_cifrado`
+  // incondicionalmente, mesmo quando `mfa_habilitado` já era `true` -- uma
+  // tentativa de re-setup abandonada, ou qualquer um de posse de um access
+  // token roubado, podia silenciosamente substituir o segundo fator de um
+  // usuário já configurado. `StaffAuthController.mfaSetup` usa este método
+  // para saber, ANTES de gerar um novo secret, se precisa exigir o código
+  // TOTP atual contra o secret EXISTENTE (só quando `habilitado` já é
+  // `true` -- primeira configuração continua sem essa exigência).
+  async getMfaState(client: PoolClient, userId: string): Promise<{ habilitado: boolean; secretCifrado: EncryptedPayload | null }> {
+    const result = await client.query<{ mfa_habilitado: boolean; mfa_secret_cifrado: EncryptedPayload | null }>(
+      `SELECT mfa_habilitado, mfa_secret_cifrado FROM user_account WHERE id = $1`,
+      [userId],
+    );
+    const row = result.rows[0];
+    return { habilitado: row?.mfa_habilitado ?? false, secretCifrado: row?.mfa_secret_cifrado ?? null };
+  }
+
   // Grava o secret recém-gerado sem habilitar MFA ainda -- `mfa_habilitado`
   // só vira `true` em `enableMfa`, depois que `POST /mfa/verify` confirmar
   // que o usuário configurou o authenticator corretamente (ver design spec,
@@ -109,6 +126,33 @@ export class StaffAccountService {
 
   async enableMfa(client: PoolClient, userId: string, backupCodesCifrados: EncryptedPayload[]): Promise<void> {
     await client.query(`UPDATE user_account SET mfa_habilitado = true, mfa_backup_codes_cifrados = $1 WHERE id = $2`, [
+      JSON.stringify(backupCodesCifrados),
+      userId,
+    ]);
+  }
+
+  // Achado I2 da revisão final: `MfaService.verificarBackupCode` existia e
+  // era testado em unidade, mas nada em `StaffAuthController` chamava --
+  // backup codes eram gerados, mostrados ao usuário, prometidos como
+  // recuperação, mas nunca podiam ser de fato apresentados de volta para
+  // destravar um login. `getBackupCodes`/`updateBackupCodes` dão a
+  // `loginMfa` o par ler-lista-cifrada / gravar-lista-já-sem-o-código-usado
+  // que faltava -- mesmo padrão de `getMfaSecret`/`setMfaSecret` para o
+  // secret TOTP.
+  async getBackupCodes(client: PoolClient, userId: string): Promise<EncryptedPayload[]> {
+    const result = await client.query<{ mfa_backup_codes_cifrados: EncryptedPayload[] | null }>(
+      `SELECT mfa_backup_codes_cifrados FROM user_account WHERE id = $1`,
+      [userId],
+    );
+    return result.rows[0]?.mfa_backup_codes_cifrados ?? [];
+  }
+
+  // Persiste a lista de backup codes já SEM o código recém-consumido --
+  // `loginMfa` chama isto só depois de `MfaService.verificarBackupCode`
+  // confirmar o código apresentado, para que ele nunca possa ser reusado
+  // (uso único, como prometido na tela de configuração de MFA).
+  async updateBackupCodes(client: PoolClient, userId: string, backupCodesCifrados: EncryptedPayload[]): Promise<void> {
+    await client.query(`UPDATE user_account SET mfa_backup_codes_cifrados = $1 WHERE id = $2`, [
       JSON.stringify(backupCodesCifrados),
       userId,
     ]);

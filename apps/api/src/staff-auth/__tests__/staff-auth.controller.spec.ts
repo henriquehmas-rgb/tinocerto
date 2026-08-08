@@ -46,8 +46,17 @@ describe('StaffAuthController', () => {
             login: jest.fn(),
             getRoles: jest.fn(),
             getMfaSecret: jest.fn(),
+            // Achado I1 da revisão final: default "sem MFA habilitado ainda"
+            // -- cobre todo teste que não mexe com reconfiguração, sem
+            // precisar sobrescrever em cada `build(...)`.
+            getMfaState: jest.fn().mockResolvedValue({ habilitado: false, secretCifrado: null }),
             setMfaSecret: jest.fn(),
             enableMfa: jest.fn(),
+            // Achado I2 da revisão final: default "sem backup codes" -- cobre
+            // todo teste de `login/mfa` que não exercita o fallback de
+            // backup code.
+            getBackupCodes: jest.fn().mockResolvedValue([]),
+            updateBackupCodes: jest.fn(),
             ...overrides.accountService,
           },
         },
@@ -71,7 +80,10 @@ describe('StaffAuthController', () => {
             gerarSetup: jest.fn(),
             verificarCodigo: jest.fn(),
             gerarBackupCodes: jest.fn(),
-            verificarBackupCode: jest.fn(),
+            // Achado I2 da revisão final: default "código não é um backup
+            // code válido" -- `verificarBackupCode` real devolveria isto
+            // para qualquer lista vazia (default de `getBackupCodes` acima).
+            verificarBackupCode: jest.fn().mockReturnValue({ valido: false, restantes: [] }),
             ...overrides.mfaService,
           },
         },
@@ -200,6 +212,63 @@ describe('StaffAuthController', () => {
     expect(issue).not.toHaveBeenCalled();
   });
 
+  // Achado I2 da revisão final: `MfaService.verificarBackupCode` existia e
+  // era testado em unidade, mas nada em `StaffAuthController` o chamava --
+  // backup codes prometidos como recuperação nunca podiam de fato destravar
+  // um login. `login/mfa` agora tenta TOTP primeiro; se falhar, tenta o
+  // mesmo valor como backup code.
+  it('login/mfa com TOTP errado mas backup code válido completa o login e consome o backup code (uso único)', async () => {
+    const verifyMfaChallenge = jest.fn().mockReturnValue({ userId: 'user-1', tenantId: 'tenant-1' });
+    const getMfaSecret = jest.fn().mockResolvedValue({ ciphertext: 'x', iv: 'y', authTag: 'z', wrappedDek: 'w' });
+    const verificarCodigo = jest.fn().mockResolvedValue(false);
+    const cifradosOriginais = ['cif1-cifrado', 'cif2-cifrado', 'cif3-cifrado'];
+    const cifradosRestantes = ['cif1-cifrado', 'cif3-cifrado'];
+    const getBackupCodes = jest.fn().mockResolvedValue(cifradosOriginais);
+    const verificarBackupCode = jest.fn().mockReturnValue({ valido: true, restantes: cifradosRestantes });
+    const updateBackupCodes = jest.fn().mockResolvedValue(undefined);
+    const getRoles = jest.fn().mockResolvedValue(['admin_tenant']);
+    const issue = jest.fn().mockResolvedValue({ token: 'refresh-abc' });
+    const sign = jest.fn().mockReturnValue('access-abc');
+
+    const controller = await build({
+      jwtService: { verifyMfaChallenge, sign },
+      accountService: { getMfaSecret, getRoles, getBackupCodes, updateBackupCodes },
+      mfaService: { verificarCodigo, verificarBackupCode },
+      tokenService: { issue },
+    });
+
+    const result = await controller.loginMfa({ mfaChallengeToken: 'challenge-abc', codigoTotp: 'ab12cd34ef' } as never);
+
+    expect(verificarCodigo).toHaveBeenCalledWith(expect.anything(), 'ab12cd34ef');
+    expect(getBackupCodes).toHaveBeenCalledWith(expect.anything(), 'user-1');
+    expect(verificarBackupCode).toHaveBeenCalledWith(cifradosOriginais, 'ab12cd34ef');
+    // O backup code usado é removido da lista persistida -- não pode ser reapresentado.
+    expect(updateBackupCodes).toHaveBeenCalledWith(expect.anything(), 'user-1', cifradosRestantes);
+    expect(result).toEqual({ accessToken: 'access-abc', refreshToken: 'refresh-abc' });
+  });
+
+  it('login/mfa com TOTP errado E backup code inválido lança 401, sem consumir nenhum backup code', async () => {
+    const verifyMfaChallenge = jest.fn().mockReturnValue({ userId: 'user-1', tenantId: 'tenant-1' });
+    const getMfaSecret = jest.fn().mockResolvedValue({ ciphertext: 'x', iv: 'y', authTag: 'z', wrappedDek: 'w' });
+    const verificarCodigo = jest.fn().mockResolvedValue(false);
+    const verificarBackupCode = jest.fn().mockReturnValue({ valido: false, restantes: ['cif1-cifrado'] });
+    const updateBackupCodes = jest.fn();
+    const issue = jest.fn();
+
+    const controller = await build({
+      jwtService: { verifyMfaChallenge },
+      accountService: { getMfaSecret, updateBackupCodes },
+      mfaService: { verificarCodigo, verificarBackupCode },
+      tokenService: { issue },
+    });
+
+    await expect(
+      controller.loginMfa({ mfaChallengeToken: 'challenge-abc', codigoTotp: 'nada-disso-serve' } as never),
+    ).rejects.toThrow(UnauthorizedException);
+    expect(updateBackupCodes).not.toHaveBeenCalled();
+    expect(issue).not.toHaveBeenCalled();
+  });
+
   it('login/mfa com mfaChallengeToken inválido/expirado lança 401', async () => {
     const verifyMfaChallenge = jest.fn().mockImplementation(() => {
       throw new Error('jwt expired');
@@ -240,7 +309,7 @@ describe('StaffAuthController', () => {
     expect(result).toEqual({ ok: true });
   });
 
-  it('mfa/setup delega para MfaService.gerarSetup e StaffAccountService.setMfaSecret, devolve o QR code', async () => {
+  it('mfa/setup (1ª configuração, MFA ainda não habilitado) delega para MfaService.gerarSetup e StaffAccountService.setMfaSecret, devolve o QR code', async () => {
     const gerarSetup = jest
       .fn()
       .mockResolvedValue({ secretCifrado: { ciphertext: 'x', iv: 'y', authTag: 'z', wrappedDek: 'w' }, qrCodeDataUri: 'data:image/png;base64,abc' });
@@ -251,7 +320,9 @@ describe('StaffAuthController', () => {
       accountService: { setMfaSecret },
     });
 
-    const result = await controller.mfaSetup({ tenantId: 'tenant-1', userId: 'user-1', userRoles: [] } as never);
+    // getMfaState usa o default do build() (habilitado: false) -- 1ª
+    // configuração não exige codigoTotp.
+    const result = await controller.mfaSetup({} as never, { tenantId: 'tenant-1', userId: 'user-1', userRoles: [] } as never);
 
     expect(gerarSetup).toHaveBeenCalled();
     expect(setMfaSecret).toHaveBeenCalledWith(
@@ -260,6 +331,51 @@ describe('StaffAuthController', () => {
       { ciphertext: 'x', iv: 'y', authTag: 'z', wrappedDek: 'w' },
     );
     expect(result).toEqual({ qrCodeDataUri: 'data:image/png;base64,abc' });
+  });
+
+  // Achado I1 da revisão final: reconfiguração (MFA já habilitado) exige o
+  // TOTP atual -- sem isto, um access token roubado (ou um re-setup
+  // abandonado) podia silenciosamente substituir o segundo fator já
+  // configurado do usuário.
+  it('mfa/setup com MFA JÁ habilitado e código TOTP atual certo permite reconfigurar', async () => {
+    const secretExistente = { ciphertext: 'existente', iv: 'y', authTag: 'z', wrappedDek: 'w' };
+    const secretNovo = { ciphertext: 'novo', iv: 'y', authTag: 'z', wrappedDek: 'w' };
+    const getMfaState = jest.fn().mockResolvedValue({ habilitado: true, secretCifrado: secretExistente });
+    const verificarCodigo = jest.fn().mockResolvedValue(true);
+    const gerarSetup = jest.fn().mockResolvedValue({ secretCifrado: secretNovo, qrCodeDataUri: 'data:image/png;base64,novo' });
+    const setMfaSecret = jest.fn().mockResolvedValue(undefined);
+
+    const controller = await build({
+      accountService: { getMfaState, setMfaSecret },
+      mfaService: { verificarCodigo, gerarSetup },
+    });
+
+    const result = await controller.mfaSetup(
+      { codigoTotp: '123456' } as never,
+      { tenantId: 'tenant-1', userId: 'user-1', userRoles: [] } as never,
+    );
+
+    expect(verificarCodigo).toHaveBeenCalledWith(secretExistente, '123456');
+    expect(setMfaSecret).toHaveBeenCalledWith(expect.anything(), 'user-1', secretNovo);
+    expect(result).toEqual({ qrCodeDataUri: 'data:image/png;base64,novo' });
+  });
+
+  it('mfa/setup com MFA JÁ habilitado e SEM código TOTP (ou código errado) lança 401 e NÃO sobrescreve o secret', async () => {
+    const getMfaState = jest
+      .fn()
+      .mockResolvedValue({ habilitado: true, secretCifrado: { ciphertext: 'x', iv: 'y', authTag: 'z', wrappedDek: 'w' } });
+    const verificarCodigo = jest.fn().mockResolvedValue(false);
+    const setMfaSecret = jest.fn();
+
+    const controller = await build({
+      accountService: { getMfaState, setMfaSecret },
+      mfaService: { verificarCodigo },
+    });
+
+    await expect(
+      controller.mfaSetup({} as never, { tenantId: 'tenant-1', userId: 'user-1', userRoles: [] } as never),
+    ).rejects.toThrow(UnauthorizedException);
+    expect(setMfaSecret).not.toHaveBeenCalled();
   });
 
   it('mfa/verify com código certo habilita MFA e devolve os backup codes', async () => {
