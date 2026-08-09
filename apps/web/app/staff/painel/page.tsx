@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Table, Button, PanelLayout } from '@tinocerto/design-system';
+import { Table, Button, PanelLayout, Badge } from '@tinocerto/design-system';
 import { staffPanelClient, VagaResumo } from '../../../lib/staff-panel-client';
 import { staffAuthClient, isErroDeAutenticacao } from '../../../lib/staff-auth-client';
 
@@ -45,7 +45,11 @@ export default function PainelPage() {
         <Table
           columns={[
             { header: 'Título', render: (vaga: VagaResumo) => <Link href={`/staff/painel/vagas/${vaga.id}`}>{vaga.titulo}</Link> },
-            { header: 'Status', render: (vaga: VagaResumo) => (vaga.publicadoEm ? 'Publicada' : 'Rascunho') },
+            {
+              header: 'Status',
+              render: (vaga: VagaResumo) =>
+                vaga.publicadoEm ? <Badge tone="sucesso">Publicada</Badge> : <Badge tone="neutro">Rascunho</Badge>,
+            },
           ]}
           rows={vagas}
         />
