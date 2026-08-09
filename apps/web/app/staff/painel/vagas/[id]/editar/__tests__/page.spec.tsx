@@ -75,6 +75,31 @@ describe('EditarVagaPage', () => {
     expect(staffPanelClient.atribuirRecrutadores).not.toHaveBeenCalled();
   });
 
+  it('mostra erro e desabilita o campo de recrutadores quando o carregamento inicial da vaga falha por motivo genérico', async () => {
+    vi.mocked(staffPanelClient.obterVaga).mockRejectedValue(new Error('Erro de rede'));
+    render(<EditarVagaPage />);
+
+    await waitFor(() => expect(screen.getByText('Erro de rede')).toBeInTheDocument());
+    expect(screen.getByLabelText('IDs dos recrutadores (separados por vírgula)')).toBeDisabled();
+  });
+
+  it('não deixa a submissão passar batido sem tentar atribuir recrutadores digitados, quando o carregamento inicial falhou', async () => {
+    vi.mocked(staffPanelClient.obterVaga).mockRejectedValue(new Error('Erro de rede'));
+    vi.mocked(staffPanelClient.editarVaga).mockResolvedValue(undefined);
+    render(<EditarVagaPage />);
+
+    await waitFor(() => expect(screen.getByText('Erro de rede')).toBeInTheDocument());
+    const campoRecrutadores = screen.getByLabelText('IDs dos recrutadores (separados por vírgula)');
+    expect(campoRecrutadores).toBeDisabled();
+
+    // Como o campo está desabilitado, o usuário não consegue digitar nele --
+    // mesmo assim, garantimos que submeter não chama atribuirRecrutadores
+    // silenciosamente com um valor que pareça ter sido confirmado.
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar' }));
+    await waitFor(() => expect(staffPanelClient.editarVaga).toHaveBeenCalled());
+    expect(staffPanelClient.atribuirRecrutadores).not.toHaveBeenCalled();
+  });
+
   it('redireciona para /staff/entrar quando o carregamento da vaga falha por sessão ausente', async () => {
     vi.mocked(staffPanelClient.obterVaga).mockRejectedValue(new Error('Usuário não autenticado'));
     render(<EditarVagaPage />);

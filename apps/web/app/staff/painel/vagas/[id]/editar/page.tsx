@@ -25,6 +25,11 @@ export default function EditarVagaPage() {
   const [habilidadesTexto, setHabilidadesTexto] = useState('');
   const [recrutadorIdsTexto, setRecrutadorIdsTexto] = useState('');
   const [erro, setErro] = useState<string | null>(null);
+  // true quando o carregamento inicial falhou por um motivo que não seja
+  // sessão ausente/expirada (ex.: rede, 500, vaga não encontrada). Usado
+  // para desabilitar o campo de recrutadores -- ver handleSubmit e o JSX
+  // abaixo.
+  const [carregamentoFalhou, setCarregamentoFalhou] = useState(false);
   // null enquanto a vaga não foi carregada com sucesso -- usado no submit
   // para decidir se é seguro chamar atribuirRecrutadores (ver handleSubmit).
   const recrutadorIdsIniciaisRef = useRef<string[] | null>(null);
@@ -45,11 +50,19 @@ export default function EditarVagaPage() {
           router.push('/staff/entrar');
           return;
         }
-        // Falha ao carregar a vaga atual (ex.: vaga não encontrada): deixamos
-        // recrutadorIdsIniciaisRef em null de propósito. handleSubmit trata
-        // null como "não mude nada" -- nunca envia atribuirRecrutadores com
-        // base em um estado que não conseguimos confirmar como o atual, para
-        // não apagar atribuições existentes por engano.
+        // Falha ao carregar a vaga atual (ex.: rede, 500, vaga não
+        // encontrada): recrutadorIdsIniciaisRef fica em null de propósito.
+        // handleSubmit trata null como "não mude nada" -- nunca envia
+        // atribuirRecrutadores com base em um estado que não conseguimos
+        // confirmar como o atual, para não apagar atribuições existentes
+        // por engano. Além disso, avisamos o usuário (setErro) e
+        // desabilitamos o campo de recrutadores, para deixar claro que a
+        // edição não está operando com dados carregados de verdade -- sem
+        // isso, o formulário ficava vazio em silêncio e uma submissão
+        // parecia ter dado tudo certo mesmo tendo ignorado o que foi
+        // digitado ali.
+        setErro((e as Error).message);
+        setCarregamentoFalhou(true);
       });
   }, [params.id, router]);
 
@@ -111,6 +124,7 @@ export default function EditarVagaPage() {
             className="rounded-control px-3 py-2 border border-border"
             value={recrutadorIdsTexto}
             onChange={(e) => setRecrutadorIdsTexto(e.target.value)}
+            disabled={carregamentoFalhou}
           />
         </label>
         <Button>Salvar</Button>
