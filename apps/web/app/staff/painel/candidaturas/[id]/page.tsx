@@ -20,7 +20,7 @@ export default function CandidaturaPage() {
   return (
     <div className="p-6 max-w-2xl">
       <h1 className="font-display text-xl mb-4">Candidatura</h1>
-      {erro && <p className="text-danger">{erro}</p>}
+      {erro && <p className="text-danger-text">{erro}</p>}
       {dados && (
         <ScoreChart
           scoreGeral={dados.aderencia?.scoreAderencia != null ? dados.aderencia.scoreAderencia / 100 : null}

@@ -73,7 +73,7 @@ export default function EditarVagaPage() {
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-4 max-w-md p-6">
       <h1 className="font-display text-xl">Editar vaga</h1>
-      {erro && <p className="text-danger">{erro}</p>}
+      {erro && <p className="text-danger-text">{erro}</p>}
       <label className="flex flex-col gap-1 font-ui text-sm">
         Título
         <input className="rounded-control px-3 py-2 border border-border" value={titulo} onChange={(e) => setTitulo(e.target.value)} />

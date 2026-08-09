@@ -29,7 +29,7 @@ export default function NovaVagaPage() {
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-4 max-w-md p-6">
       <h1 className="font-display text-xl">Nova vaga</h1>
-      {erro && <p className="text-danger">{erro}</p>}
+      {erro && <p className="text-danger-text">{erro}</p>}
       <label className="flex flex-col gap-1 font-ui text-sm">
         Título
         <input

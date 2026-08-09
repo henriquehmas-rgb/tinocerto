@@ -40,7 +40,7 @@ export default function FunilPage() {
           Editar vaga
         </Link>
       </div>
-      {erro && <p className="text-danger">{erro}</p>}
+      {erro && <p className="text-danger-text">{erro}</p>}
       <KanbanBoard
         colunas={COLUNAS}
         itens={funil}

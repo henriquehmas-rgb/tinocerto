@@ -34,7 +34,7 @@ export default function PainelPage() {
           <Button>Nova vaga</Button>
         </Link>
       </div>
-      {erro && <p className="text-danger">{erro}</p>}
+      {erro && <p className="text-danger-text">{erro}</p>}
       {!carregando && (
         <Table
           columns={[

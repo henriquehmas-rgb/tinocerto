@@ -18,6 +18,8 @@ const config: Config = {
         'success-text': 'var(--pr-state-success)',
         'warning-bg': 'var(--pr-state-warning-bg)',
         'warning-text': 'var(--pr-state-warning)',
+        'danger-bg': 'var(--pr-state-danger-bg)',
+        'danger-text': 'var(--pr-state-danger)',
       },
       borderRadius: {
         control: 'var(--pr-r-control)',
