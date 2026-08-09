@@ -1,5 +1,6 @@
 # apps/web/Dockerfile
 FROM node:20-alpine AS base
+RUN apk add --no-cache python3 make g++
 RUN corepack enable && corepack prepare pnpm@9.12.0 --activate
 
 FROM base AS deps
