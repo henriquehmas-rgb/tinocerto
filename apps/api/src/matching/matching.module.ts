@@ -9,5 +9,9 @@ import { AdherenceService } from './adherence.service';
   imports: [DatabaseModule],
   controllers: [AdherenceController],
   providers: [AdherenceService, PersonService, EnvelopeEncryptionService],
+  // AdherenceService exportado para HiringModule (ApplicationController,
+  // Fase 5a Task 4) consumir GET :id/assessment-report -- ver comentário
+  // equivalente em assessment.module.ts.
+  exports: [AdherenceService],
 })
 export class MatchingModule {}

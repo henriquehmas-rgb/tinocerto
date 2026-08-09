@@ -19,8 +19,15 @@ import { QuotaService } from './quota.service';
 import { LiaDocumentService } from './lia-document.service';
 import { CandidateEvaluationViewService } from './candidate-evaluation-view.service';
 import { OutboxService } from '../outbox/outbox.service';
+import { AssessmentModule } from '../assessment/assessment.module';
+import { MatchingModule } from '../matching/matching.module';
 
 @Module({
+  // AssessmentModule/MatchingModule importados para que ApplicationController
+  // (Fase 5a, Task 4) possa injetar ReportService/AdherenceService na rota
+  // GET :id/assessment-report -- ver exports em assessment.module.ts e
+  // matching.module.ts.
+  imports: [AssessmentModule, MatchingModule],
   controllers: [RequisitionController, JobController, ApplicationController, OfferController, DecisionController],
   providers: [
     RequisitionService,

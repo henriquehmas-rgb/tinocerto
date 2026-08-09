@@ -109,6 +109,20 @@ export class JobController {
     );
   }
 
+  @Get(':id/funil')
+  @CerbosCheck('job', 'read')
+  async funil(@Req() req: RequestWithAuthContext, @Param('id') id: string) {
+    return this.tenantContext.run(req.tenantId, async (client) => {
+      await this.jobRecrutadorService.exigirAcesso(client, {
+        tenantId: req.tenantId,
+        jobId: id,
+        userId: req.userId,
+        userRoles: req.userRoles,
+      });
+      return this.jobService.funil(client, { tenantId: req.tenantId, jobId: id });
+    });
+  }
+
   @Post(':id/actions/atribuir-recrutadores')
   @CerbosCheck('job', 'update')
   async atribuirRecrutadores(

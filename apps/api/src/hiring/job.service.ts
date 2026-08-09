@@ -37,6 +37,13 @@ export interface EditarJobInput {
   habilidadesExigidas?: string[];
 }
 
+export interface CandidaturaResumo {
+  id: string;
+  personId: string;
+  nomeCandidato: string;
+  criadoEm: Date;
+}
+
 @Injectable()
 export class JobService {
   private readonly outbox = new OutboxService();
@@ -102,6 +109,34 @@ export class JobService {
       publicadoEm: row.publicado_em,
       criadoEm: row.criado_em,
     }));
+  }
+
+  async funil(client: PoolClient, input: { tenantId: string; jobId: string }): Promise<Record<string, CandidaturaResumo[]>> {
+    const result = await client.query<{
+      id: string;
+      person_id: string;
+      nome: string;
+      etapa_funil: string;
+      criado_em: Date;
+    }>(
+      `SELECT a.id, a.person_id, p.nome, a.etapa_funil, a.criado_em
+       FROM application a
+       JOIN person p ON p.id = a.person_id
+       WHERE a.tenant_id = $1 AND a.job_id = $2
+       ORDER BY a.criado_em ASC`,
+      [input.tenantId, input.jobId],
+    );
+    const funil: Record<string, CandidaturaResumo[]> = {};
+    for (const row of result.rows) {
+      if (!funil[row.etapa_funil]) funil[row.etapa_funil] = [];
+      funil[row.etapa_funil].push({
+        id: row.id,
+        personId: row.person_id,
+        nomeCandidato: row.nome,
+        criadoEm: row.criado_em,
+      });
+    }
+    return funil;
   }
 
   async editar(client: PoolClient, input: EditarJobInput): Promise<void> {

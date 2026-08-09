@@ -239,6 +239,68 @@ describe('JobService', () => {
     });
   });
 
+  describe('funil', () => {
+    let vagaFunilId: string;
+    let personTriagemId: string;
+    let personEntrevistaId: string;
+    let applicationTriagemId: string;
+    let applicationEntrevistaId: string;
+
+    beforeAll(async () => {
+      const job = await adminPool.query<{ id: string }>(
+        `INSERT INTO job (tenant_id, requisition_id, titulo, seo_slug) VALUES ($1, $2, 'Vaga Funil', 'vaga-funil-0018') RETURNING id`,
+        [tenantId, requisitionId],
+      );
+      vagaFunilId = job.rows[0].id;
+
+      const personA = await adminPool.query<{ id: string }>(
+        `INSERT INTO person (cpf_hash, cpf_encriptado, nome, email_principal)
+         VALUES ('hash-funil-triagem', '{"ciphertext":"x","iv":"y","authTag":"z","wrappedDek":"w"}', 'Bruna Triagem', 'bruna.triagem@example.com')
+         RETURNING id`,
+      );
+      personTriagemId = personA.rows[0].id;
+      const personB = await adminPool.query<{ id: string }>(
+        `INSERT INTO person (cpf_hash, cpf_encriptado, nome, email_principal)
+         VALUES ('hash-funil-entrevista', '{"ciphertext":"x","iv":"y","authTag":"z","wrappedDek":"w"}', 'Caio Entrevista', 'caio.entrevista@example.com')
+         RETURNING id`,
+      );
+      personEntrevistaId = personB.rows[0].id;
+
+      const appTriagem = await adminPool.query<{ id: string }>(
+        `INSERT INTO application (tenant_id, job_id, person_id, etapa_funil) VALUES ($1, $2, $3, 'triagem') RETURNING id`,
+        [tenantId, vagaFunilId, personTriagemId],
+      );
+      applicationTriagemId = appTriagem.rows[0].id;
+      const appEntrevista = await adminPool.query<{ id: string }>(
+        `INSERT INTO application (tenant_id, job_id, person_id, etapa_funil) VALUES ($1, $2, $3, 'entrevista') RETURNING id`,
+        [tenantId, vagaFunilId, personEntrevistaId],
+      );
+      applicationEntrevistaId = appEntrevista.rows[0].id;
+    });
+
+    afterAll(async () => {
+      await adminPool.query('DELETE FROM application WHERE id = ANY($1)', [
+        [applicationTriagemId, applicationEntrevistaId],
+      ]);
+      await adminPool.query('DELETE FROM job WHERE id = $1', [vagaFunilId]);
+      await adminPool.query('DELETE FROM person WHERE id = ANY($1)', [[personTriagemId, personEntrevistaId]]);
+    });
+
+    it('agrupa candidaturas da vaga por etapa_funil', async () => {
+      const ctx = new TenantContext(appPool);
+      const service = new JobService(new RequisitionService(), new JobRecrutadorService());
+
+      const funil = await ctx.run(tenantId, (client) =>
+        service.funil(client, { tenantId, jobId: vagaFunilId }),
+      );
+
+      expect(funil).toEqual({
+        triagem: [expect.objectContaining({ id: applicationTriagemId })],
+        entrevista: [expect.objectContaining({ id: applicationEntrevistaId })],
+      });
+    });
+  });
+
   describe('editar', () => {
     it('atualiza titulo, descricao e habilidadesExigidas da vaga', async () => {
       const ctx = new TenantContext(appPool);
