@@ -58,7 +58,7 @@ describe('PainelPage (Dashboard)', () => {
   });
 
   it('redireciona para /staff/entrar em erro de autenticação', async () => {
-    vi.mocked(staffPanelClient.obterMetricas).mockRejectedValue(new Error('Sessão expirada'));
+    vi.mocked(staffPanelClient.obterMetricas).mockRejectedValue(new Error('Sessão expirada, faça login novamente'));
     vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue({
       userId: 'u1',
       tenantId: 't1',
