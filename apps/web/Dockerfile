@@ -13,7 +13,7 @@ RUN pnpm install --frozen-lockfile
 
 FROM base AS builder
 WORKDIR /workspace
-COPY --from=deps /workspace/node_modules ./node_modules
+COPY --from=deps /workspace ./
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NEXT_PUBLIC_API_URL=https://api.tinocerto.com.br
