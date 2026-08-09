@@ -20,7 +20,7 @@ Veja [LICENSE](./LICENSE) — todos os direitos reservados, uso não autorizado.
 apps/api/       -- API NestJS (multi-tenant, RLS, autenticação de staff e candidato)
 apps/web/       -- Painel do recrutador + portal público de vagas (Next.js)
 packages/design-system/  -- Componentes e tokens visuais compartilhados
-infra/          -- Docker Compose (dev e produção), configuração de Cerbos
+infra/          -- Docker Compose (dev), configuração do servidor Cerbos e .env.example
 cerbos/         -- Políticas de autorização (Cerbos)
 ```
 
