@@ -4,7 +4,7 @@ import { CerbosService } from '../../authz/cerbos.service';
 import { CompetencyService } from '../competency.service';
 import { InterviewGuideService } from '../interview-guide.service';
 import { InterviewScheduleService } from '../interview-schedule.service';
-import { ScorecardService, ScorecardJaSubmetidoError } from '../scorecard.service';
+import { ScorecardService, ScorecardJaSubmetidoError, AvaliadorNaoEhInterviewEvaluatorError } from '../scorecard.service';
 
 describe('ScorecardService — visibilidade oculta até submissão própria', () => {
   const adminPool = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -171,6 +171,29 @@ describe('ScorecardService — visibilidade oculta até submissão própria', ()
         }),
       ),
     ).rejects.toThrow(/não está cadastrado como interview_evaluator/);
+    await adminPool.query('DELETE FROM user_account WHERE id = $1', [intruso.rows[0].id]);
+  });
+
+  // [Fix round 1 -- achado incidental da revisão] A violação do trigger
+  // precisa chegar tipada como AvaliadorNaoEhInterviewEvaluatorError (não
+  // um Error genérico do pg) -- é essa classe que o controller usa para
+  // traduzir para ForbiddenException (403) em vez do 500 cru que vazava
+  // antes desta correção.
+  it('inserir scorecard com avaliador fora de interview_evaluator lança AvaliadorNaoEhInterviewEvaluatorError (nao um Error generico)', async () => {
+    const intruso = await adminPool.query<{ id: string }>(
+      `INSERT INTO user_account (tenant_id, email) VALUES ($1, 'intruso2@example.com') RETURNING id`,
+      [tenantId],
+    );
+    await expect(
+      tenantContext.run(tenantId, (client) =>
+        scorecardService.submeter(client, {
+          tenantId,
+          interviewScheduleId: scheduleId,
+          avaliadorId: intruso.rows[0].id,
+          notasPorCompetencia: { comunicacao: 5 },
+        }),
+      ),
+    ).rejects.toBeInstanceOf(AvaliadorNaoEhInterviewEvaluatorError);
     await adminPool.query('DELETE FROM user_account WHERE id = $1', [intruso.rows[0].id]);
   });
 

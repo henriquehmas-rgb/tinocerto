@@ -155,6 +155,22 @@ export class OfferService {
     return { id: input.offerId, applicationId };
   }
 
+  // Item 1 da onda 3 de correcao pos-revisao: accept/decline no controller
+  // recebem so o offerId na URL (sem jobId direto) -- precisa resolver
+  // offer.id -> application_id -> job_id antes de checar posse por
+  // recrutador. Mesmo raciocinio de application.controller.ts: buscar
+  // antes, checar posse, so entao prosseguir.
+  async buscarJobId(client: PoolClient, tenantId: string, offerId: string): Promise<string | null> {
+    const result = await client.query<{ job_id: string }>(
+      `SELECT a.job_id
+         FROM offer o
+         JOIN application a ON a.tenant_id = o.tenant_id AND a.id = o.application_id
+        WHERE o.tenant_id = $1 AND o.id = $2`,
+      [tenantId, offerId],
+    );
+    return result.rows[0]?.job_id ?? null;
+  }
+
   async listByApplication(client: PoolClient, tenantId: string, applicationId: string): Promise<OfferRow[]> {
     const result = await client.query<{
       id: string;
