@@ -416,7 +416,7 @@ describe('ApplicationController', () => {
       };
       const reportServiceMock = { gerar: jest.fn().mockResolvedValue({ assessmentResultId: 'ar-1', secoes: [] }) };
       const adherenceServiceMock = {
-        porCandidatura: jest.fn().mockResolvedValue({ scoreAderencia: 0.8, skillsBatidas: [], skillsFaltantes: [], totalExigidas: 0 }),
+        porCandidatura: jest.fn().mockResolvedValue({ scoreAderencia: 80, skillsBatidas: [], skillsFaltantes: [], totalExigidas: 0 }),
       };
       const controller = await buildController(jest.fn(), undefined, {}, {}, jest.fn(), {
         applicationServiceMock,
@@ -427,7 +427,7 @@ describe('ApplicationController', () => {
 
       const result = await controller.assessmentReport(req, 'app-1');
 
-      expect(result.aderencia?.scoreAderencia).toBe(0.8);
+      expect(result.aderencia?.scoreAderencia).toBe(80);
     });
 
     it('lança NotFoundException quando a candidatura não existe', async () => {
@@ -455,7 +455,7 @@ describe('ApplicationController', () => {
       };
       const reportServiceMock = { gerar: jest.fn() };
       const adherenceServiceMock = {
-        porCandidatura: jest.fn().mockResolvedValue({ scoreAderencia: 0.5, skillsBatidas: [], skillsFaltantes: [], totalExigidas: 2 }),
+        porCandidatura: jest.fn().mockResolvedValue({ scoreAderencia: 50, skillsBatidas: [], skillsFaltantes: [], totalExigidas: 2 }),
       };
       const controller = await buildController(jest.fn(), undefined, {}, {}, jest.fn(), {
         applicationServiceMock,
@@ -471,7 +471,7 @@ describe('ApplicationController', () => {
       // deve nem ser chamado, e relatorio deve ser null.
       expect(reportServiceMock.gerar).not.toHaveBeenCalled();
       expect(result.relatorio).toBeNull();
-      expect(result.aderencia?.scoreAderencia).toBe(0.5);
+      expect(result.aderencia?.scoreAderencia).toBe(50);
     });
   });
 });
