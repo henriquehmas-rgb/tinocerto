@@ -1,4 +1,4 @@
-import { Body, Controller, Post, Req, UnauthorizedException, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Post, Req, UnauthorizedException, UseGuards } from '@nestjs/common';
 import { IsEmail, IsNotEmpty, IsOptional, IsString, MinLength } from 'class-validator';
 import { Request } from 'express';
 import { TenantContext } from '../database/tenant-context';
@@ -238,6 +238,16 @@ export class StaffAuthController {
       const accessToken = this.jwtService.sign({ userId: rotated.userId, tenantId: rotated.tenantId, roles });
       return { accessToken, refreshToken: rotated.token };
     });
+  }
+
+  // I1 da revisão de coerência do Painel do Recrutador: um recrutador não
+  // tinha nenhum jeito de descobrir o próprio userId de staff (necessário,
+  // por exemplo, para conferir se já está atribuído a uma vaga). Os dados
+  // já vêm do JWT decodificado por TenantResolutionMiddleware -- nenhuma
+  // consulta ao banco é necessária.
+  @Get('me')
+  async me(@Req() req: RequestWithAuthContext) {
+    return { userId: req.userId, tenantId: req.tenantId, roles: req.userRoles };
   }
 
   @Post('logout')

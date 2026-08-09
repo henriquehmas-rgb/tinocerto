@@ -422,4 +422,18 @@ describe('StaffAuthController', () => {
     ).rejects.toThrow(UnauthorizedException);
     expect(enableMfa).not.toHaveBeenCalled();
   });
+
+  // I1 da revisão de coerência do Painel do Recrutador: recrutador não
+  // tinha nenhum jeito de descobrir o próprio userId de staff.
+  it('GET me devolve userId/tenantId/roles direto do JWT decodificado (sem tocar banco)', async () => {
+    const controller = await build();
+
+    const result = await controller.me({
+      tenantId: 'tenant-1',
+      userId: 'user-1',
+      userRoles: ['recrutador'],
+    } as never);
+
+    expect(result).toEqual({ userId: 'user-1', tenantId: 'tenant-1', roles: ['recrutador'] });
+  });
 });
