@@ -1,6 +1,7 @@
 {
   "name": "@tinocerto/api",
   "version": "0.0.1",
+  "license": "UNLICENSED",
   "scripts": {
     "start:dev": "nest start --watch",
     "build": "nest build",
