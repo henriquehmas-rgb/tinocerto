@@ -7,11 +7,16 @@ import { KanbanBoard, PanelLayout } from '@tinocerto/design-system';
 import { staffPanelClient, CandidaturaResumo } from '../../../../../lib/staff-panel-client';
 import { staffAuthClient, isErroDeAutenticacao } from '../../../../../lib/staff-auth-client';
 
-// Colunas usadas apenas enquanto o funil ainda nao carregou, para evitar
-// uma tela vazia por um instante. Assim que o funil chega, as colunas
-// passam a ser derivadas de Object.keys(funil) (ver COLUNAS abaixo) --
-// nunca ficam presas a 'triagem'/'entrevista', entao candidaturas em
-// qualquer outra etapa (ex.: 'oferta') tambem aparecem.
+// Etapas conhecidas hoje, sempre mostradas como coluna (e como destino no
+// menu Mover) mesmo quando ainda nao tem nenhuma candidatura -- e o caso
+// mais comum de todos, uma vaga nova onde todo mundo esta em triagem.
+// JobService.funil() no backend so inclui no objeto retornado as etapas que
+// JA TEM ao menos uma candidatura (nunca emite chave pra etapa vazia), entao
+// as colunas exibidas sao sempre a UNIAO desta lista padrao com as chaves
+// reais de `funil` -- nunca a substituicao de uma pela outra. Isso garante
+// que uma etapa nova/inesperada (ex.: 'oferta') tambem apareca quando
+// existir candidatura nela, sem fazer 'entrevista' sumir quando ainda
+// estiver vazia.
 const COLUNAS_PADRAO = [
   { chave: 'triagem', titulo: 'Triagem' },
   { chave: 'entrevista', titulo: 'Entrevista' },
@@ -26,7 +31,6 @@ export default function FunilPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const [funil, setFunil] = useState<Record<string, CandidaturaResumo[]>>({});
-  const [funilCarregado, setFunilCarregado] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
 
   const carregar = useCallback(() => {
@@ -34,7 +38,6 @@ export default function FunilPage() {
       .obterFunil(params.id)
       .then((dados) => {
         setFunil(dados);
-        setFunilCarregado(true);
       })
       .catch((e) => {
         if (isErroDeAutenticacao(e)) {
@@ -59,9 +62,13 @@ export default function FunilPage() {
     router.push('/staff/entrar');
   }
 
-  const colunas = funilCarregado
-    ? Object.keys(funil).map((chave) => ({ chave, titulo: capitalizar(chave) }))
-    : COLUNAS_PADRAO;
+  const chavesExtras = Object.keys(funil).filter(
+    (chave) => !COLUNAS_PADRAO.some((coluna) => coluna.chave === chave),
+  );
+  const colunas = [
+    ...COLUNAS_PADRAO,
+    ...chavesExtras.map((chave) => ({ chave, titulo: capitalizar(chave) })),
+  ];
 
   return (
     <PanelLayout nomeStaff="" nomeTenant="" onSair={handleSair}>
