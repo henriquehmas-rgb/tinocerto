@@ -20,6 +20,12 @@ export interface RequisitionRecord {
   closedAt: Date | null;
 }
 
+export interface RequisitionResumo {
+  id: string;
+  titulo: string;
+  status: 'aberta' | 'aprovada' | 'fechada';
+}
+
 @Injectable()
 export class RequisitionService {
   private readonly outbox = new OutboxService();
@@ -69,6 +75,24 @@ export class RequisitionService {
       payload: { requisition_id: id, approved_by: approvedBy },
       occurredAt: new Date(),
     });
+  }
+
+  // C3 da revisão de coerência do Painel do Recrutador: não existia
+  // NENHUM jeito de listar requisições existentes pela API -- mesmo depois
+  // do onboarding passar a criar uma requisition inicial aprovada (ver
+  // StaffOnboardingService.onboard), o formulário de criar vaga não tinha
+  // como descobrir o id dela. Lista TODAS as requisições do tenant (não só
+  // as aprovadas) -- o frontend decide como filtrar/exibir; requisição não
+  // tem conceito de recrutador atribuído (job_recrutador é por VAGA, não
+  // por requisição), então não há guarda de posse aqui, só o
+  // @CerbosCheck('requisition', 'read') já usado pela regra
+  // "gestao-requisicao" (admin_tenant, recrutador).
+  async listar(client: PoolClient, tenantId: string): Promise<RequisitionResumo[]> {
+    const result = await client.query<{ id: string; titulo: string; status: 'aberta' | 'aprovada' | 'fechada' }>(
+      `SELECT id, titulo, status FROM requisition WHERE tenant_id = $1 ORDER BY opened_at DESC`,
+      [tenantId],
+    );
+    return result.rows;
   }
 
   async findById(client: PoolClient, id: string): Promise<RequisitionRecord | null> {

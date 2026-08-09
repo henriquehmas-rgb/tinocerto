@@ -1,4 +1,4 @@
-import { Body, Controller, Param, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
 import { IsNotEmpty, IsString, IsUUID } from 'class-validator';
 import { Request } from 'express';
 import { TenantContext } from '../database/tenant-context';
@@ -32,6 +32,21 @@ export class RequisitionController {
     databaseService: DatabaseService,
   ) {
     this.tenantContext = new TenantContext(databaseService.pool);
+  }
+
+  // C3 da revisão de coerência do Painel do Recrutador: não existia
+  // NENHUMA rota para listar requisições -- o formulário de criar vaga não
+  // tinha como descobrir o id da requisition inicial que o onboarding
+  // agora cria (ver StaffOnboardingService.onboard). Lista todas as
+  // requisições do tenant (não filtra por status -- o frontend decide como
+  // exibir/filtrar). Sem guarda de posse: requisição não tem conceito de
+  // recrutador atribuído (job_recrutador é por VAGA), só o
+  // @CerbosCheck('requisition', 'read') já coberto pela regra
+  // "gestao-requisicao" (admin_tenant, recrutador) em resource_requisition.yaml.
+  @Get()
+  @CerbosCheck('requisition', 'read')
+  async listar(@Req() req: RequestWithAuthContext) {
+    return this.tenantContext.run(req.tenantId, (client) => this.requisitionService.listar(client, req.tenantId));
   }
 
   @Post()

@@ -21,6 +21,7 @@ describe('ApplicationCustomFieldResponseService — coleta faseada', () => {
   let inscricaoFieldId: string;
   let admissaoFieldId: string;
   let userId: string;
+  const personIds: string[] = [];
 
   beforeAll(async () => {
     process.env.ENVELOPE_ENCRYPTION_KEK ??= 'a'.repeat(64);
@@ -70,7 +71,7 @@ describe('ApplicationCustomFieldResponseService — coleta faseada', () => {
     await adminPool.query('DELETE FROM job_custom_field WHERE tenant_id = $1', [tenantId]);
     await adminPool.query('DELETE FROM job WHERE tenant_id = $1', [tenantId]);
     await adminPool.query('DELETE FROM requisition WHERE tenant_id = $1', [tenantId]);
-    await adminPool.query('DELETE FROM person WHERE cpf_hash IN (SELECT cpf_hash FROM person)', []);
+    await adminPool.query('DELETE FROM person WHERE id = ANY($1)', [personIds]);
     await adminPool.query('DELETE FROM user_account WHERE tenant_id = $1', [tenantId]);
     await adminPool.query('DELETE FROM org_unit WHERE tenant_id = $1', [tenantId]);
     await adminPool.query('DELETE FROM tenant WHERE id = $1', [tenantId]);
@@ -87,6 +88,7 @@ describe('ApplicationCustomFieldResponseService — coleta faseada', () => {
     const person = await ctx.run(tenantId, (client) =>
       personService.create(client, { nome: 'Candidato CF', emailPrincipal: `cf-${cpf}@teste.com`, cpf }),
     );
+    personIds.push(person.id);
     const touchpoint = await ctx.run(tenantId, (client) =>
       touchpointService.record(client, { tenantId, personId: person.id, canal: 'site_carreiras' }),
     );

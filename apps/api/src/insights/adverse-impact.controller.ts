@@ -5,6 +5,7 @@ import { DatabaseService } from '../database/database.service';
 import { CerbosGuard } from '../authz/cerbos.guard';
 import { CerbosCheck } from '../authz/cerbos-check.decorator';
 import { AdverseImpactSnapshotService } from './adverse-impact-snapshot.service';
+import { JobRecrutadorService } from '../hiring/job-recrutador.service';
 
 interface RequestWithAuthContext extends Request {
   tenantId: string;
@@ -23,6 +24,13 @@ interface RequestWithAuthContext extends Request {
 // dispara para este recurso. Se o caminho de leitura algum dia deixar de
 // passar por `TenantContext.run`, essa proteção desaparece silenciosamente
 // -- registrado aqui para não ser confundido com "Cerbos já bloqueia".
+//
+// C3 da revisão de coerência do Painel do Recrutador: o Cerbos libera o
+// papel "recrutador" para esta rota (mesma regra "job"/"read"), mas até
+// aqui não havia guarda de posse por job_recrutador -- um recrutador sem
+// atribuição podia ler o snapshot de adverse impact de QUALQUER vaga do
+// tenant via chamada direta à API. Mesma JobRecrutadorService.exigirAcesso
+// usada em JobController/ApplicationController.
 @Controller('v1/jobs')
 @UseGuards(CerbosGuard)
 export class AdverseImpactController {
@@ -30,6 +38,7 @@ export class AdverseImpactController {
 
   constructor(
     private readonly snapshotService: AdverseImpactSnapshotService,
+    private readonly jobRecrutadorService: JobRecrutadorService,
     databaseService: DatabaseService,
   ) {
     this.tenantContext = new TenantContext(databaseService.pool);
@@ -38,6 +47,14 @@ export class AdverseImpactController {
   @Get(':id/adverse-impact')
   @CerbosCheck('job', 'read')
   async porVaga(@Req() req: RequestWithAuthContext, @Param('id') id: string) {
-    return this.tenantContext.run(req.tenantId, (client) => this.snapshotService.listarPorVaga(client, id));
+    return this.tenantContext.run(req.tenantId, async (client) => {
+      await this.jobRecrutadorService.exigirAcesso(client, {
+        tenantId: req.tenantId,
+        jobId: id,
+        userId: req.userId,
+        userRoles: req.userRoles,
+      });
+      return this.snapshotService.listarPorVaga(client, id);
+    });
   }
 }

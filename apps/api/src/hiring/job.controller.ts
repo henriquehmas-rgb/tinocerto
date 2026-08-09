@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Req, UseGuards, NotFoundException } from '@nestjs/common';
 import { ArrayNotEmpty, IsArray, IsNotEmpty, IsOptional, IsString, IsUUID } from 'class-validator';
 import { Request } from 'express';
 import { TenantContext } from '../database/tenant-context';
@@ -28,9 +28,14 @@ class CreateJobDto {
   recrutadorIds?: string[];
 }
 
-class AtribuirRecrutadoresDto {
+export class AtribuirRecrutadoresDto {
   @IsArray()
-  @IsString({ each: true })
+  // Achado I4 da revisão de coerência do Painel do Recrutador: um id
+  // não-UUID aqui passava direto para o INSERT em job_recrutador e
+  // estourava um 500 não tratado do Postgres (22P02, invalid input syntax
+  // for type uuid). @IsUUID rejeita com 400 já no ValidationPipe global
+  // (main.ts), antes de qualquer query.
+  @IsUUID('4', { each: true })
   recrutadorIds!: string[];
 }
 
@@ -98,15 +103,49 @@ export class JobController {
   @Post()
   @CerbosCheck('job', 'create')
   async create(@Req() req: RequestWithAuthContext, @Body() dto: CreateJobDto) {
+    // Achado C1 da revisão de coerência do Painel do Recrutador: sem isto,
+    // uma vaga criada sem recrutadorIds explícitos no body nascia sem
+    // NENHUM recrutador atribuído -- nem o próprio criador, que ficava
+    // trancado fora da própria vaga (404 em tudo, sem conseguir se
+    // auto-atribuir via atribuirRecrutadores, que já exige posse antes de
+    // atribuir). Inclui SEMPRE req.userId no conjunto de recrutadores,
+    // deduplicado com o que o body já trouxer -- independe do papel de quem
+    // cria: para admin_tenant/gestor_vaga é inócuo (já têm acesso total via
+    // PAPEIS_COM_ACESSO_TOTAL), para recrutador é o que garante posse
+    // imediata sobre a vaga recém-criada.
+    const recrutadorIds = Array.from(new Set([req.userId, ...(dto.recrutadorIds ?? [])]));
     return this.tenantContext.run(req.tenantId, (client) =>
       this.jobService.create(client, {
         tenantId: req.tenantId,
         requisitionId: dto.requisitionId,
         titulo: dto.titulo,
         habilidadesExigidas: dto.habilidadesExigidas,
-        recrutadorIds: dto.recrutadorIds,
+        recrutadorIds,
       }),
     );
+  }
+
+  @Get(':id')
+  @CerbosCheck('job', 'read')
+  async findOne(@Req() req: RequestWithAuthContext, @Param('id') id: string) {
+    return this.tenantContext.run(req.tenantId, async (client) => {
+      // Guarda de posse por recrutador (Fase 5a, fix C4 pré-requisito):
+      // mesmo padrão de funil/editar/atribuirRecrutadores acima -- roda
+      // ANTES da leitura para não vazar a existência da vaga a quem não
+      // tem acesso (404, não 403).
+      await this.jobRecrutadorService.exigirAcesso(client, {
+        tenantId: req.tenantId,
+        jobId: id,
+        userId: req.userId,
+        userRoles: req.userRoles,
+      });
+      const job = await this.jobService.findById(client, { tenantId: req.tenantId, jobId: id });
+      if (!job) {
+        throw new NotFoundException(`Vaga ${id} não encontrada`);
+      }
+      const recrutadorIds = await this.jobRecrutadorService.listarPorVaga(client, { tenantId: req.tenantId, jobId: id });
+      return { ...job, recrutadorIds };
+    });
   }
 
   @Get(':id/funil')
@@ -164,7 +203,21 @@ export class JobController {
   @Post(':id/actions/publish')
   @CerbosCheck('job', 'publish')
   async publish(@Req() req: RequestWithAuthContext, @Param('id') id: string, @Body() dto: PublishJobDto) {
-    await this.tenantContext.run(req.tenantId, (client) => this.jobService.publish(client, id, dto.canais));
+    await this.tenantContext.run(req.tenantId, async (client) => {
+      // Achado C2 da revisão de coerência do Painel do Recrutador: o Cerbos
+      // libera o papel "recrutador" para esta rota (mesma regra
+      // "gestao-vaga" de create/read/update), mas a guarda de posse por
+      // job_recrutador nunca tinha sido aplicada aqui -- um recrutador sem
+      // atribuição podia publicar QUALQUER vaga do tenant via chamada
+      // direta à API. Mesma guarda de funil/editar acima.
+      await this.jobRecrutadorService.exigirAcesso(client, {
+        tenantId: req.tenantId,
+        jobId: id,
+        userId: req.userId,
+        userRoles: req.userRoles,
+      });
+      await this.jobService.publish(client, id, dto.canais);
+    });
     return { id, status: 'publicada' };
   }
 
@@ -175,9 +228,17 @@ export class JobController {
     @Param('id') id: string,
     @Body() dto: DeclararHabilidadesExigidasDto,
   ) {
-    await this.tenantContext.run(req.tenantId, (client) =>
-      this.jobService.declararHabilidadesExigidas(client, id, dto.habilidades),
-    );
+    await this.tenantContext.run(req.tenantId, async (client) => {
+      // Mesmo achado C2 documentado em publish() acima -- guarda de posse
+      // que faltava nesta rota.
+      await this.jobRecrutadorService.exigirAcesso(client, {
+        tenantId: req.tenantId,
+        jobId: id,
+        userId: req.userId,
+        userRoles: req.userRoles,
+      });
+      await this.jobService.declararHabilidadesExigidas(client, id, dto.habilidades);
+    });
     return { id, habilidadesExigidas: dto.habilidades };
   }
 }

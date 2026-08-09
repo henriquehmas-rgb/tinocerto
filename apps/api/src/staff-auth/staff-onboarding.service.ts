@@ -107,6 +107,44 @@ export class StaffOnboardingService {
         [userId, tenantId, roleResult.rows[0].id],
       );
 
+      // Achado C3 da revisão de coerência do Painel do Recrutador: criar
+      // uma vaga (JobService.create) exige uma requisition aprovada, que
+      // por sua vez exige um org_unit -- e não existe nenhum jeito de criar
+      // org_unit nem de listar requisições existentes pela API. Um tenant
+      // recém-onboardado ficava sem NENHUM jeito de criar uma vaga pelo
+      // produto, exigindo seed manual direto no banco. Em vez de um CRUD
+      // completo de org_unit/requisição (fora de escopo desta fase), o
+      // onboarding cria automaticamente, na MESMA transação, um org_unit
+      // raiz e uma requisition já aprovada -- todo tenant novo já nasce com
+      // pelo menos 1 requisição pronta pra criar vaga.
+      //
+      // materialized_path 'matriz' (não algo derivado do id) -- mesma
+      // convenção literal usada em TODOS os fixtures de teste do projeto
+      // que criam o org_unit raiz de um tenant (ex.:
+      // hiring/__tests__/job.service.spec.ts,
+      // hiring/__tests__/requisition.service.spec.ts,
+      // copilot/__tests__/candidate-summary.service.spec.ts) -- não um
+      // path derivado do id do org_unit, que não é conhecido antes do
+      // INSERT (a coluna usa DEFAULT gen_random_uuid()).
+      const orgUnitResult = await client.query<{ id: string }>(
+        `INSERT INTO org_unit (tenant_id, tipo, nome, materialized_path) VALUES ($1, 'empresa', $2, 'matriz') RETURNING id`,
+        [tenantId, input.nomeEmpresa],
+      );
+      const orgUnitId = orgUnitResult.rows[0].id;
+
+      // status 'aprovada' + approved_at preenchido -- mesmo shape que
+      // RequisitionService.approve grava numa aprovação normal (ver
+      // hiring/requisition.service.ts), só que direto no INSERT em vez de
+      // um INSERT 'aberta' seguido de UPDATE, já que não há necessidade de
+      // passar pelo estado intermediário aqui (não há outbox de
+      // requisition.opened/approved a emitir para esta requisição
+      // sintética de onboarding -- ela nunca foi de fato "aberta" por
+      // ninguém, é infraestrutura criada para destravar o produto).
+      await client.query(
+        `INSERT INTO requisition (tenant_id, org_unit_id, titulo, status, approved_at) VALUES ($1, $2, 'Requisição inicial', 'aprovada', now())`,
+        [tenantId, orgUnitId],
+      );
+
       return { tenantId, userId };
     });
   }
