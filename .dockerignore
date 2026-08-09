@@ -1,0 +1,16 @@
+node_modules
+**/node_modules
+dist
+**/dist
+.next
+**/.next
+.env
+.env.local
+.env.production
+**/.env
+**/.env.local
+**/.env.production
+*.log
+.git
+.turbo
+storybook-static
