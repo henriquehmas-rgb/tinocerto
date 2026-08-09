@@ -42,8 +42,14 @@ jobs:
       STAFF_JWT_SECRET: segredo-de-teste-nao-usar-em-producao
       CPF_HASH_PEPPER: segredo-de-teste-nao-usar-em-producao
       API_KEY_HASH_PEPPER: segredo-de-teste-nao-usar-em-producao
-      ENVELOPE_ENCRYPTION_KEK: ***REMOVED-SECRET***
-      WEBHOOK_SECRET_ENCRYPTION_KEY: ***REMOVED-SECRET***
+      # ENVELOPE_ENCRYPTION_KEK e WEBHOOK_SECRET_ENCRYPTION_KEY (revisão de
+      # segurança pré-lançamento, achado Important): removidas daqui porque
+      # o código exige especificamente 32 bytes decodificáveis em base64
+      # (diferente das 4 variáveis acima, que aceitam qualquer frase). Um
+      # valor fixo desse formato no YAML é indistinguível de um segredo
+      # real para leitores humanos e para o secret scanning do GitHub —
+      # gerado em runtime no step "Gerar segredos de teste" abaixo em vez
+      # de hardcoded aqui.
 
     steps:
       - uses: actions/checkout@v4
@@ -87,5 +93,10 @@ jobs:
           echo "Cerbos não ficou saudável a tempo. Logs do container:"
           docker logs cerbos || true
           exit 1
+
+      - name: Gerar segredos de teste (32 bytes, formato exigido em runtime)
+        run: |
+          echo "ENVELOPE_ENCRYPTION_KEK=$(openssl rand -base64 32)" >> "$GITHUB_ENV"
+          echo "WEBHOOK_SECRET_ENCRYPTION_KEY=$(openssl rand -base64 32)" >> "$GITHUB_ENV"
 
       - run: pnpm test
