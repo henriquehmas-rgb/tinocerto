@@ -7,39 +7,68 @@ const pushMock = vi.fn();
 const routerMock = { push: pushMock };
 vi.mock('next/navigation', () => ({ useRouter: () => routerMock }));
 vi.mock('../../../../lib/staff-panel-client', () => ({
-  staffPanelClient: { listarVagas: vi.fn() },
+  staffPanelClient: { obterMetricas: vi.fn(), obterPerfil: vi.fn() },
 }));
 
-describe('PainelPage', () => {
+describe('PainelPage (Dashboard)', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('lista as vagas retornadas pelo client', async () => {
-    vi.mocked(staffPanelClient.listarVagas).mockResolvedValue([
-      { id: '1', titulo: 'Engenheiro de Dados', publicadoEm: null, criadoEm: '2026-08-01T00:00:00Z' },
-    ]);
+  it('mostra as métricas retornadas pelo client', async () => {
+    vi.mocked(staffPanelClient.obterMetricas).mockResolvedValue({
+      vagasAtivas: 3,
+      vagasRascunho: 1,
+      candidaturasEmAndamento: 7,
+      porEstagio: { triagem: 5, entrevista: 2 },
+    });
+    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue({
+      userId: 'u1',
+      tenantId: 't1',
+      roles: ['admin_tenant'],
+      email: 'ana@empresa.example',
+      razaoSocial: 'Empresa Exemplo Ltda',
+    });
+
     render(<PainelPage />);
-    await waitFor(() => expect(screen.getByText('Engenheiro de Dados')).toBeInTheDocument());
+
+    await waitFor(() => expect(screen.getByText('3')).toBeInTheDocument());
+    expect(screen.getByText('1')).toBeInTheDocument();
+    expect(screen.getByText('7')).toBeInTheDocument();
+    expect(screen.getByText('Empresa Exemplo Ltda')).toBeInTheDocument();
+    expect(screen.getByText('ana@empresa.example')).toBeInTheDocument();
   });
 
-  it('mostra o status da vaga como um Badge (Publicada/Rascunho)', async () => {
-    vi.mocked(staffPanelClient.listarVagas).mockResolvedValue([
-      { id: '1', titulo: 'Engenheiro de Dados', publicadoEm: '2026-08-01T00:00:00Z', criadoEm: '2026-08-01T00:00:00Z' },
-      { id: '2', titulo: 'Analista de BI', publicadoEm: null, criadoEm: '2026-08-01T00:00:00Z' },
-    ]);
+  it('mostra estado vazio com CTA quando não há nenhuma vaga', async () => {
+    vi.mocked(staffPanelClient.obterMetricas).mockResolvedValue({
+      vagasAtivas: 0,
+      vagasRascunho: 0,
+      candidaturasEmAndamento: 0,
+      porEstagio: {},
+    });
+    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue({
+      userId: 'u1',
+      tenantId: 't1',
+      roles: ['admin_tenant'],
+      email: 'ana@empresa.example',
+      razaoSocial: 'Empresa Exemplo Ltda',
+    });
+
     render(<PainelPage />);
-    await waitFor(() => expect(screen.getByText('Publicada')).toBeInTheDocument());
-    expect(screen.getByText('Rascunho')).toBeInTheDocument();
+
+    await waitFor(() => expect(screen.getByText('Criar sua primeira vaga')).toBeInTheDocument());
   });
 
-  it('mostra mensagem de vazio quando não há vagas', async () => {
-    vi.mocked(staffPanelClient.listarVagas).mockResolvedValue([]);
-    render(<PainelPage />);
-    await waitFor(() => expect(screen.getByText('Nenhum item encontrado')).toBeInTheDocument());
-  });
+  it('redireciona para /staff/entrar em erro de autenticação', async () => {
+    vi.mocked(staffPanelClient.obterMetricas).mockRejectedValue(new Error('Sessão expirada'));
+    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue({
+      userId: 'u1',
+      tenantId: 't1',
+      roles: ['admin_tenant'],
+      email: 'ana@empresa.example',
+      razaoSocial: 'Empresa Exemplo Ltda',
+    });
 
-  it('redireciona para /staff/entrar quando o carregamento falha por sessão ausente', async () => {
-    vi.mocked(staffPanelClient.listarVagas).mockRejectedValue(new Error('Usuário não autenticado'));
     render(<PainelPage />);
+
     await waitFor(() => expect(pushMock).toHaveBeenCalledWith('/staff/entrar'));
   });
 });
