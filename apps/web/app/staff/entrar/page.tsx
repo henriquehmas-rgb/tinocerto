@@ -20,9 +20,7 @@ export default function StaffLoginPage() {
       if (staffAuthClient.isMfaChallenge(result)) {
         setMfaChallengeToken(result.mfaChallengeToken);
       } else {
-        // Não existe painel ainda -- redireciona para a home por enquanto.
-        // Isso deve mudar para algo como `/staff/painel` quando o painel existir.
-        router.push('/');
+        router.push('/staff/painel');
       }
     } catch (err) {
       setErro(err instanceof Error ? err.message : 'Erro ao entrar');
@@ -39,8 +37,7 @@ export default function StaffLoginPage() {
     const form = new FormData(event.currentTarget);
     try {
       await staffAuthClient.loginMfa({ mfaChallengeToken, codigoTotp: String(form.get('codigoTotp')) });
-      // Não existe painel ainda -- redireciona para a home por enquanto.
-      router.push('/');
+      router.push('/staff/painel');
     } catch (err) {
       setErro(err instanceof Error ? err.message : 'Erro ao confirmar o código');
     } finally {
