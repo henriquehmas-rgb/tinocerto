@@ -1,10 +1,10 @@
 import { Test } from '@nestjs/testing';
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { validate } from 'class-validator';
 import { plainToInstance } from 'class-transformer';
-import { JobController, AtribuirRecrutadoresDto } from '../job.controller';
+import { JobController, AtribuirRecrutadoresDto, CreateJobDto } from '../job.controller';
 import { JobService } from '../job.service';
-import { JobRecrutadorService } from '../job-recrutador.service';
+import { JobRecrutadorService, RecrutadorInvalidoError } from '../job-recrutador.service';
 import { DatabaseService } from '../../database/database.service';
 import { CerbosGuard } from '../../authz/cerbos.guard';
 
@@ -258,6 +258,71 @@ describe('JobController', () => {
       });
       const erros = await validate(dto);
       expect(erros).toHaveLength(0);
+    });
+  });
+
+  // Item 3a da onda 2 de correção pós-revisão: o mesmo achado I4 (id
+  // não-UUID em recrutadorIds estourava 500 via 22P02) só tinha sido
+  // corrigido em AtribuirRecrutadoresDto -- CreateJobDto.recrutadorIds
+  // continuava aceitando qualquer string.
+  describe('CreateJobDto -- validação de UUID (onda 2, fix 3a)', () => {
+    it('rejeita quando recrutadorIds contém um id que não é UUID', async () => {
+      const dto = plainToInstance(CreateJobDto, {
+        requisitionId: 'c56a4180-65aa-42ec-a945-5fd21dec0538',
+        titulo: 'Vaga X',
+        recrutadorIds: ['nao-e-um-uuid'],
+      });
+      const erros = await validate(dto);
+      const erroRecrutadorIds = erros.find((e) => e.property === 'recrutadorIds');
+      expect(erroRecrutadorIds?.constraints).toHaveProperty('isUuid');
+    });
+
+    it('aceita quando recrutadorIds não é enviado (opcional) ou contém apenas UUIDs válidos', async () => {
+      const semRecrutadorIds = plainToInstance(CreateJobDto, {
+        requisitionId: 'c56a4180-65aa-42ec-a945-5fd21dec0538',
+        titulo: 'Vaga X',
+      });
+      expect(await validate(semRecrutadorIds)).toHaveLength(0);
+
+      const comUuidValido = plainToInstance(CreateJobDto, {
+        requisitionId: 'c56a4180-65aa-42ec-a945-5fd21dec0538',
+        titulo: 'Vaga X',
+        recrutadorIds: ['c56a4180-65aa-42ec-a945-5fd21dec0538'],
+      });
+      expect(await validate(comUuidValido)).toHaveLength(0);
+    });
+  });
+
+  // Item 3b da onda 2 de correção pós-revisão: um UUID bem-formado mas de
+  // um user_account inexistente/de outro tenant estourava a FK composta
+  // fk_job_recrutador_tenant_staff como 500 -- tanto em POST /v1/jobs
+  // (create, via JobService.create -> JobRecrutadorService.atribuir) quanto
+  // em POST :id/actions/atribuir-recrutadores. JobRecrutadorService.atribuir
+  // agora traduz essa violação num RecrutadorInvalidoError; os testes
+  // abaixo travam que os dois pontos de entrada do controller traduzem
+  // esse erro de negócio para 400 (não deixam vazar como 500).
+  describe('RecrutadorInvalidoError traduzida para 400 (onda 2, fix 3b)', () => {
+    it('POST / traduz RecrutadorInvalidoError (de JobService.create) em BadRequestException', async () => {
+      const createMock = jest.fn().mockRejectedValue(new RecrutadorInvalidoError('recrutador inválido'));
+      const controller = await buildController({ create: createMock });
+      const req = { tenantId: 'tenant-1', userId: 'user-criador', userRoles: ['admin_tenant'] } as any;
+
+      await expect(
+        controller.create(req, { requisitionId: 'req-1', titulo: 'Vaga Nova' } as any),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('POST :id/actions/atribuir-recrutadores traduz RecrutadorInvalidoError em BadRequestException', async () => {
+      const exigirAcessoMock = jest.fn().mockResolvedValue(undefined);
+      const atribuirMock = jest.fn().mockRejectedValue(new RecrutadorInvalidoError('recrutador inválido'));
+      const controller = await buildController({}, { exigirAcesso: exigirAcessoMock, atribuir: atribuirMock });
+      const req = { tenantId: 'tenant-1', userId: 'user-1', userRoles: ['admin_tenant'] } as any;
+
+      await expect(
+        controller.atribuirRecrutadores(req, 'job-1', {
+          recrutadorIds: ['c56a4180-65aa-42ec-a945-5fd21dec0538'],
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
     });
   });
 });

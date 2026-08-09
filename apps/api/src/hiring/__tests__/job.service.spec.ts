@@ -2,7 +2,7 @@ import { Pool } from 'pg';
 import { TenantContext } from '../../database/tenant-context';
 import { RequisitionService } from '../requisition.service';
 import { JobService } from '../job.service';
-import { JobRecrutadorService } from '../job-recrutador.service';
+import { JobRecrutadorService, RecrutadorInvalidoError } from '../job-recrutador.service';
 
 describe('JobService', () => {
   const url = new URL(process.env.DATABASE_URL!);
@@ -39,6 +39,32 @@ describe('JobService', () => {
     await adminPool.query('DELETE FROM tenant WHERE id = $1', [tenantId]);
     await adminPool.end();
     await appPool.end();
+  });
+
+  // Item 3b da onda 2 de correção pós-revisão: JobService.create chama
+  // JobRecrutadorService.atribuir na MESMA transação -- um UUID
+  // bem-formado mas de um user_account inexistente/de outro tenant
+  // estourava a FK composta fk_job_recrutador_tenant_staff como um 500 cru
+  // via este caminho (POST /v1/jobs), não só via
+  // atribuir-recrutadores (já coberto em job-recrutador.service.spec.ts).
+  // Este teste prova que o erro se propaga como RecrutadorInvalidoError
+  // (não um pg error cru) através de JobService.create, para o controller
+  // poder traduzi-lo em 400 -- ver JobController.create.
+  it('create lança RecrutadorInvalidoError (não um erro cru do Postgres) quando recrutadorIds contém um UUID que não existe em user_account', async () => {
+    const ctx = new TenantContext(appPool);
+    const service = new JobService(new RequisitionService(), new JobRecrutadorService());
+    const uuidInexistente = '00000000-0000-4000-8000-000000000001';
+
+    await expect(
+      ctx.run(tenantId, (client) =>
+        service.create(client, {
+          tenantId,
+          requisitionId,
+          titulo: 'Vaga com Recrutador Inválido',
+          recrutadorIds: [uuidInexistente],
+        }),
+      ),
+    ).rejects.toBeInstanceOf(RecrutadorInvalidoError);
   });
 
   it('cria uma vaga em rascunho com seo_slug único e sem publicado_em', async () => {

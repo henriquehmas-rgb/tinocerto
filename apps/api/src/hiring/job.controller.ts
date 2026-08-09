@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Req, UseGuards, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Param, Patch, Post, Req, UseGuards, NotFoundException } from '@nestjs/common';
 import { ArrayNotEmpty, IsArray, IsNotEmpty, IsOptional, IsString, IsUUID } from 'class-validator';
 import { Request } from 'express';
 import { TenantContext } from '../database/tenant-context';
@@ -6,9 +6,9 @@ import { DatabaseService } from '../database/database.service';
 import { CerbosGuard } from '../authz/cerbos.guard';
 import { CerbosCheck } from '../authz/cerbos-check.decorator';
 import { JobService } from './job.service';
-import { JobRecrutadorService } from './job-recrutador.service';
+import { JobRecrutadorService, RecrutadorInvalidoError } from './job-recrutador.service';
 
-class CreateJobDto {
+export class CreateJobDto {
   @IsUUID()
   requisitionId!: string;
 
@@ -24,7 +24,12 @@ class CreateJobDto {
 
   @IsOptional()
   @IsArray()
-  @IsString({ each: true })
+  // Item 3a da onda 2 de correção pós-revisão: mesmo achado I4 já corrigido
+  // em AtribuirRecrutadoresDto abaixo, mas que ficara aplicado só naquele
+  // DTO -- um id não-UUID aqui também passava direto para o INSERT em
+  // job_recrutador (via JobService.create -> JobRecrutadorService.atribuir)
+  // e estourava um 500 não tratado do Postgres (22P02).
+  @IsUUID('4', { each: true })
   recrutadorIds?: string[];
 }
 
@@ -114,15 +119,27 @@ export class JobController {
     // PAPEIS_COM_ACESSO_TOTAL), para recrutador é o que garante posse
     // imediata sobre a vaga recém-criada.
     const recrutadorIds = Array.from(new Set([req.userId, ...(dto.recrutadorIds ?? [])]));
-    return this.tenantContext.run(req.tenantId, (client) =>
-      this.jobService.create(client, {
-        tenantId: req.tenantId,
-        requisitionId: dto.requisitionId,
-        titulo: dto.titulo,
-        habilidadesExigidas: dto.habilidadesExigidas,
-        recrutadorIds,
-      }),
-    );
+    try {
+      return await this.tenantContext.run(req.tenantId, (client) =>
+        this.jobService.create(client, {
+          tenantId: req.tenantId,
+          requisitionId: dto.requisitionId,
+          titulo: dto.titulo,
+          habilidadesExigidas: dto.habilidadesExigidas,
+          recrutadorIds,
+        }),
+      );
+    } catch (err) {
+      // Item 3b da onda 2 de correção pós-revisão: ver comentário de
+      // RecrutadorInvalidoError em job-recrutador.service.ts. JobService.create
+      // chama JobRecrutadorService.atribuir internamente (mesma transação), então
+      // a violação da FK composta cross-tenant/inexistente também alcança este
+      // ponto de entrada, não só atribuirRecrutadores abaixo.
+      if (err instanceof RecrutadorInvalidoError) {
+        throw new BadRequestException(err.message);
+      }
+      throw err;
+    }
   }
 
   @Get(':id')
@@ -169,19 +186,28 @@ export class JobController {
     @Param('id') id: string,
     @Body() dto: AtribuirRecrutadoresDto,
   ) {
-    await this.tenantContext.run(req.tenantId, async (client) => {
-      await this.jobRecrutadorService.exigirAcesso(client, {
-        tenantId: req.tenantId,
-        jobId: id,
-        userId: req.userId,
-        userRoles: req.userRoles,
+    try {
+      await this.tenantContext.run(req.tenantId, async (client) => {
+        await this.jobRecrutadorService.exigirAcesso(client, {
+          tenantId: req.tenantId,
+          jobId: id,
+          userId: req.userId,
+          userRoles: req.userRoles,
+        });
+        await this.jobRecrutadorService.atribuir(client, {
+          tenantId: req.tenantId,
+          jobId: id,
+          recrutadorIds: dto.recrutadorIds,
+        });
       });
-      await this.jobRecrutadorService.atribuir(client, {
-        tenantId: req.tenantId,
-        jobId: id,
-        recrutadorIds: dto.recrutadorIds,
-      });
-    });
+    } catch (err) {
+      // Item 3b da onda 2 de correção pós-revisão: ver comentário de
+      // RecrutadorInvalidoError em job-recrutador.service.ts.
+      if (err instanceof RecrutadorInvalidoError) {
+        throw new BadRequestException(err.message);
+      }
+      throw err;
+    }
     return { id, recrutadorIds: dto.recrutadorIds };
   }
 
