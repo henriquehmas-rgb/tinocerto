@@ -1,5 +1,6 @@
 # apps/api/Dockerfile
 FROM node:20-slim AS base
+RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ && rm -rf /var/lib/apt/lists/*
 RUN corepack enable && corepack prepare pnpm@9.12.0 --activate
 
 FROM base AS deps
@@ -12,7 +13,7 @@ RUN pnpm install --frozen-lockfile
 
 FROM base AS builder
 WORKDIR /workspace
-COPY --from=deps /workspace/node_modules ./node_modules
+COPY --from=deps /workspace ./
 COPY . .
 RUN pnpm --filter @tinocerto/api build
 
