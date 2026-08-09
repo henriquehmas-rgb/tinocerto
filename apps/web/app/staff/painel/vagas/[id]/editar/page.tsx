@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Button, PanelLayout } from '@tinocerto/design-system';
-import { staffPanelClient } from '../../../../../../lib/staff-panel-client';
+import { staffPanelClient, PerfilStaff } from '../../../../../../lib/staff-panel-client';
 import { staffAuthClient, isErroDeAutenticacao } from '../../../../../../lib/staff-auth-client';
 
 function parseIds(texto: string): string[] {
@@ -12,6 +12,11 @@ function parseIds(texto: string): string[] {
     .map((id) => id.trim())
     .filter(Boolean);
 }
+
+const NAV_LINKS = [
+  { href: '/staff/painel', label: 'Dashboard' },
+  { href: '/staff/painel/vagas', label: 'Vagas' },
+];
 
 function arraysIguais(a: string[], b: string[]): boolean {
   return a.length === b.length && a.every((valor, indice) => valor === b[indice]);
@@ -30,11 +35,13 @@ export default function EditarVagaPage() {
   // para desabilitar o campo de recrutadores -- ver handleSubmit e o JSX
   // abaixo.
   const [carregamentoFalhou, setCarregamentoFalhou] = useState(false);
+  const [perfil, setPerfil] = useState<PerfilStaff | null>(null);
   // null enquanto a vaga não foi carregada com sucesso -- usado no submit
   // para decidir se é seguro chamar atribuirRecrutadores (ver handleSubmit).
   const recrutadorIdsIniciaisRef = useRef<string[] | null>(null);
 
   useEffect(() => {
+    staffPanelClient.obterPerfil().then(setPerfil).catch(() => {});
     staffPanelClient
       .obterVaga(params.id)
       .then((vaga) => {
@@ -98,7 +105,7 @@ export default function EditarVagaPage() {
   }
 
   return (
-    <PanelLayout nomeStaff="" nomeTenant="" onSair={handleSair}>
+    <PanelLayout nomeStaff={perfil?.email ?? ''} nomeTenant={perfil?.razaoSocial ?? ''} links={NAV_LINKS} onSair={handleSair}>
       <form onSubmit={handleSubmit} className="flex flex-col gap-4 max-w-md p-6">
         <h1 className="font-display text-xl">Editar vaga</h1>
         {erro && <p className="text-danger-text">{erro}</p>}

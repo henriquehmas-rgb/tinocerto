@@ -7,7 +7,7 @@ const pushMock = vi.fn();
 const routerMock = { push: pushMock };
 vi.mock('next/navigation', () => ({ useRouter: () => routerMock, useParams: () => ({ id: 'job-1' }) }));
 vi.mock('../../../../../../../lib/staff-panel-client', () => ({
-  staffPanelClient: { editarVaga: vi.fn(), atribuirRecrutadores: vi.fn(), obterVaga: vi.fn() },
+  staffPanelClient: { editarVaga: vi.fn(), atribuirRecrutadores: vi.fn(), obterVaga: vi.fn(), obterPerfil: vi.fn() },
 }));
 
 const vagaBase = {
@@ -25,6 +25,14 @@ describe('EditarVagaPage', () => {
 
   it('pré-preenche o formulário com os dados atuais da vaga', async () => {
     vi.mocked(staffPanelClient.obterVaga).mockResolvedValue(vagaBase);
+    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue({
+      userId: 'u1',
+      tenantId: 't1',
+      roles: ['admin_tenant'],
+      email: 'ana@empresa.example',
+      razaoSocial: 'Empresa Exemplo Ltda',
+    });
+
     render(<EditarVagaPage />);
 
     await waitFor(() => expect(screen.getByLabelText('Título')).toHaveValue('Engenheiro de Dados'));
@@ -36,6 +44,14 @@ describe('EditarVagaPage', () => {
   it('não chama atribuirRecrutadores quando o campo de recrutadores não é alterado ao salvar', async () => {
     vi.mocked(staffPanelClient.obterVaga).mockResolvedValue(vagaBase);
     vi.mocked(staffPanelClient.editarVaga).mockResolvedValue(undefined);
+    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue({
+      userId: 'u1',
+      tenantId: 't1',
+      roles: ['admin_tenant'],
+      email: 'ana@empresa.example',
+      razaoSocial: 'Empresa Exemplo Ltda',
+    });
+
     render(<EditarVagaPage />);
 
     await waitFor(() => expect(screen.getByLabelText('IDs dos recrutadores (separados por vírgula)')).toHaveValue('r1, r2'));
@@ -50,6 +66,14 @@ describe('EditarVagaPage', () => {
     vi.mocked(staffPanelClient.obterVaga).mockResolvedValue(vagaBase);
     vi.mocked(staffPanelClient.editarVaga).mockResolvedValue(undefined);
     vi.mocked(staffPanelClient.atribuirRecrutadores).mockResolvedValue(undefined);
+    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue({
+      userId: 'u1',
+      tenantId: 't1',
+      roles: ['admin_tenant'],
+      email: 'ana@empresa.example',
+      razaoSocial: 'Empresa Exemplo Ltda',
+    });
+
     render(<EditarVagaPage />);
 
     await waitFor(() => expect(screen.getByLabelText('IDs dos recrutadores (separados por vírgula)')).toHaveValue('r1, r2'));
@@ -66,6 +90,14 @@ describe('EditarVagaPage', () => {
   it('não chama atribuirRecrutadores quando o carregamento inicial da vaga falha (não perde ninguém por segurança)', async () => {
     vi.mocked(staffPanelClient.obterVaga).mockRejectedValue(new Error('Vaga não encontrada'));
     vi.mocked(staffPanelClient.editarVaga).mockResolvedValue(undefined);
+    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue({
+      userId: 'u1',
+      tenantId: 't1',
+      roles: ['admin_tenant'],
+      email: 'ana@empresa.example',
+      razaoSocial: 'Empresa Exemplo Ltda',
+    });
+
     render(<EditarVagaPage />);
 
     await waitFor(() => expect(staffPanelClient.obterVaga).toHaveBeenCalled());
@@ -77,6 +109,14 @@ describe('EditarVagaPage', () => {
 
   it('mostra erro e desabilita o campo de recrutadores quando o carregamento inicial da vaga falha por motivo genérico', async () => {
     vi.mocked(staffPanelClient.obterVaga).mockRejectedValue(new Error('Erro de rede'));
+    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue({
+      userId: 'u1',
+      tenantId: 't1',
+      roles: ['admin_tenant'],
+      email: 'ana@empresa.example',
+      razaoSocial: 'Empresa Exemplo Ltda',
+    });
+
     render(<EditarVagaPage />);
 
     await waitFor(() => expect(screen.getByText('Erro de rede')).toBeInTheDocument());
@@ -86,6 +126,14 @@ describe('EditarVagaPage', () => {
   it('não deixa a submissão passar batido sem tentar atribuir recrutadores digitados, quando o carregamento inicial falhou', async () => {
     vi.mocked(staffPanelClient.obterVaga).mockRejectedValue(new Error('Erro de rede'));
     vi.mocked(staffPanelClient.editarVaga).mockResolvedValue(undefined);
+    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue({
+      userId: 'u1',
+      tenantId: 't1',
+      roles: ['admin_tenant'],
+      email: 'ana@empresa.example',
+      razaoSocial: 'Empresa Exemplo Ltda',
+    });
+
     render(<EditarVagaPage />);
 
     await waitFor(() => expect(screen.getByText('Erro de rede')).toBeInTheDocument());
@@ -102,6 +150,14 @@ describe('EditarVagaPage', () => {
 
   it('redireciona para /staff/entrar quando o carregamento da vaga falha por sessão ausente', async () => {
     vi.mocked(staffPanelClient.obterVaga).mockRejectedValue(new Error('Usuário não autenticado'));
+    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue({
+      userId: 'u1',
+      tenantId: 't1',
+      roles: ['admin_tenant'],
+      email: 'ana@empresa.example',
+      razaoSocial: 'Empresa Exemplo Ltda',
+    });
+
     render(<EditarVagaPage />);
     await waitFor(() => expect(pushMock).toHaveBeenCalledWith('/staff/entrar'));
   });
@@ -109,6 +165,14 @@ describe('EditarVagaPage', () => {
   it('redireciona para /staff/entrar quando editarVaga falha por sessão expirada', async () => {
     vi.mocked(staffPanelClient.obterVaga).mockResolvedValue(vagaBase);
     vi.mocked(staffPanelClient.editarVaga).mockRejectedValue(new Error('Sessão expirada, faça login novamente'));
+    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue({
+      userId: 'u1',
+      tenantId: 't1',
+      roles: ['admin_tenant'],
+      email: 'ana@empresa.example',
+      razaoSocial: 'Empresa Exemplo Ltda',
+    });
+
     render(<EditarVagaPage />);
     await waitFor(() => expect(screen.getByLabelText('Título')).toHaveValue('Engenheiro de Dados'));
     fireEvent.click(screen.getByRole('button', { name: 'Salvar' }));
@@ -118,6 +182,14 @@ describe('EditarVagaPage', () => {
   it('mostra erro quando editarVaga falha', async () => {
     vi.mocked(staffPanelClient.obterVaga).mockResolvedValue(vagaBase);
     vi.mocked(staffPanelClient.editarVaga).mockRejectedValue(new Error('Vaga não encontrada'));
+    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue({
+      userId: 'u1',
+      tenantId: 't1',
+      roles: ['admin_tenant'],
+      email: 'ana@empresa.example',
+      razaoSocial: 'Empresa Exemplo Ltda',
+    });
+
     render(<EditarVagaPage />);
     await waitFor(() => expect(screen.getByLabelText('Título')).toHaveValue('Engenheiro de Dados'));
     fireEvent.click(screen.getByRole('button', { name: 'Salvar' }));

@@ -7,7 +7,7 @@ const pushMock = vi.fn();
 const routerMock = { push: pushMock };
 vi.mock('next/navigation', () => ({ useParams: () => ({ id: 'job-1' }), useRouter: () => routerMock }));
 vi.mock('../../../../../../lib/staff-panel-client', () => ({
-  staffPanelClient: { obterFunil: vi.fn(), moverEtapa: vi.fn() },
+  staffPanelClient: { obterFunil: vi.fn(), moverEtapa: vi.fn(), obterPerfil: vi.fn() },
 }));
 
 describe('FunilPage', () => {
@@ -21,6 +21,14 @@ describe('FunilPage', () => {
     vi.mocked(staffPanelClient.obterFunil).mockResolvedValue({
       triagem: [{ id: 'app-1', personId: 'person-1', nomeCandidato: 'Ana', criadoEm: '2026-08-01T00:00:00Z' }],
     });
+    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue({
+      userId: 'u1',
+      tenantId: 't1',
+      roles: ['admin_tenant'],
+      email: 'ana@empresa.example',
+      razaoSocial: 'Empresa Exemplo Ltda',
+    });
+
     render(<FunilPage />);
     await waitFor(() => expect(screen.getByText('Ana')).toBeInTheDocument());
   });
@@ -33,6 +41,14 @@ describe('FunilPage', () => {
     vi.mocked(staffPanelClient.obterFunil).mockResolvedValue({
       triagem: [{ id: 'app-1', personId: 'person-1', nomeCandidato: 'Ana', criadoEm: '2026-08-01T00:00:00Z' }],
     });
+    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue({
+      userId: 'u1',
+      tenantId: 't1',
+      roles: ['admin_tenant'],
+      email: 'ana@empresa.example',
+      razaoSocial: 'Empresa Exemplo Ltda',
+    });
+
     render(<FunilPage />);
     await waitFor(() => expect(screen.getByText('Ana')).toBeInTheDocument());
 
@@ -51,6 +67,14 @@ describe('FunilPage', () => {
         entrevista: [{ id: 'app-1', personId: 'person-1', nomeCandidato: 'Ana', criadoEm: '2026-08-01T00:00:00Z' }],
       });
     vi.mocked(staffPanelClient.moverEtapa).mockResolvedValue(undefined);
+    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue({
+      userId: 'u1',
+      tenantId: 't1',
+      roles: ['admin_tenant'],
+      email: 'ana@empresa.example',
+      razaoSocial: 'Empresa Exemplo Ltda',
+    });
+
     render(<FunilPage />);
     await waitFor(() => expect(screen.getByText('Ana')).toBeInTheDocument());
 
@@ -65,6 +89,14 @@ describe('FunilPage', () => {
 
   it('renderiza um link para editar a vaga apontando para a rota correta', async () => {
     vi.mocked(staffPanelClient.obterFunil).mockResolvedValue({});
+    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue({
+      userId: 'u1',
+      tenantId: 't1',
+      roles: ['admin_tenant'],
+      email: 'ana@empresa.example',
+      razaoSocial: 'Empresa Exemplo Ltda',
+    });
+
     render(<FunilPage />);
     const link = await screen.findByRole('link', { name: 'Editar vaga' });
     expect(link).toHaveAttribute('href', '/staff/painel/vagas/job-1/editar');
@@ -74,6 +106,14 @@ describe('FunilPage', () => {
     vi.mocked(staffPanelClient.obterFunil).mockResolvedValue({
       oferta: [{ id: 'app-2', personId: 'person-2', nomeCandidato: 'Bruno', criadoEm: '2026-08-01T00:00:00Z' }],
     });
+    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue({
+      userId: 'u1',
+      tenantId: 't1',
+      roles: ['admin_tenant'],
+      email: 'ana@empresa.example',
+      razaoSocial: 'Empresa Exemplo Ltda',
+    });
+
     render(<FunilPage />);
     await waitFor(() => expect(screen.getByText('Bruno')).toBeInTheDocument());
     expect(screen.getByText('Oferta')).toBeInTheDocument();
@@ -84,6 +124,14 @@ describe('FunilPage', () => {
 
   it('redireciona para /staff/entrar quando o carregamento do funil falha por sessão ausente', async () => {
     vi.mocked(staffPanelClient.obterFunil).mockRejectedValue(new Error('Usuário não autenticado'));
+    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue({
+      userId: 'u1',
+      tenantId: 't1',
+      roles: ['admin_tenant'],
+      email: 'ana@empresa.example',
+      razaoSocial: 'Empresa Exemplo Ltda',
+    });
+
     render(<FunilPage />);
     await waitFor(() => expect(pushMock).toHaveBeenCalledWith('/staff/entrar'));
   });

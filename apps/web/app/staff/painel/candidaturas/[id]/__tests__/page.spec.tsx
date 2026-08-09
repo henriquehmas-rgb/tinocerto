@@ -7,7 +7,7 @@ const pushMock = vi.fn();
 const routerMock = { push: pushMock };
 vi.mock('next/navigation', () => ({ useParams: () => ({ id: 'app-1' }), useRouter: () => routerMock }));
 vi.mock('../../../../../../lib/staff-panel-client', () => ({
-  staffPanelClient: { obterRelatorioAssessment: vi.fn(), obterCandidatura: vi.fn() },
+  staffPanelClient: { obterRelatorioAssessment: vi.fn(), obterCandidatura: vi.fn(), obterPerfil: vi.fn() },
 }));
 
 describe('CandidaturaPage', () => {
@@ -25,6 +25,14 @@ describe('CandidaturaPage', () => {
       criadoEm: '2026-08-01T00:00:00Z',
       person: { id: 'person-1', nome: 'Ana Souza', emailPrincipal: 'ana@example.com' },
     });
+    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue({
+      userId: 'u1',
+      tenantId: 't1',
+      roles: ['admin_tenant'],
+      email: 'ana@empresa.example',
+      razaoSocial: 'Empresa Exemplo Ltda',
+    });
+
     render(<CandidaturaPage />);
     await waitFor(() => expect(screen.getByText('80%')).toBeInTheDocument());
     expect(screen.getByText('Conscienciosidade')).toBeInTheDocument();
@@ -43,6 +51,14 @@ describe('CandidaturaPage', () => {
       criadoEm: '2026-08-01T00:00:00Z',
       person: { id: 'person-1', nome: 'Bruno Lima', emailPrincipal: 'bruno@example.com' },
     });
+    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue({
+      userId: 'u1',
+      tenantId: 't1',
+      roles: ['admin_tenant'],
+      email: 'ana@empresa.example',
+      razaoSocial: 'Empresa Exemplo Ltda',
+    });
+
     render(<CandidaturaPage />);
     await waitFor(() => expect(screen.getByText('Assessment ainda não concluído')).toBeInTheDocument());
     expect(screen.getByText('Bruno Lima')).toBeInTheDocument();
@@ -51,6 +67,14 @@ describe('CandidaturaPage', () => {
   it('redireciona para /staff/entrar quando o carregamento falha por sessão ausente', async () => {
     vi.mocked(staffPanelClient.obterRelatorioAssessment).mockRejectedValue(new Error('Usuário não autenticado'));
     vi.mocked(staffPanelClient.obterCandidatura).mockRejectedValue(new Error('Usuário não autenticado'));
+    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue({
+      userId: 'u1',
+      tenantId: 't1',
+      roles: ['admin_tenant'],
+      email: 'ana@empresa.example',
+      razaoSocial: 'Empresa Exemplo Ltda',
+    });
+
     render(<CandidaturaPage />);
     await waitFor(() => expect(pushMock).toHaveBeenCalledWith('/staff/entrar'));
   });
