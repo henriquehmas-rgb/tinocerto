@@ -1,5 +1,6 @@
 import { Test } from '@nestjs/testing';
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
+import { Pool } from 'pg';
 import { ApplicationController } from '../application.controller';
 import { ApplicationService } from '../application.service';
 import { PipelineStageTransitionService } from '../pipeline-stage-transition.service';
@@ -409,5 +410,203 @@ describe('ApplicationController', () => {
       expect(result.relatorio).toBeNull();
       expect(result.aderencia?.scoreAderencia).toBe(0.5);
     });
+  });
+});
+
+// ------------------------------------------------------------------
+// [Fase 5a, Task 4 -- fix round 1] Achado Important de revisão: a query de
+// result_grant dentro de assessmentReport() acima só era exercitada com
+// `fakeClient.query` mockado (`{ rows: [] }`) -- nunca rodava contra
+// Postgres de verdade. As 6 condições que ela reproduz manualmente da
+// constante compartilhada RESULT_GRANT_LIVE_EXISTS
+// (apps/api/src/talent/result-grant-predicate.ts) nunca eram avaliadas por
+// um SQL real, então um erro de digitação futuro num operador (ex.:
+// inverter `IS NULL`, trocar `>` por `<`) não seria pego por nenhum teste
+// -- só mitigado indiretamente pela revalidação que ReportService.gerar já
+// faz internamente (defesa em profundidade, não substituto de um teste
+// direto da query em si).
+//
+// Este describe usa um Pool `app_runtime` de VERDADE como
+// DatabaseService.pool -- igual ao padrão de report.service.spec.ts
+// (Fase 2a) -- para que o TenantContext que o controller monta no próprio
+// construtor rode a query de result_grant deste achado contra Postgres,
+// não um mock. ApplicationService (localização de application.jobId) e
+// ReportService.gerar (corpo do relatório em si, já coberto por
+// report.service.spec.ts) continuam mockados -- só a query de result_grant
+// definida em application.controller.ts é o alvo destes testes.
+// JobRecrutadorService é o serviço REAL (não mock): userRoles ['admin_tenant']
+// tem acesso total e retorna sem consultar o banco (ver
+// job-recrutador.service.ts), então dispensa fixture de job_recrutador.
+describe('ApplicationController — GET :id/assessment-report, result_grant contra Postgres real (Fase 5a, Task 4, fix round 1)', () => {
+  const adminPool = new Pool({ connectionString: process.env.DATABASE_URL });
+  const appUrl = new URL(process.env.DATABASE_URL!);
+  appUrl.username = 'app_runtime';
+  appUrl.password = 'app_runtime_dev_only';
+  const appPool = new Pool({ connectionString: appUrl.toString() });
+
+  // result_grant.application_id não tem FK para `application` (ver
+  // talent_0002__assessment_result_stub.sql) -- é seguro usar um uuid fixo
+  // sem precisar de uma linha real na tabela application.
+  const applicationId = 'b6e5c9a0-0000-4000-8000-000000000401';
+
+  let tenantId: string;
+  let personId: string;
+  let consentId: string;
+  let assessmentResultId: string;
+
+  beforeAll(async () => {
+    const t = await adminPool.query<{ id: string }>(
+      `INSERT INTO tenant (razao_social, cnpj, slug)
+       VALUES ('Empresa Assessment Report Grant', '00000000000401', 'test-tenant-00000000000401') RETURNING id`,
+    );
+    tenantId = t.rows[0].id;
+
+    const person = await adminPool.query<{ id: string }>(
+      `INSERT INTO person (cpf_hash, cpf_encriptado, nome, email_principal)
+       VALUES ('hash-assessment-report-grant','{"ciphertext":"x","iv":"y","authTag":"z","wrappedDek":"w"}','Grant Teste','grant-teste@example.com')
+       RETURNING id`,
+    );
+    personId = person.rows[0].id;
+
+    const consent = await adminPool.query<{ id: string }>(
+      `INSERT INTO consent (person_id, finalidade, base_legal)
+       VALUES ($1, 'reaproveitamento_resultado', 'consentimento_especifico') RETURNING id`,
+      [personId],
+    );
+    consentId = consent.rows[0].id;
+
+    // instrument_version_id não tem FK (mesmo raciocínio documentado em
+    // talent_0002__assessment_result_stub.sql) -- gen_random_uuid() basta.
+    const result = await adminPool.query<{ id: string }>(
+      `INSERT INTO assessment_result (person_id, instrument_version_id) VALUES ($1, gen_random_uuid()) RETURNING id`,
+      [personId],
+    );
+    assessmentResultId = result.rows[0].id;
+  });
+
+  afterEach(async () => {
+    await adminPool.query('DELETE FROM result_grant WHERE tenant_id = $1', [tenantId]);
+  });
+
+  afterAll(async () => {
+    await adminPool.query('DELETE FROM assessment_result WHERE id = $1', [assessmentResultId]);
+    await adminPool.query('DELETE FROM consent WHERE id = $1', [consentId]);
+    await adminPool.query('DELETE FROM person WHERE id = $1', [personId]);
+    await adminPool.query('DELETE FROM tenant WHERE id = $1', [tenantId]);
+    await adminPool.end();
+    await appPool.end();
+  });
+
+  async function conceder(extras: { revoked?: boolean; expirado?: boolean } = {}): Promise<void> {
+    await adminPool.query(
+      `INSERT INTO result_grant (assessment_result_id, tenant_id, application_id, consent_id, revoked_at, expires_at)
+       VALUES ($1,$2,$3,$4, CASE WHEN $5::boolean THEN now() ELSE NULL END,
+                            CASE WHEN $6::boolean THEN now() - interval '1 day' ELSE NULL END)`,
+      [assessmentResultId, tenantId, applicationId, consentId, extras.revoked ?? false, extras.expirado ?? false],
+    );
+  }
+
+  async function buildRealController(): Promise<{ controller: ApplicationController; reportGerarMock: jest.Mock }> {
+    const reportGerarMock = jest.fn().mockResolvedValue({ secoes: [], marker: 'relatorio-real' });
+    const moduleRef = await Test.createTestingModule({
+      controllers: [ApplicationController],
+      providers: [
+        {
+          provide: ApplicationService,
+          useValue: {
+            findByIdWithPersonView: jest.fn().mockResolvedValue({ id: applicationId, jobId: 'job-qualquer', person: { id: personId } }),
+          },
+        },
+        { provide: PipelineStageTransitionService, useValue: { moveStage: jest.fn() } },
+        { provide: DecisionService, useValue: { record: jest.fn() } },
+        { provide: OfferService, useValue: { extend: jest.fn(), listByApplication: jest.fn() } },
+        { provide: ApplicationStartedWorkService, useValue: { registrar: jest.fn() } },
+        JobRecrutadorService,
+        { provide: ReportService, useValue: { gerar: reportGerarMock } },
+        {
+          provide: AdherenceService,
+          useValue: {
+            porCandidatura: jest.fn().mockResolvedValue({ scoreAderencia: 0, skillsBatidas: [], skillsFaltantes: [], totalExigidas: 0 }),
+          },
+        },
+        // Pool app_runtime real -- é o que faz o TenantContext do
+        // controller (montado no próprio construtor a partir de
+        // databaseService.pool) rodar a query de result_grant contra
+        // Postgres de verdade, sob RLS, em vez de contra um fakeClient.
+        { provide: DatabaseService, useValue: { pool: appPool } },
+      ],
+    })
+      .overrideGuard(CerbosGuard)
+      .useValue({ canActivate: () => true })
+      .compile();
+
+    return { controller: moduleRef.get(ApplicationController), reportGerarMock };
+  }
+
+  function req() {
+    return { tenantId, userId: 'admin-real-1', userRoles: ['admin_tenant'] } as any;
+  }
+
+  it('1. grant vivo e consent válido -- relatorio não é null e reportService.gerar recebe o assessment_result_id certo', async () => {
+    await conceder();
+    const { controller, reportGerarMock } = await buildRealController();
+
+    const result = await controller.assessmentReport(req(), applicationId);
+
+    expect(reportGerarMock).toHaveBeenCalledWith(expect.anything(), assessmentResultId);
+    expect(result.relatorio).not.toBeNull();
+  });
+
+  it('2. grant revogado (revoked_at preenchido) -- relatorio é null', async () => {
+    await conceder({ revoked: true });
+    const { controller, reportGerarMock } = await buildRealController();
+
+    const result = await controller.assessmentReport(req(), applicationId);
+
+    expect(reportGerarMock).not.toHaveBeenCalled();
+    expect(result.relatorio).toBeNull();
+  });
+
+  it('3. grant expirado (expires_at no passado) -- relatorio é null', async () => {
+    await conceder({ expirado: true });
+    const { controller, reportGerarMock } = await buildRealController();
+
+    const result = await controller.assessmentReport(req(), applicationId);
+
+    expect(reportGerarMock).not.toHaveBeenCalled();
+    expect(result.relatorio).toBeNull();
+  });
+
+  it('4. consent com ttl_meses vencido -- relatorio é null, mesmo com grant vivo', async () => {
+    await conceder();
+    try {
+      await adminPool.query(
+        `UPDATE consent SET ttl_meses = 1, granted_at = now() - interval '2 months' WHERE id = $1`,
+        [consentId],
+      );
+
+      const { controller, reportGerarMock } = await buildRealController();
+      const result = await controller.assessmentReport(req(), applicationId);
+
+      expect(reportGerarMock).not.toHaveBeenCalled();
+      expect(result.relatorio).toBeNull();
+    } finally {
+      await adminPool.query(`UPDATE consent SET ttl_meses = NULL, granted_at = now() WHERE id = $1`, [consentId]);
+    }
+  });
+
+  it('5. consent revogado -- relatorio é null, mesmo com grant vivo e não expirado', async () => {
+    await conceder();
+    try {
+      await adminPool.query('UPDATE consent SET revoked_at = now() WHERE id = $1', [consentId]);
+
+      const { controller, reportGerarMock } = await buildRealController();
+      const result = await controller.assessmentReport(req(), applicationId);
+
+      expect(reportGerarMock).not.toHaveBeenCalled();
+      expect(result.relatorio).toBeNull();
+    } finally {
+      await adminPool.query('UPDATE consent SET revoked_at = NULL WHERE id = $1', [consentId]);
+    }
   });
 });
