@@ -34,7 +34,12 @@ export default function FunilPage() {
 
   return (
     <div className="p-6">
-      <h1 className="font-display text-xl mb-4">Funil</h1>
+      <div className="flex items-center justify-between mb-4">
+        <h1 className="font-display text-xl">Funil</h1>
+        <Link href={`/staff/painel/vagas/${params.id}/editar`} className="font-ui text-sm text-accent underline">
+          Editar vaga
+        </Link>
+      </div>
       {erro && <p className="text-danger">{erro}</p>}
       <KanbanBoard
         colunas={COLUNAS}

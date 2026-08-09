@@ -42,4 +42,11 @@ describe('FunilPage', () => {
     );
     expect(staffPanelClient.obterFunil).toHaveBeenCalledTimes(2);
   });
+
+  it('renderiza um link para editar a vaga apontando para a rota correta', async () => {
+    vi.mocked(staffPanelClient.obterFunil).mockResolvedValue({ triagem: [], entrevista: [] });
+    render(<FunilPage />);
+    const link = await screen.findByRole('link', { name: 'Editar vaga' });
+    expect(link).toHaveAttribute('href', '/staff/painel/vagas/job-1/editar');
+  });
 });
