@@ -105,6 +105,14 @@ export class JobController {
     );
   }
 
+
+  @Get('dashboard-metrics')
+  @CerbosCheck('job', 'read')
+  async dashboardMetrics(@Req() req: RequestWithAuthContext) {
+    return this.tenantContext.run(req.tenantId, (client) =>
+      this.jobService.obterMetricas(client, { tenantId: req.tenantId, userId: req.userId, userRoles: req.userRoles }),
+    );
+  }
   @Post()
   @CerbosCheck('job', 'create')
   async create(@Req() req: RequestWithAuthContext, @Body() dto: CreateJobDto) {

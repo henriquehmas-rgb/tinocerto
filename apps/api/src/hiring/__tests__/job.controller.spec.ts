@@ -46,6 +46,26 @@ describe('JobController', () => {
     expect(result).toHaveLength(1);
   });
 
+  it('GET dashboard-metrics delega para jobService.obterMetricas com tenantId/userId/userRoles da requisição', async () => {
+    const obterMetricasMock = jest.fn().mockResolvedValue({
+      vagasAtivas: 2,
+      vagasRascunho: 1,
+      candidaturasEmAndamento: 3,
+      porEstagio: { triagem: 3 },
+    });
+    const controller = await buildController({ obterMetricas: obterMetricasMock });
+    const req = { tenantId: 'tenant-1', userId: 'user-1', userRoles: ['recrutador'] } as any;
+
+    const result = await controller.dashboardMetrics(req);
+
+    expect(obterMetricasMock).toHaveBeenCalledWith(expect.anything(), {
+      tenantId: 'tenant-1',
+      userId: 'user-1',
+      userRoles: ['recrutador'],
+    });
+    expect(result.vagasAtivas).toBe(2);
+  });
+
   it('POST :id/actions/atribuir-recrutadores delega para jobRecrutadorService.exigirAcesso e atribuir', async () => {
     const exigirAcessoMock = jest.fn().mockResolvedValue(undefined);
     const atribuirMock = jest.fn().mockResolvedValue(undefined);

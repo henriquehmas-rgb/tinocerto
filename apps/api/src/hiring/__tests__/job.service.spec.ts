@@ -327,6 +327,118 @@ describe('JobService', () => {
     });
   });
 
+  describe('obterMetricas', () => {
+    let vagaPublicadaId: string;
+    let vagaRascunhoId: string;
+    let vagaNaoAtribuidaId: string;
+    let recrutadorId: string;
+    let personTriagemId: string;
+    let personEntrevistaId: string;
+    const adminId = '00000000-0000-0000-0000-000000000098';
+
+    beforeAll(async () => {
+      const vagaPublicada = await adminPool.query<{ id: string }>(
+        `INSERT INTO job (tenant_id, requisition_id, titulo, seo_slug, publicado_em) VALUES ($1, $2, 'Vaga Métricas Publicada', 'vaga-metricas-publicada-0018', now()) RETURNING id`,
+        [tenantId, requisitionId],
+      );
+      vagaPublicadaId = vagaPublicada.rows[0].id;
+      const vagaRascunho = await adminPool.query<{ id: string }>(
+        `INSERT INTO job (tenant_id, requisition_id, titulo, seo_slug) VALUES ($1, $2, 'Vaga Métricas Rascunho', 'vaga-metricas-rascunho-0018') RETURNING id`,
+        [tenantId, requisitionId],
+      );
+      vagaRascunhoId = vagaRascunho.rows[0].id;
+      const vagaNaoAtribuida = await adminPool.query<{ id: string }>(
+        `INSERT INTO job (tenant_id, requisition_id, titulo, seo_slug, publicado_em) VALUES ($1, $2, 'Vaga Métricas Não Atribuída', 'vaga-metricas-nao-atribuida-0018', now()) RETURNING id`,
+        [tenantId, requisitionId],
+      );
+      vagaNaoAtribuidaId = vagaNaoAtribuida.rows[0].id;
+
+      const staff = await adminPool.query<{ id: string }>(
+        `INSERT INTO user_account (tenant_id, email) VALUES ($1, 'recrutador-metricas@empresa-018.example') RETURNING id`,
+        [tenantId],
+      );
+      recrutadorId = staff.rows[0].id;
+      await adminPool.query(`INSERT INTO job_recrutador (job_id, tenant_id, staff_id) VALUES ($1, $2, $3)`, [
+        vagaPublicadaId,
+        tenantId,
+        recrutadorId,
+      ]);
+      await adminPool.query(`INSERT INTO job_recrutador (job_id, tenant_id, staff_id) VALUES ($1, $2, $3)`, [
+        vagaRascunhoId,
+        tenantId,
+        recrutadorId,
+      ]);
+
+      const person = await adminPool.query<{ id: string }>(
+        `INSERT INTO person (cpf_hash, cpf_encriptado, nome, email_principal)
+         VALUES ('hash-metricas-001', '{"ciphertext":"x","iv":"y","authTag":"z","wrappedDek":"w"}', 'Dora Métricas', 'dora.metricas@example.com')
+         RETURNING id`,
+      );
+      personTriagemId = person.rows[0].id;
+      await adminPool.query(
+        `INSERT INTO application (tenant_id, job_id, person_id, etapa_funil) VALUES ($1, $2, $3, 'triagem')`,
+        [tenantId, vagaPublicadaId, person.rows[0].id],
+      );
+      const person2 = await adminPool.query<{ id: string }>(
+        `INSERT INTO person (cpf_hash, cpf_encriptado, nome, email_principal)
+         VALUES ('hash-metricas-002', '{"ciphertext":"x","iv":"y","authTag":"z","wrappedDek":"w"}', 'Elias Métricas', 'elias.metricas@example.com')
+         RETURNING id`,
+      );
+      personEntrevistaId = person2.rows[0].id;
+      await adminPool.query(
+        `INSERT INTO application (tenant_id, job_id, person_id, etapa_funil) VALUES ($1, $2, $3, 'entrevista')`,
+        [tenantId, vagaNaoAtribuidaId, person2.rows[0].id],
+      );
+    });
+
+    afterAll(async () => {
+      await adminPool.query('DELETE FROM application WHERE job_id = ANY($1)', [
+        [vagaPublicadaId, vagaNaoAtribuidaId],
+      ]);
+      await adminPool.query('DELETE FROM person WHERE id = ANY($1)', [
+        [personTriagemId, personEntrevistaId],
+      ]);
+      await adminPool.query('DELETE FROM job_recrutador WHERE tenant_id = $1 AND staff_id = $2', [
+        tenantId,
+        recrutadorId,
+      ]);
+      await adminPool.query('DELETE FROM user_account WHERE id = $1', [recrutadorId]);
+      await adminPool.query('DELETE FROM job WHERE id = ANY($1)', [
+        [vagaPublicadaId, vagaRascunhoId, vagaNaoAtribuidaId],
+      ]);
+    });
+
+    it('agrega vagas ativas/rascunho e candidaturas por estágio para admin_tenant (vê tudo)', async () => {
+      const ctx = new TenantContext(appPool);
+      const service = new JobService(new RequisitionService(), new JobRecrutadorService());
+
+      const metricas = await ctx.run(tenantId, (client) =>
+        service.obterMetricas(client, { tenantId, userId: adminId, userRoles: ['admin_tenant'] }),
+      );
+
+      expect(metricas.vagasAtivas).toBeGreaterThanOrEqual(2);
+      expect(metricas.vagasRascunho).toBeGreaterThanOrEqual(1);
+      expect(metricas.candidaturasEmAndamento).toBeGreaterThanOrEqual(2);
+      expect(metricas.porEstagio.triagem).toBeGreaterThanOrEqual(1);
+      expect(metricas.porEstagio.entrevista).toBeGreaterThanOrEqual(1);
+    });
+
+    it('agrega só as vagas atribuídas para um recrutador puro', async () => {
+      const ctx = new TenantContext(appPool);
+      const service = new JobService(new RequisitionService(), new JobRecrutadorService());
+
+      const metricas = await ctx.run(tenantId, (client) =>
+        service.obterMetricas(client, { tenantId, userId: recrutadorId, userRoles: ['recrutador'] }),
+      );
+
+      expect(metricas.vagasAtivas).toBe(1);
+      expect(metricas.vagasRascunho).toBe(1);
+      expect(metricas.candidaturasEmAndamento).toBe(1);
+      expect(metricas.porEstagio).toEqual({ triagem: 1 });
+    });
+  });
+
+
   describe('editar', () => {
     it('atualiza titulo, descricao e habilidadesExigidas da vaga', async () => {
       const ctx = new TenantContext(appPool);

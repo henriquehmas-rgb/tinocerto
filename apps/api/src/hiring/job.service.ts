@@ -53,6 +53,13 @@ export interface CandidaturaResumo {
   criadoEm: Date;
 }
 
+export interface DashboardMetricas {
+  vagasAtivas: number;
+  vagasRascunho: number;
+  candidaturasEmAndamento: number;
+  porEstagio: Record<string, number>;
+}
+
 @Injectable()
 export class JobService {
   private readonly outbox = new OutboxService();
@@ -178,6 +185,51 @@ export class JobService {
       });
     }
     return funil;
+  }
+
+  async obterMetricas(client: PoolClient, input: ListarJobsInput): Promise<DashboardMetricas> {
+    // Mesma lógica de posse de `listar` (Fase 5a, fix I5): qualquer papel
+    // fora de PAPEIS_COM_ACESSO_TOTAL é tratado como recrutador puro.
+    const somenteRecrutador = !input.userRoles.some((papel) => PAPEIS_COM_ACESSO_TOTAL.includes(papel));
+
+    const vagasQuery = somenteRecrutador
+      ? `SELECT
+           COUNT(*) FILTER (WHERE j.publicado_em IS NOT NULL) AS vagas_ativas,
+           COUNT(*) FILTER (WHERE j.publicado_em IS NULL) AS vagas_rascunho
+         FROM job j
+         JOIN job_recrutador jr ON jr.job_id = j.id AND jr.tenant_id = j.tenant_id
+         WHERE j.tenant_id = $1 AND jr.staff_id = $2`
+      : `SELECT
+           COUNT(*) FILTER (WHERE publicado_em IS NOT NULL) AS vagas_ativas,
+           COUNT(*) FILTER (WHERE publicado_em IS NULL) AS vagas_rascunho
+         FROM job WHERE tenant_id = $1`;
+    const vagasParams = somenteRecrutador ? [input.tenantId, input.userId] : [input.tenantId];
+    const vagasResult = await client.query<{ vagas_ativas: string; vagas_rascunho: string }>(vagasQuery, vagasParams);
+
+    const estagioQuery = somenteRecrutador
+      ? `SELECT a.etapa_funil, COUNT(*) AS total
+         FROM application a
+         JOIN job_recrutador jr ON jr.job_id = a.job_id AND jr.tenant_id = a.tenant_id
+         WHERE a.tenant_id = $1 AND jr.staff_id = $2
+         GROUP BY a.etapa_funil`
+      : `SELECT etapa_funil, COUNT(*) AS total FROM application WHERE tenant_id = $1 GROUP BY etapa_funil`;
+    const estagioParams = somenteRecrutador ? [input.tenantId, input.userId] : [input.tenantId];
+    const estagioResult = await client.query<{ etapa_funil: string; total: string }>(estagioQuery, estagioParams);
+
+    const porEstagio: Record<string, number> = {};
+    let candidaturasEmAndamento = 0;
+    for (const row of estagioResult.rows) {
+      const total = Number(row.total);
+      porEstagio[row.etapa_funil] = total;
+      candidaturasEmAndamento += total;
+    }
+
+    return {
+      vagasAtivas: Number(vagasResult.rows[0].vagas_ativas),
+      vagasRascunho: Number(vagasResult.rows[0].vagas_rascunho),
+      candidaturasEmAndamento,
+      porEstagio,
+    };
   }
 
   async editar(client: PoolClient, input: EditarJobInput): Promise<void> {
