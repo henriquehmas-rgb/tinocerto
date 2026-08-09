@@ -247,7 +247,10 @@ export class StaffAuthController {
   // consulta ao banco é necessária.
   @Get('me')
   async me(@Req() req: RequestWithAuthContext) {
-    return { userId: req.userId, tenantId: req.tenantId, roles: req.userRoles };
+    return this.tenantContext.run(req.tenantId, async (client) => {
+      const perfil = await this.accountService.getPerfil(client, req.userId, req.tenantId);
+      return { userId: req.userId, tenantId: req.tenantId, roles: req.userRoles, email: perfil.email, razaoSocial: perfil.razaoSocial };
+    });
   }
 
   @Post('logout')

@@ -82,6 +82,17 @@ export class StaffAccountService {
     return rolesResult.rows.map((r) => r.nome);
   }
 
+  async getPerfil(client: PoolClient, userId: string, tenantId: string): Promise<{ email: string; razaoSocial: string }> {
+    const result = await client.query<{ email: string; razao_social: string }>(
+      `SELECT ua.email, t.razao_social FROM user_account ua JOIN tenant t ON t.id = ua.tenant_id WHERE ua.id = $1 AND ua.tenant_id = $2`,
+      [userId, tenantId],
+    );
+    if (result.rows.length === 0) {
+      throw new UnauthorizedException(`Usuário ${userId} não encontrado no tenant ${tenantId}`);
+    }
+    return { email: result.rows[0].email, razaoSocial: result.rows[0].razao_social };
+  }
+
   // Task 7: MfaService.gerarSetup/gerarBackupCodes cifram o segredo/códigos
   // TOTP, mas quem persiste em `user_account` é este service -- único ponto
   // de acesso a essa tabela, mesmo padrão de todo outro controller do

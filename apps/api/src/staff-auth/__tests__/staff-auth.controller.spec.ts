@@ -425,8 +425,10 @@ describe('StaffAuthController', () => {
 
   // I1 da revisão de coerência do Painel do Recrutador: recrutador não
   // tinha nenhum jeito de descobrir o próprio userId de staff.
-  it('GET me devolve userId/tenantId/roles direto do JWT decodificado (sem tocar banco)', async () => {
-    const controller = await build();
+  // Task 3: agora me() também retorna email e razaoSocial da conta.
+  it('GET me devolve userId/tenantId/roles mais email/razaoSocial', async () => {
+    const getPerfil = jest.fn().mockResolvedValue({ email: 'recrutador@empresa.example', razaoSocial: 'Empresa Exemplo' });
+    const controller = await build({ accountService: { getPerfil } });
 
     const result = await controller.me({
       tenantId: 'tenant-1',
@@ -434,6 +436,21 @@ describe('StaffAuthController', () => {
       userRoles: ['recrutador'],
     } as never);
 
-    expect(result).toEqual({ userId: 'user-1', tenantId: 'tenant-1', roles: ['recrutador'] });
+    expect(getPerfil).toHaveBeenCalledWith(expect.anything(), 'user-1', 'tenant-1');
+    expect(result).toEqual({ userId: 'user-1', tenantId: 'tenant-1', roles: ['recrutador'], email: 'recrutador@empresa.example', razaoSocial: 'Empresa Exemplo' });
+  });
+  it('me devolve userId/tenantId/roles do request mais email/razaoSocial de StaffAccountService.getPerfil', async () => {
+    const getPerfil = jest.fn().mockResolvedValue({ email: 'ana@empresa.example', razaoSocial: 'Empresa Exemplo Ltda' });
+    const controller = await build({ accountService: { getPerfil } });
+    const req = { tenantId: 'tenant-1', userId: 'user-1', userRoles: ['admin_tenant'] } as any;
+    const result = await controller.me(req);
+    expect(getPerfil).toHaveBeenCalledWith(expect.anything(), 'user-1', 'tenant-1');
+    expect(result).toEqual({
+      userId: 'user-1',
+      tenantId: 'tenant-1',
+      roles: ['admin_tenant'],
+      email: 'ana@empresa.example',
+      razaoSocial: 'Empresa Exemplo Ltda',
+    });
   });
 });
