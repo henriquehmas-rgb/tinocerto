@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { DatabaseModule } from '../database/database.module';
 import { HiringModule } from '../hiring/hiring.module';
+import { JobRecrutadorService } from '../hiring/job-recrutador.service';
 import { ApplicationService } from '../hiring/application.service';
 import { EnvelopeEncryptionService } from '../talent/envelope-encryption.service';
 import { AuditLogService } from '../trust/audit-log.service';
@@ -28,6 +29,12 @@ import { GoogleCalendarConnectionController } from './scheduling/google-calendar
     GoogleCalendarConnectionController,
   ],
   providers: [
+    // JobRecrutadorService (onda 3 de correcao pos-revisao, Item 3): mesma
+    // convencao ja usada em copilot.module.ts/matching.module.ts/insights.module.ts
+    // -- HiringModule NAO exporta JobRecrutadorService, entao cada modulo que
+    // precisa checar posse por recrutador registra sua propria instancia local
+    // (sem dependencias, seguro de instanciar por modulo).
+    JobRecrutadorService,
     CompetencyService,
     InterviewGuideService,
     InterviewScheduleService,
