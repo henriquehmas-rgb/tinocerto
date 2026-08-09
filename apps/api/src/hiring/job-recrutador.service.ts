@@ -14,7 +14,7 @@ export interface ExigirAcessoInput {
   userRoles: string[];
 }
 
-const PAPEIS_COM_ACESSO_TOTAL = ['admin_tenant', 'gestor_vaga'];
+export const PAPEIS_COM_ACESSO_TOTAL = ['admin_tenant', 'gestor_vaga'];
 
 @Injectable()
 export class JobRecrutadorService {

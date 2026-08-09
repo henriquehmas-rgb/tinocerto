@@ -5,7 +5,7 @@ import { OutboxService } from '../outbox/outbox.service';
 import { nextOutboxSequence } from '../outbox/next-outbox-sequence';
 import { generateSeoSlug } from './seo-slug';
 import { RequisitionService } from './requisition.service';
-import { JobRecrutadorService } from './job-recrutador.service';
+import { JobRecrutadorService, PAPEIS_COM_ACESSO_TOTAL } from './job-recrutador.service';
 import { classifySensitiveCategories } from './compliance/sensitive-category-linter';
 
 export interface CreateJobInput {
@@ -25,6 +25,15 @@ export interface ListarJobsInput {
 export interface JobResumo {
   id: string;
   titulo: string;
+  publicadoEm: Date | null;
+  criadoEm: Date;
+}
+
+export interface JobDetail {
+  id: string;
+  titulo: string;
+  descricao: string;
+  habilidadesExigidas: string[];
   publicadoEm: Date | null;
   criadoEm: Date;
 }
@@ -88,9 +97,16 @@ export class JobService {
   }
 
   async listar(client: PoolClient, input: ListarJobsInput): Promise<JobResumo[]> {
-    const somenteRecrutador =
-      input.userRoles.includes('recrutador') &&
-      !input.userRoles.some((papel) => ['admin_tenant', 'gestor_vaga'].includes(papel));
+    // Mesma lógica conservadora de JobRecrutadorService.exigirAcesso (Fase
+    // 5a, fix I5): qualquer papel que NÃO esteja em PAPEIS_COM_ACESSO_TOTAL
+    // (admin_tenant, gestor_vaga) é tratado como precisando de posse
+    // (job_recrutador) para ver a vaga -- não apenas o papel "recrutador"
+    // especificamente. Hoje só esses 3 papéis alcançam esta rota, então o
+    // comportamento observável não muda; a diferença só aparece se um papel
+    // novo (ex.: entrevistador) ganhar acesso de leitura no futuro sem
+    // posse -- antes essa combinação veria TODAS as vagas do tenant (bug),
+    // agora seria filtrada como um recrutador puro.
+    const somenteRecrutador = !input.userRoles.some((papel) => PAPEIS_COM_ACESSO_TOTAL.includes(papel));
 
     const query = somenteRecrutador
       ? `SELECT j.id, j.titulo, j.publicado_em, j.criado_em FROM job j
@@ -109,6 +125,31 @@ export class JobService {
       publicadoEm: row.publicado_em,
       criadoEm: row.criado_em,
     }));
+  }
+
+  async findById(client: PoolClient, input: { tenantId: string; jobId: string }): Promise<JobDetail | null> {
+    const result = await client.query<{
+      id: string;
+      titulo: string;
+      descricao: string;
+      habilidades_exigidas: string[];
+      publicado_em: Date | null;
+      criado_em: Date;
+    }>(
+      `SELECT id, titulo, descricao, habilidades_exigidas, publicado_em, criado_em
+       FROM job WHERE id = $1 AND tenant_id = $2`,
+      [input.jobId, input.tenantId],
+    );
+    if (result.rows.length === 0) return null;
+    const row = result.rows[0];
+    return {
+      id: row.id,
+      titulo: row.titulo,
+      descricao: row.descricao,
+      habilidadesExigidas: row.habilidades_exigidas,
+      publicadoEm: row.publicado_em,
+      criadoEm: row.criado_em,
+    };
   }
 
   async funil(client: PoolClient, input: { tenantId: string; jobId: string }): Promise<Record<string, CandidaturaResumo[]>> {
