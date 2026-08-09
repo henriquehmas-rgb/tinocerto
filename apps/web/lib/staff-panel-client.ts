@@ -16,6 +16,13 @@ export interface CriarVagaInput {
   recrutadorIds?: string[];
 }
 
+export interface CandidaturaResumo {
+  id: string;
+  personId: string;
+  nomeCandidato: string;
+  criadoEm: string;
+}
+
 async function tratarResposta<T>(response: Response, mensagemErroPadrao: string): Promise<T> {
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
@@ -55,5 +62,19 @@ export const staffPanelClient = {
       body: JSON.stringify(input),
     });
     await tratarResposta(response, 'Não foi possível editar a vaga');
+  },
+
+  async obterFunil(jobId: string): Promise<Record<string, CandidaturaResumo[]>> {
+    const response = await staffAuthClient.authenticatedFetch(`/v1/jobs/${jobId}/funil`);
+    return tratarResposta(response, 'Não foi possível carregar o funil');
+  },
+
+  async moverEtapa(applicationId: string, toState: string): Promise<void> {
+    const response = await staffAuthClient.authenticatedFetch(`/v1/applications/${applicationId}/actions/move-stage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ toState }),
+    });
+    await tratarResposta(response, 'Não foi possível mover a candidatura');
   },
 };
