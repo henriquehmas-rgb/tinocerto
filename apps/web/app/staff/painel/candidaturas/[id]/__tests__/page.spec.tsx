@@ -14,7 +14,7 @@ describe('CandidaturaPage', () => {
   it('mostra o score de aderência e as dimensões do relatório quando disponíveis', async () => {
     vi.mocked(staffPanelClient.obterRelatorioAssessment).mockResolvedValue({
       relatorio: { secoes: [{ dimensao: 'conscienciosidade', titulo: 'Conscienciosidade', estimativaTheta: 0.6 }] },
-      aderencia: { scoreAderencia: 0.8, skillsBatidas: ['SQL'], skillsFaltantes: ['Python'] },
+      aderencia: { scoreAderencia: 80, skillsBatidas: ['SQL'], skillsFaltantes: ['Python'] },
     });
     render(<CandidaturaPage />);
     await waitFor(() => expect(screen.getByText('80%')).toBeInTheDocument());

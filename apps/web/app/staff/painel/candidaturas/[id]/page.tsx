@@ -23,7 +23,7 @@ export default function CandidaturaPage() {
       {erro && <p className="text-danger">{erro}</p>}
       {dados && (
         <ScoreChart
-          scoreGeral={dados.aderencia?.scoreAderencia ?? null}
+          scoreGeral={dados.aderencia?.scoreAderencia != null ? dados.aderencia.scoreAderencia / 100 : null}
           dimensoes={dados.relatorio?.secoes ?? []}
         />
       )}
