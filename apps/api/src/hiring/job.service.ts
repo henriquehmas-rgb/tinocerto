@@ -27,6 +27,7 @@ export interface JobResumo {
   titulo: string;
   publicadoEm: Date | null;
   criadoEm: Date;
+  contagemCandidaturas: number;
 }
 
 export interface JobDetail {
@@ -116,21 +117,29 @@ export class JobService {
     const somenteRecrutador = !input.userRoles.some((papel) => PAPEIS_COM_ACESSO_TOTAL.includes(papel));
 
     const query = somenteRecrutador
-      ? `SELECT j.id, j.titulo, j.publicado_em, j.criado_em FROM job j
+      ? `SELECT j.id, j.titulo, j.publicado_em, j.criado_em,
+           (SELECT COUNT(*) FROM application a WHERE a.job_id = j.id) AS contagem_candidaturas
+         FROM job j
          JOIN job_recrutador jr ON jr.job_id = j.id AND jr.tenant_id = j.tenant_id
          WHERE j.tenant_id = $1 AND jr.staff_id = $2 ORDER BY j.criado_em DESC`
-      : `SELECT id, titulo, publicado_em, criado_em FROM job WHERE tenant_id = $1 ORDER BY criado_em DESC`;
+      : `SELECT id, titulo, publicado_em, criado_em,
+           (SELECT COUNT(*) FROM application a WHERE a.job_id = job.id) AS contagem_candidaturas
+         FROM job WHERE tenant_id = $1 ORDER BY criado_em DESC`;
     const params = somenteRecrutador ? [input.tenantId, input.userId] : [input.tenantId];
 
-    const result = await client.query<{ id: string; titulo: string; publicado_em: Date | null; criado_em: Date }>(
-      query,
-      params,
-    );
+    const result = await client.query<{
+      id: string;
+      titulo: string;
+      publicado_em: Date | null;
+      criado_em: Date;
+      contagem_candidaturas: string;
+    }>(query, params);
     return result.rows.map((row) => ({
       id: row.id,
       titulo: row.titulo,
       publicadoEm: row.publicado_em,
       criadoEm: row.criado_em,
+      contagemCandidaturas: Number(row.contagem_candidaturas),
     }));
   }
 

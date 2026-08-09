@@ -227,9 +227,20 @@ describe('JobService', () => {
         tenantId,
         recrutadorId,
       ]);
+      const person = await adminPool.query<{ id: string }>(
+        `INSERT INTO person (cpf_hash, cpf_encriptado, nome, email_principal)
+         VALUES ('hash-listar-contagem', '{"ciphertext":"x","iv":"y","authTag":"z","wrappedDek":"w"}', 'Fabio Contagem', 'fabio.contagem@example.com')
+         RETURNING id`,
+      );
+      await adminPool.query(
+        `INSERT INTO application (tenant_id, job_id, person_id, etapa_funil) VALUES ($1, $2, $3, 'triagem')`,
+        [tenantId, vagaAtribuidaId, person.rows[0].id],
+      );
     });
 
     afterAll(async () => {
+      await adminPool.query('DELETE FROM application WHERE job_id = $1', [vagaAtribuidaId]);
+      await adminPool.query('DELETE FROM person WHERE cpf_hash = $1', ['hash-listar-contagem']);
       await adminPool.query('DELETE FROM job_recrutador WHERE tenant_id = $1 AND staff_id = $2', [
         tenantId,
         recrutadorId,
@@ -261,7 +272,7 @@ describe('JobService', () => {
         service.listar(client, { tenantId, userId: recrutadorId, userRoles: ['recrutador'] }),
       );
 
-      expect(vagas.map((v) => v.id)).toEqual([vagaAtribuidaId]);
+      expect(vagas).toEqual([expect.objectContaining({ id: vagaAtribuidaId, contagemCandidaturas: 1 })]);
     });
   });
 
