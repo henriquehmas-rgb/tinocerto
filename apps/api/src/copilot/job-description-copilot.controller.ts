@@ -6,6 +6,7 @@ import { DatabaseService } from '../database/database.service';
 import { CerbosGuard } from '../authz/cerbos.guard';
 import { CerbosCheck } from '../authz/cerbos-check.decorator';
 import { ModelRouterUnavailableError } from '../llm-router/model-router.types';
+import { JobRecrutadorService } from '../hiring/job-recrutador.service';
 import {
   JobDescriptionCopilotService,
   JobNotFoundError,
@@ -26,14 +27,37 @@ export class JobDescriptionCopilotController {
 
   constructor(
     private readonly service: JobDescriptionCopilotService,
+    private readonly jobRecrutadorService: JobRecrutadorService,
     databaseService: DatabaseService,
   ) {
     this.tenantContext = new TenantContext(databaseService.pool);
   }
 
+  // Achado Critical da revisão de segurança da onda 2: este controller não
+  // tinha NENHUMA chamada a exigirAcesso -- um recrutador sem atribuição
+  // podia gerar sugestão, listar sugestões e aplicar uma sugestão (reescrever
+  // a descrição) de QUALQUER vaga do tenant. Diferente de
+  // CandidateSummaryController (que parte de applicationId e precisa
+  // resolver o jobId via ApplicationService), as 3 rotas aqui já operam
+  // sobre um jobId que vem direto do param da rota -- não precisa de lookup
+  // adicional. Roda numa TenantContext.run PRÓPRIA (conexão separada da que
+  // service.sugerir()/aplicar() abrem internamente), mesmo padrão de
+  // CandidateSummaryController.exigirPosseDaCandidatura.
+  private async exigirPosseDaVaga(req: RequestWithAuthContext, jobId: string): Promise<void> {
+    await this.tenantContext.run(req.tenantId, (client) =>
+      this.jobRecrutadorService.exigirAcesso(client, {
+        tenantId: req.tenantId,
+        jobId,
+        userId: req.userId,
+        userRoles: req.userRoles,
+      }),
+    );
+  }
+
   @Post()
   @CerbosCheck('job', 'rewrite_description')
   async gerar(@Req() req: RequestWithAuthContext, @Param('jobId') jobId: string) {
+    await this.exigirPosseDaVaga(req, jobId);
     try {
       return await this.service.sugerir({ tenantId: req.tenantId, jobId, actorId: req.userId });
     } catch (err) {
@@ -48,6 +72,7 @@ export class JobDescriptionCopilotController {
   @Get()
   @CerbosCheck('job', 'read')
   async listar(@Req() req: RequestWithAuthContext, @Param('jobId') jobId: string) {
+    await this.exigirPosseDaVaga(req, jobId);
     return this.tenantContext.run(req.tenantId, (client) => this.service.listar(client, req.tenantId, jobId));
   }
 
@@ -58,6 +83,7 @@ export class JobDescriptionCopilotController {
     @Param('jobId') jobId: string,
     @Param('suggestionId') suggestionId: string,
   ) {
+    await this.exigirPosseDaVaga(req, jobId);
     try {
       return await this.service.aplicar({ tenantId: req.tenantId, jobId, suggestionId, actorId: req.userId });
     } catch (err) {

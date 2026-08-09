@@ -216,25 +216,32 @@ export class ApplicationController {
   }
 
   @Post(':id/actions/reject')
-  // TODO(fase-5b?): esta rota (e extend-offer/offers/mark-started-work
-  // abaixo) ainda não tem a guarda de posse por recrutador aplicada em
-  // findOne/moveStage/assessment-report (Fase 5a, Task 4) -- ficaram fora
-  // do escopo desta task por não serem consumidas pelo painel nesta
-  // sub-fase. Replicar o mesmo padrão (buscar application.jobId via
-  // findByIdWithPersonView, chamar jobRecrutadorService.exigirAcesso, só
-  // então delegar) quando essas ações ganharem UI no painel.
   @CerbosCheck('application', 'reject')
   async reject(@Req() req: RequestWithAuthContext, @Param('id') id: string, @Body() dto: RejectApplicationDto) {
     try {
-      return await this.tenantContext.run(req.tenantId, (client) =>
-        this.decisionService.record(client, {
+      return await this.tenantContext.run(req.tenantId, async (client) => {
+        const view = await this.applicationService.findByIdWithPersonView(client, id);
+        if (!view) {
+          throw new NotFoundException(`Candidatura ${id} não encontrada`);
+        }
+        // Guarda de posse por recrutador (Fase 5a, Task 4; achado Critical
+        // da revisão da onda 1 -- esta rota é explorável diretamente pela
+        // API, independente de estar consumida pelo painel ou não). Mesmo
+        // padrão de findOne/moveStage/assessment-report acima.
+        await this.jobRecrutadorService.exigirAcesso(client, {
+          tenantId: req.tenantId,
+          jobId: view.jobId,
+          userId: req.userId,
+          userRoles: req.userRoles,
+        });
+        return this.decisionService.record(client, {
           tenantId: req.tenantId,
           applicationId: id,
           tipo: 'reprovacao',
           motivoCodigo: dto.motivoCodigo,
           decidoPor: req.userId,
-        }),
-      );
+        });
+      });
     } catch (err) {
       // Ver comentário de isForeignKeyViolation no topo do arquivo.
       if (isForeignKeyViolation(err, 'fk_decision_tenant_application')) {
@@ -248,14 +255,26 @@ export class ApplicationController {
   @CerbosCheck('offer', 'extend')
   async extendOffer(@Req() req: RequestWithAuthContext, @Param('id') id: string, @Body() dto: ExtendOfferDto) {
     try {
-      return await this.tenantContext.run(req.tenantId, (client) =>
-        this.offerService.extend(client, {
+      return await this.tenantContext.run(req.tenantId, async (client) => {
+        const view = await this.applicationService.findByIdWithPersonView(client, id);
+        if (!view) {
+          throw new NotFoundException(`Candidatura ${id} não encontrada`);
+        }
+        // Guarda de posse por recrutador (Fase 5a, Task 4; achado Critical
+        // da revisão da onda 1). Mesmo padrão de findOne/moveStage acima.
+        await this.jobRecrutadorService.exigirAcesso(client, {
+          tenantId: req.tenantId,
+          jobId: view.jobId,
+          userId: req.userId,
+          userRoles: req.userRoles,
+        });
+        return this.offerService.extend(client, {
           tenantId: req.tenantId,
           applicationId: id,
           valor: dto.valor,
           estendidoPor: req.userId,
-        }),
-      );
+        });
+      });
     } catch (err) {
       if (isForeignKeyViolation(err, 'fk_offer_tenant_application')) {
         throw new NotFoundException(`Candidatura ${id} não encontrada`);
@@ -270,21 +289,47 @@ export class ApplicationController {
   @Get(':id/offers')
   @CerbosCheck('offer', 'read')
   async listOffers(@Req() req: RequestWithAuthContext, @Param('id') id: string) {
-    return this.tenantContext.run(req.tenantId, (client) => this.offerService.listByApplication(client, req.tenantId, id));
+    return this.tenantContext.run(req.tenantId, async (client) => {
+      const view = await this.applicationService.findByIdWithPersonView(client, id);
+      if (!view) {
+        throw new NotFoundException(`Candidatura ${id} não encontrada`);
+      }
+      // Guarda de posse por recrutador (Fase 5a, Task 4; achado Critical
+      // da revisão da onda 1). Mesmo padrão de findOne/moveStage acima.
+      await this.jobRecrutadorService.exigirAcesso(client, {
+        tenantId: req.tenantId,
+        jobId: view.jobId,
+        userId: req.userId,
+        userRoles: req.userRoles,
+      });
+      return this.offerService.listByApplication(client, req.tenantId, id);
+    });
   }
 
   @Post(':id/actions/mark-started-work')
   @CerbosCheck('application', 'mark-started-work')
   async markStartedWork(@Req() req: RequestWithAuthContext, @Param('id') id: string, @Body() dto: MarkStartedWorkDto) {
     try {
-      return await this.tenantContext.run(req.tenantId, (client) =>
-        this.applicationStartedWorkService.registrar(client, {
+      return await this.tenantContext.run(req.tenantId, async (client) => {
+        const view = await this.applicationService.findByIdWithPersonView(client, id);
+        if (!view) {
+          throw new NotFoundException(`Candidatura ${id} não encontrada`);
+        }
+        // Guarda de posse por recrutador (Fase 5a, Task 4; achado Critical
+        // da revisão da onda 1). Mesmo padrão de findOne/moveStage acima.
+        await this.jobRecrutadorService.exigirAcesso(client, {
+          tenantId: req.tenantId,
+          jobId: view.jobId,
+          userId: req.userId,
+          userRoles: req.userRoles,
+        });
+        return this.applicationStartedWorkService.registrar(client, {
           tenantId: req.tenantId,
           applicationId: id,
           startDate: dto.startDate,
           registradoPor: req.userId,
-        }),
-      );
+        });
+      });
     } catch (err) {
       if (err instanceof NenhumaOfertaAceitaError || err instanceof InicioTrabalhoJaRegistradoError) {
         throw new ConflictException(err.message);

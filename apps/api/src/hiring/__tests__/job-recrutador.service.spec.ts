@@ -1,6 +1,6 @@
 import { Pool } from 'pg';
 import { TenantContext } from '../../database/tenant-context';
-import { JobRecrutadorService } from '../job-recrutador.service';
+import { JobRecrutadorService, RecrutadorInvalidoError } from '../job-recrutador.service';
 
 describe('JobRecrutadorService', () => {
   const url = new URL(process.env.DATABASE_URL!);
@@ -66,6 +66,34 @@ describe('JobRecrutadorService', () => {
       service.atribuir(client, { tenantId, jobId, recrutadorIds: [recrutadorA, recrutadorB] }),
     );
 
+    const ids = await ctx.run(tenantId, (client) => service.listarPorVaga(client, { tenantId, jobId }));
+    expect(ids.sort()).toEqual([recrutadorA, recrutadorB].sort());
+  });
+
+  // Item 3b da onda 2 de correção pós-revisão: um UUID bem-formado mas de
+  // um user_account inexistente/de outro tenant estourava a FK composta
+  // fk_job_recrutador_tenant_staff (23503) como erro cru do Postgres, que
+  // vazava como 500 nos dois pontos de entrada (POST /v1/jobs e
+  // POST :id/actions/atribuir-recrutadores). Este teste exercita a FK de
+  // verdade contra Postgres (não um mock de erro), travando que atribuir()
+  // traduz a violação para RecrutadorInvalidoError.
+  it('atribuir lança RecrutadorInvalidoError quando um recrutadorId é um UUID bem-formado mas não existe em user_account (violação de fk_job_recrutador_tenant_staff)', async () => {
+    const ctx = new TenantContext(appPool);
+    const service = new JobRecrutadorService();
+    const uuidInexistente = '00000000-0000-4000-8000-000000000000';
+
+    await expect(
+      ctx.run(tenantId, (client) =>
+        service.atribuir(client, { tenantId, jobId, recrutadorIds: [uuidInexistente] }),
+      ),
+    ).rejects.toBeInstanceOf(RecrutadorInvalidoError);
+
+    // Efeito colateral esperado: DELETE e INSERT rodam dentro da MESMA
+    // transação aberta por ctx.run (BEGIN/COMMIT/ROLLBACK em
+    // tenant-context.ts) -- quando o INSERT falha e o erro sobe, ctx.run
+    // faz ROLLBACK da transação inteira, desfazendo também o DELETE. Não há
+    // atribuição parcial nem perda do estado anterior: a vaga continua com
+    // os recrutadores atribuídos pelo teste anterior.
     const ids = await ctx.run(tenantId, (client) => service.listarPorVaga(client, { tenantId, jobId }));
     expect(ids.sort()).toEqual([recrutadorA, recrutadorB].sort());
   });
