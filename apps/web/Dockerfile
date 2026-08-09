@@ -1,10 +1,10 @@
 # apps/web/Dockerfile
 FROM node:20-alpine AS base
-RUN apk add --no-cache python3 make g++
 RUN corepack enable && corepack prepare pnpm@9.12.0 --activate
 
 FROM base AS deps
 WORKDIR /workspace
+RUN apk add --no-cache python3 make g++
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY apps/api/package.json apps/api/package.json
 COPY apps/web/package.json apps/web/package.json
