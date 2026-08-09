@@ -1,5 +1,5 @@
-import React from 'react';
-import { KanbanColumn } from './KanbanColumn';
+import React from "react";
+import { KanbanColumn } from "./KanbanColumn";
 
 export interface KanbanBoardProps<T> {
   colunas: { chave: string; titulo: string }[];
@@ -7,6 +7,7 @@ export interface KanbanBoardProps<T> {
   renderItem: (item: T) => React.ReactNode;
   onMoverItem: (item: T, novaColuna: string) => void;
   labelMover?: (item: T) => string;
+  mensagemVazia?: string;
 }
 
 export function KanbanBoard<T extends { id: string | number; nome?: string }>({
@@ -15,6 +16,7 @@ export function KanbanBoard<T extends { id: string | number; nome?: string }>({
   renderItem,
   onMoverItem,
   labelMover,
+  mensagemVazia,
 }: KanbanBoardProps<T>) {
   return (
     <div className="flex gap-4 overflow-x-auto">
@@ -25,8 +27,9 @@ export function KanbanBoard<T extends { id: string | number; nome?: string }>({
           itens={itens[coluna.chave] ?? []}
           colunasDestino={colunas.filter((c) => c.chave !== coluna.chave)}
           renderItem={renderItem}
-          labelMover={labelMover ?? ((item) => `Mover ${item.nome ?? 'item'}`)}
+          labelMover={labelMover ?? ((item) => `Mover ${item.nome ?? "item"}`)}
           onMoverItem={onMoverItem}
+          mensagemVazia={mensagemVazia}
         />
       ))}
     </div>

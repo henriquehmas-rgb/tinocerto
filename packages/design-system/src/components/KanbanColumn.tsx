@@ -1,6 +1,6 @@
-import React from 'react';
-import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
-import { Card } from './Card';
+import React from "react";
+import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
+import { Card } from "./Card";
 
 export interface KanbanColumnProps<T> {
   titulo: string;
@@ -9,6 +9,7 @@ export interface KanbanColumnProps<T> {
   renderItem: (item: T) => React.ReactNode;
   labelMover: (item: T) => string;
   onMoverItem: (item: T, novaColuna: string) => void;
+  mensagemVazia?: string;
 }
 
 export function KanbanColumn<T extends { id: string | number }>({
@@ -18,10 +19,12 @@ export function KanbanColumn<T extends { id: string | number }>({
   renderItem,
   labelMover,
   onMoverItem,
+  mensagemVazia = "Nenhum item nesta etapa",
 }: KanbanColumnProps<T>) {
   return (
     <div className="flex flex-col gap-2 min-w-[240px]">
       <h3 className="font-ui text-sm font-medium text-text-secondary">{titulo}</h3>
+      {itens.length === 0 && <p className="font-ui text-sm text-text-secondary">{mensagemVazia}</p>}
       {itens.map((item) => (
         <Card key={item.id}>
           <div className="flex items-center justify-between gap-2">

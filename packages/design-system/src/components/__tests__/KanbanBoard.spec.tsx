@@ -41,4 +41,17 @@ describe('KanbanBoard', () => {
 
     expect(onMoverItem).toHaveBeenCalledWith({ id: '1', nome: 'Ana' }, 'entrevista');
   });
+
+  it('mostra mensagem de estado vazio numa coluna sem itens', () => {
+    render(
+      <KanbanBoard
+        colunas={colunas}
+        itens={{ triagem: [], entrevista: [] }}
+        renderItem={(item: ItemTeste) => item.nome}
+        onMoverItem={vi.fn()}
+      />,
+    );
+
+    expect(screen.getAllByText('Nenhum item nesta etapa')).toHaveLength(2);
+  });
 });
