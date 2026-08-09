@@ -13,5 +13,12 @@
   },
   "devDependencies": {
     "typescript": "^5.5.4"
+  },
+  "pnpm": {
+    "overrides": {
+      "sharp": ">=0.35.0",
+      "multer": ">=2.2.0",
+      "@nestjs/serve-static>path-to-regexp": ">=1.9.0"
+    }
   }
 }
