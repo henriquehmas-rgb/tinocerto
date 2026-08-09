@@ -2,16 +2,11 @@ name: Deploy
 
 # NOTA DE ESCOPO (Fase 0, Task 17): este workflow faz exatamente o que o
 # plano pede — SSH na VPS, git pull, `docker compose pull` + `up -d --build`.
-# Hoje, porém, isso é efetivamente um no-op sobre a aplicação: não existe
-# nenhum Dockerfile no repo (nem na raiz, nem em apps/api/), e
-# infra/docker-compose.yml só define imagens pré-construídas de infra
-# (postgres/redis/cerbos/minio) — nenhum serviço com `build:` para a API
-# em si. `--build` não vai falhar, mas também não constrói/roda a API
-# NestJS; ele só recria a infra que já está de pé. A API ainda não tem
-# rotas HTTP reais (confirmado na Task 16), então não há superfície de
-# aplicação para deployar ainda. Escrever um Dockerfile de produção fica
-# para quando a aplicação tiver essa superfície real (provavelmente
-# Fase 1) — não é escopo desta task.
+# ATUALIZAÇÃO (revisão de segurança pré-lançamento, achado M4): a nota
+# original dizia que não existia nenhum Dockerfile no repo — isso está
+# desatualizado. Hoje já existem `apps/api/Dockerfile` e
+# `apps/web/Dockerfile`, então `--build` de fato constrói e roda a
+# aplicação; não é mais um no-op sobre a API/web.
 #
 # Além disso, os secrets VPS_HOST e VPS_SSH_KEY referenciados abaixo ainda
 # não estão cadastrados no repositório GitHub. Até que o Henrique os
@@ -29,6 +24,21 @@ name: Deploy
 # antes mesmo do CI terminar de rodar lint/test — inclusive em pushes com
 # suíte vermelha. `needs: []` não corrigia isso: workflows separados não
 # podem referenciar jobs de outros arquivos de workflow via `needs`.
+#
+# GATE ANTI-"PWN REQUEST" (revisão de segurança pré-lançamento, achado
+# CRITICAL): `on: pull_request` no ci.yml (sem filtro de branch) roda em
+# repositório público para PRs de QUALQUER fork. O filtro `branches: [main]`
+# abaixo casa com o `head_branch` do evento que disparou o CI — que é a
+# branch de origem no repositório de origem do evento, não necessariamente
+# a branch `main` do repositório base. Um atacante pode forkar o repo,
+# criar uma branch chamada `main` no fork, abrir um PR, deixar o CI passar
+# e assim satisfazer esse filtro `branches: [main]` sem nunca ter enviado
+# push para o `main` real. Sem checagem adicional, o job `deploy` abaixo
+# rodaria com acesso aos secrets `VPS_HOST`/`VPS_SSH_KEY` do repositório
+# BASE, fazendo SSH como root na VPS de produção a partir de um PR de
+# fork. O `if:` do job `deploy` abaixo garante explicitamente que o evento
+# que disparou o CI foi um `push` real (não um `pull_request`) E que veio
+# do próprio repositório (não de um fork), fechando essa rota de ataque.
 
 on:
   workflow_run:
@@ -39,7 +49,10 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    if: github.event.workflow_run.conclusion == 'success'
+    if: >
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
     steps:
       - uses: actions/checkout@v4
         with:
