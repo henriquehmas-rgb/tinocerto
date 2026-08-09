@@ -49,4 +49,14 @@ describe('FunilPage', () => {
     const link = await screen.findByRole('link', { name: 'Editar vaga' });
     expect(link).toHaveAttribute('href', '/staff/painel/vagas/job-1/editar');
   });
+
+  it('deriva as colunas dinamicamente do funil, mostrando etapas fora da lista fixa antiga', async () => {
+    vi.mocked(staffPanelClient.obterFunil).mockResolvedValue({
+      triagem: [],
+      oferta: [{ id: 'app-2', personId: 'person-2', nomeCandidato: 'Bruno', criadoEm: '2026-08-01T00:00:00Z' }],
+    });
+    render(<FunilPage />);
+    await waitFor(() => expect(screen.getByText('Bruno')).toBeInTheDocument());
+    expect(screen.getByText('Oferta')).toBeInTheDocument();
+  });
 });

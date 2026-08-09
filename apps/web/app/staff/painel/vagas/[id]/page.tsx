@@ -6,20 +6,34 @@ import Link from 'next/link';
 import { KanbanBoard } from '@tinocerto/design-system';
 import { staffPanelClient, CandidaturaResumo } from '../../../../../lib/staff-panel-client';
 
-const COLUNAS = [
+// Colunas usadas apenas enquanto o funil ainda nao carregou, para evitar
+// uma tela vazia por um instante. Assim que o funil chega, as colunas
+// passam a ser derivadas de Object.keys(funil) (ver COLUNAS abaixo) --
+// nunca ficam presas a 'triagem'/'entrevista', entao candidaturas em
+// qualquer outra etapa (ex.: 'oferta') tambem aparecem.
+const COLUNAS_PADRAO = [
   { chave: 'triagem', titulo: 'Triagem' },
   { chave: 'entrevista', titulo: 'Entrevista' },
 ];
 
+function capitalizar(texto: string): string {
+  if (!texto) return texto;
+  return texto.charAt(0).toUpperCase() + texto.slice(1);
+}
+
 export default function FunilPage() {
   const params = useParams<{ id: string }>();
   const [funil, setFunil] = useState<Record<string, CandidaturaResumo[]>>({});
+  const [funilCarregado, setFunilCarregado] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
 
   const carregar = useCallback(() => {
     staffPanelClient
       .obterFunil(params.id)
-      .then(setFunil)
+      .then((dados) => {
+        setFunil(dados);
+        setFunilCarregado(true);
+      })
       .catch((e) => setErro(e.message));
   }, [params.id]);
 
@@ -32,6 +46,10 @@ export default function FunilPage() {
     carregar();
   }
 
+  const colunas = funilCarregado
+    ? Object.keys(funil).map((chave) => ({ chave, titulo: capitalizar(chave) }))
+    : COLUNAS_PADRAO;
+
   return (
     <div className="p-6">
       <div className="flex items-center justify-between mb-4">
@@ -42,7 +60,7 @@ export default function FunilPage() {
       </div>
       {erro && <p className="text-danger-text">{erro}</p>}
       <KanbanBoard
-        colunas={COLUNAS}
+        colunas={colunas}
         itens={funil}
         renderItem={(item: CandidaturaResumo) => (
           <Link href={`/staff/painel/candidaturas/${item.id}`}>{item.nomeCandidato}</Link>
