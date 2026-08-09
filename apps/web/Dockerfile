@@ -30,6 +30,7 @@ COPY --from=builder --chown=nextjs:nodejs /workspace/apps/web/public ./apps/web/
 COPY --from=builder --chown=nextjs:nodejs /workspace/apps/web/package.json ./apps/web/package.json
 COPY --from=builder --chown=nextjs:nodejs /workspace/package.json ./package.json
 COPY --from=builder --chown=nextjs:nodejs /workspace/apps/web/next.config.* ./apps/web/
+COPY --from=builder --chown=nextjs:nodejs /workspace/apps/web/node_modules ./apps/web/node_modules
 COPY --from=builder --chown=nextjs:nodejs /workspace/node_modules ./node_modules
 COPY --from=builder --chown=nextjs:nodejs /workspace/packages/design-system ./packages/design-system
 USER nextjs
