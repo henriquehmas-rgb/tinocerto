@@ -33,6 +33,18 @@ export interface CandidaturaResumo {
   criadoEm: string;
 }
 
+export interface CandidaturaDetalhe {
+  id: string;
+  jobId: string;
+  etapaFunil: string;
+  criadoEm: string;
+  person: {
+    id: string;
+    nome: string;
+    emailPrincipal: string;
+  };
+}
+
 async function tratarResposta<T>(response: Response, mensagemErroPadrao: string): Promise<T> {
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
@@ -101,5 +113,10 @@ export const staffPanelClient = {
   async obterRelatorioAssessment(applicationId: string): Promise<RelatorioAssessment> {
     const response = await staffAuthClient.authenticatedFetch(`/v1/applications/${applicationId}/assessment-report`);
     return tratarResposta(response, 'Não foi possível carregar o relatório de assessment');
+  },
+
+  async obterCandidatura(applicationId: string): Promise<CandidaturaDetalhe> {
+    const response = await staffAuthClient.authenticatedFetch(`/v1/applications/${applicationId}`);
+    return tratarResposta(response, 'Não foi possível carregar a candidatura');
   },
 };

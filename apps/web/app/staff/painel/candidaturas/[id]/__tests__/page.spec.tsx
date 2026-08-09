@@ -5,7 +5,7 @@ import { staffPanelClient } from '../../../../../../lib/staff-panel-client';
 
 vi.mock('next/navigation', () => ({ useParams: () => ({ id: 'app-1' }) }));
 vi.mock('../../../../../../lib/staff-panel-client', () => ({
-  staffPanelClient: { obterRelatorioAssessment: vi.fn() },
+  staffPanelClient: { obterRelatorioAssessment: vi.fn(), obterCandidatura: vi.fn() },
 }));
 
 describe('CandidaturaPage', () => {
@@ -16,14 +16,33 @@ describe('CandidaturaPage', () => {
       relatorio: { secoes: [{ dimensao: 'conscienciosidade', titulo: 'Conscienciosidade', estimativaTheta: 0.6 }] },
       aderencia: { scoreAderencia: 80, skillsBatidas: ['SQL'], skillsFaltantes: ['Python'] },
     });
+    vi.mocked(staffPanelClient.obterCandidatura).mockResolvedValue({
+      id: 'app-1',
+      jobId: 'job-1',
+      etapaFunil: 'entrevista',
+      criadoEm: '2026-08-01T00:00:00Z',
+      person: { id: 'person-1', nome: 'Ana Souza', emailPrincipal: 'ana@example.com' },
+    });
     render(<CandidaturaPage />);
     await waitFor(() => expect(screen.getByText('80%')).toBeInTheDocument());
     expect(screen.getByText('Conscienciosidade')).toBeInTheDocument();
+    expect(screen.getByText('Ana Souza')).toBeInTheDocument();
+    expect(screen.getByText('Etapa atual: entrevista')).toBeInTheDocument();
+    expect(screen.getByText('SQL')).toBeInTheDocument();
+    expect(screen.getByText('Python')).toBeInTheDocument();
   });
 
   it('mostra mensagem apropriada quando o assessment ainda não foi concluído', async () => {
     vi.mocked(staffPanelClient.obterRelatorioAssessment).mockResolvedValue({ relatorio: null, aderencia: null });
+    vi.mocked(staffPanelClient.obterCandidatura).mockResolvedValue({
+      id: 'app-1',
+      jobId: 'job-1',
+      etapaFunil: 'triagem',
+      criadoEm: '2026-08-01T00:00:00Z',
+      person: { id: 'person-1', nome: 'Bruno Lima', emailPrincipal: 'bruno@example.com' },
+    });
     render(<CandidaturaPage />);
     await waitFor(() => expect(screen.getByText('Assessment ainda não concluído')).toBeInTheDocument());
+    expect(screen.getByText('Bruno Lima')).toBeInTheDocument();
   });
 });
