@@ -7,6 +7,7 @@ export interface VagaResumo {
   titulo: string;
   publicadoEm: string | null;
   criadoEm: string;
+  contagemCandidaturas: number;
 }
 
 export interface VagaCompleta {
@@ -23,6 +24,8 @@ export interface PerfilStaff {
   userId: string;
   tenantId: string;
   roles: string[];
+  email: string;
+  razaoSocial: string;
 }
 
 export interface CriarVagaInput {
@@ -62,6 +65,13 @@ async function tratarResposta<T>(response: Response, mensagemErroPadrao: string)
 export interface RelatorioAssessment {
   relatorio: { secoes: { dimensao: string; titulo: string; estimativaTheta: number }[] } | null;
   aderencia: { scoreAderencia: number | null; skillsBatidas: string[]; skillsFaltantes: string[] } | null;
+}
+
+export interface DashboardMetricas {
+  vagasAtivas: number;
+  vagasRascunho: number;
+  candidaturasEmAndamento: number;
+  porEstagio: Record<string, number>;
 }
 
 export const staffPanelClient = {
@@ -129,5 +139,10 @@ export const staffPanelClient = {
   async obterPerfil(): Promise<PerfilStaff> {
     const response = await staffAuthClient.authenticatedFetch('/v1/staff/auth/me');
     return tratarResposta(response, 'Não foi possível carregar o perfil');
+  },
+
+  async obterMetricas(): Promise<DashboardMetricas> {
+    const response = await staffAuthClient.authenticatedFetch('/v1/jobs/dashboard-metrics');
+    return tratarResposta(response, 'Não foi possível carregar as métricas');
   },
 };
