@@ -31,6 +31,28 @@ interface PrincipalMinimo {
 // sobrescrevendo submetido_em sem deixar rastro).
 export class ScorecardJaSubmetidoError extends Error {}
 
+// [Fix round 1 -- achado incidental da revisão da vulnerabilidade
+// introduzida pela onda 3] `trg_scorecard_avaliador_e_evaluator`
+// (interview_0006__scorecard.sql) rejeita via RAISE EXCEPTION um
+// INSERT/UPDATE de scorecard cujo avaliador_id não está cadastrado como
+// interview_evaluator daquela interview_schedule_id específica -- cenário
+// possível para um recrutador com posse REAL da vaga (passa pela guarda de
+// ScorecardController.exigirPosseDaEntrevista) mas que nunca foi designado
+// avaliador daquela entrevista. RAISE EXCEPTION sem SQLSTATE explícito usa
+// o código default P0001 (raise_exception) -- sem este catch, o erro cru
+// do Postgres (500) vazava para o cliente.
+export class AvaliadorNaoEhInterviewEvaluatorError extends Error {}
+
+function isAvaliadorNaoEvaluatorViolation(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    (err as { code?: unknown }).code === 'P0001' &&
+    typeof (err as { message?: unknown }).message === 'string' &&
+    (err as { message: string }).message.includes('não está cadastrado como interview_evaluator desta entrevista')
+  );
+}
+
 @Injectable()
 export class ScorecardService {
   constructor(private readonly cerbosService: CerbosService) {}
@@ -43,23 +65,31 @@ export class ScorecardService {
     // tentativas concorrentes de submissão. Num INSERT novo (sem conflito
     // ainda) o WHERE nem se aplica -- só rege o ramo de conflito/update --
     // então RETURNING sempre produz uma linha para um insert genuíno.
-    const result = await client.query<{ id: string }>(
-      `INSERT INTO scorecard (tenant_id, interview_schedule_id, avaliador_id, notas_por_competencia, comentario, submetido_em)
-       VALUES ($1, $2, $3, $4, $5, now())
-       ON CONFLICT (tenant_id, interview_schedule_id, avaliador_id)
-       DO UPDATE SET notas_por_competencia = EXCLUDED.notas_por_competencia,
-                      comentario = EXCLUDED.comentario,
-                      submetido_em = now()
-       WHERE scorecard.submetido_em IS NULL
-       RETURNING id`,
-      [
-        input.tenantId,
-        input.interviewScheduleId,
-        input.avaliadorId,
-        JSON.stringify(input.notasPorCompetencia),
-        input.comentario ?? null,
-      ],
-    );
+    let result;
+    try {
+      result = await client.query<{ id: string }>(
+        `INSERT INTO scorecard (tenant_id, interview_schedule_id, avaliador_id, notas_por_competencia, comentario, submetido_em)
+         VALUES ($1, $2, $3, $4, $5, now())
+         ON CONFLICT (tenant_id, interview_schedule_id, avaliador_id)
+         DO UPDATE SET notas_por_competencia = EXCLUDED.notas_por_competencia,
+                        comentario = EXCLUDED.comentario,
+                        submetido_em = now()
+         WHERE scorecard.submetido_em IS NULL
+         RETURNING id`,
+        [
+          input.tenantId,
+          input.interviewScheduleId,
+          input.avaliadorId,
+          JSON.stringify(input.notasPorCompetencia),
+          input.comentario ?? null,
+        ],
+      );
+    } catch (err) {
+      if (isAvaliadorNaoEvaluatorViolation(err)) {
+        throw new AvaliadorNaoEhInterviewEvaluatorError((err as { message: string }).message);
+      }
+      throw err;
+    }
     if (result.rows.length === 0) {
       throw new ScorecardJaSubmetidoError(
         `scorecard do avaliador ${input.avaliadorId} para a entrevista ${input.interviewScheduleId} já foi submetido e não pode ser alterado`,

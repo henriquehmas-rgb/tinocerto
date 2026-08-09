@@ -47,28 +47,35 @@ export class InterviewScheduleController {
     // application.controller.ts/adherence.controller.ts) antes de checar
     // posse.
     //
-    // Exceção deliberada (mesmo raciocínio de
-    // ScorecardController.exigirPosseDaEntrevista): o papel "entrevistador"
-    // também é liberado pelo Cerbos para esta ação (regra "gestao-
-    // entrevista" de resource_interview_schedule.yaml), mas nunca é
-    // cadastrado em job_recrutador -- entrevistadores são atribuídos por
-    // ENTREVISTA (interview_evaluator), não por VAGA. Pula a guarda de
-    // posse por vaga quando o principal tem o papel "entrevistador", para
-    // não bloquear incorretamente um entrevistador legítimo.
-    if (!req.userRoles.includes('entrevistador')) {
-      await this.tenantContext.run(req.tenantId, async (client) => {
-        const view = await this.applicationService.findByIdWithPersonView(client, dto.applicationId);
-        if (!view) {
-          throw new NotFoundException(`Candidatura ${dto.applicationId} não encontrada`);
-        }
-        await this.jobRecrutadorService.exigirAcesso(client, {
-          tenantId: req.tenantId,
-          jobId: view.jobId,
-          userId: req.userId,
-          userRoles: req.userRoles,
-        });
+    // [Fix round 1 -- vulnerabilidade introduzida pela própria onda 3] A
+    // versão anterior pulava esta guarda inteira quando o principal tinha
+    // o papel "entrevistador" -- um bypass TOTAL (qualquer entrevistador,
+    // mesmo sem nenhuma relação com a candidatura, conseguia agendar) que
+    // também reabria acesso irrestrito para um recrutador com papel duplo
+    // ['recrutador','entrevistador']. Diferente de
+    // ScorecardController.exigirPosseDaEntrevista, aqui NÃO existe uma
+    // checagem alternativa possível: este é o ato de CRIAR o agendamento,
+    // então não há um interview_schedule prévio contra o qual checar
+    // interview_evaluator, e avaliadorIds é um campo controlado pelo
+    // próprio chamador no corpo da requisição -- um "sou avaliador"
+    // auto-atestado aqui seria um controle inútil (o requisitante poderia
+    // simplesmente se incluir em avaliadorIds para se autoautorizar). Por
+    // isso a guarda de posse por vaga passa a ser incondicional: só quem
+    // tem posse da vaga (via job_recrutador, ou papéis de acesso total)
+    // pode criar um agendamento, mesmo que o principal também tenha o
+    // papel "entrevistador".
+    await this.tenantContext.run(req.tenantId, async (client) => {
+      const view = await this.applicationService.findByIdWithPersonView(client, dto.applicationId);
+      if (!view) {
+        throw new NotFoundException(`Candidatura ${dto.applicationId} não encontrada`);
+      }
+      await this.jobRecrutadorService.exigirAcesso(client, {
+        tenantId: req.tenantId,
+        jobId: view.jobId,
+        userId: req.userId,
+        userRoles: req.userRoles,
       });
-    }
+    });
 
     // organizadoPorUserId é SEMPRE req.userId -- nunca um campo do corpo
     // da requisição (decisão 4 da spec: o organizador é quem está de fato

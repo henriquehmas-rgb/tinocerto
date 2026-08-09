@@ -12,10 +12,10 @@ describe('InterviewScheduleController', () => {
 
   async function buildController(
     agendarMock: jest.Mock = jest.fn().mockResolvedValue({ id: 'schedule-1' }),
-    // Guarda de posse por recrutador (onda 3 de correção pós-revisão) --
+    // Guarda de posse por recrutador (onda 3 de correcao pos-revisao) --
     // default: a candidatura existe (com jobId) e o requisitante tem
     // acesso. Os testes de guarda abaixo sobrescrevem esses mocks. Mesmo
-    // padrão de AdherenceController.spec.ts.
+    // padrao de AdherenceController.spec.ts.
     findByIdWithPersonViewMock: jest.Mock = jest.fn().mockResolvedValue({ id: 'application-1', jobId: 'job-1' }),
     exigirAcessoMock: jest.Mock = jest.fn().mockResolvedValue(undefined),
   ) {
@@ -50,17 +50,37 @@ describe('InterviewScheduleController', () => {
     );
   });
 
-  it('criar pula a guarda de posse por vaga quando o principal tem o papel entrevistador', async () => {
+  // Item 1 do "Fix round 1" (correcao da vulnerabilidade introduzida pela
+  // propria onda 3): esta rota nao tem entrevista PREVIA contra a qual
+  // checar posse por avaliador (e o proprio ato de CRIAR o agendamento --
+  // avaliadorIds e controlado pelo chamador, entao um "sou avaliador"
+  // seria auto-atestado e inutil como controle). O bypass do papel
+  // "entrevistador" aqui era um bypass TOTAL -- foi removido. So quem tem
+  // posse da vaga (via applicationId -> jobId) pode criar um agendamento,
+  // MESMO que o principal tambem tenha o papel "entrevistador".
+  it('criar exige posse da vaga mesmo quando o principal tem (tambem) o papel entrevistador -- bypass removido', async () => {
     const agendarMock = jest.fn().mockResolvedValue({ id: 'schedule-1' });
     const exigirAcessoMock = jest.fn().mockResolvedValue(undefined);
     const controller = await buildController(agendarMock, undefined, exigirAcessoMock);
     const req = { tenantId: 'tenant-1', userId: 'entrevistador-1', userRoles: ['entrevistador'] } as any;
 
     await expect(controller.criar(req, dto)).resolves.toEqual({ id: 'schedule-1' });
-    // Entrevistadores são atribuídos por ENTREVISTA (interview_evaluator),
-    // não por VAGA -- nunca cadastrados em job_recrutador. Aplicar a
-    // guarda aqui bloquearia incorretamente um entrevistador legítimo.
-    expect(exigirAcessoMock).not.toHaveBeenCalled();
+    expect(exigirAcessoMock).toHaveBeenCalledWith(expect.anything(), {
+      tenantId: 'tenant-1',
+      jobId: 'job-1',
+      userId: 'entrevistador-1',
+      userRoles: ['entrevistador'],
+    });
+  });
+
+  it('criar com um entrevistador sem posse de vaga recebe 404 (nao bypassa mais)', async () => {
+    const agendarMock = jest.fn();
+    const exigirAcessoMock = jest.fn().mockRejectedValue(new NotFoundException('Vaga nao encontrada'));
+    const controller = await buildController(agendarMock, undefined, exigirAcessoMock);
+    const req = { tenantId: 'tenant-1', userId: 'entrevistador-sem-posse', userRoles: ['entrevistador'] } as any;
+
+    await expect(controller.criar(req, dto)).rejects.toBeInstanceOf(NotFoundException);
+    expect(agendarMock).not.toHaveBeenCalled();
   });
 
   // Item 3 da onda 3 de correção pós-revisão: esta rota não tinha guarda
