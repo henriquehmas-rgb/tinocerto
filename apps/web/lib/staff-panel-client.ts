@@ -19,6 +19,12 @@ export interface VagaCompleta {
   recrutadorIds: string[];
 }
 
+export interface PerfilStaff {
+  userId: string;
+  tenantId: string;
+  roles: string[];
+}
+
 export interface CriarVagaInput {
   requisitionId: string;
   titulo: string;
@@ -118,5 +124,10 @@ export const staffPanelClient = {
   async obterCandidatura(applicationId: string): Promise<CandidaturaDetalhe> {
     const response = await staffAuthClient.authenticatedFetch(`/v1/applications/${applicationId}`);
     return tratarResposta(response, 'Não foi possível carregar a candidatura');
+  },
+
+  async obterPerfil(): Promise<PerfilStaff> {
+    const response = await staffAuthClient.authenticatedFetch('/v1/staff/auth/me');
+    return tratarResposta(response, 'Não foi possível carregar o perfil');
   },
 };

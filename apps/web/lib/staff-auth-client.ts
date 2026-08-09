@@ -30,6 +30,17 @@ function isMfaChallenge(result: StaffLoginResult): result is StaffMfaChallenge {
  */
 export class MfaSetupPrecisaCodigoAtualError extends Error {}
 
+/**
+ * true quando o erro veio de authenticatedFetch por ausencia de sessao
+ * valida (sem token, ou refresh falhou). UI deve tratar isso redirecionando
+ * para /staff/entrar em vez de so exibir o texto do erro parado na tela --
+ * ver mensagens lançadas em authenticatedFetch/refreshAccessToken abaixo.
+ */
+export function isErroDeAutenticacao(erro: unknown): boolean {
+  const mensagem = erro instanceof Error ? erro.message : '';
+  return mensagem === 'Usuário não autenticado' || mensagem === 'Sessão expirada, faça login novamente';
+}
+
 export const staffAuthClient = {
   isMfaChallenge,
 

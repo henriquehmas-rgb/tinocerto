@@ -2,8 +2,9 @@
 
 import { FormEvent, useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { Button } from '@tinocerto/design-system';
+import { Button, PanelLayout } from '@tinocerto/design-system';
 import { staffPanelClient } from '../../../../../../lib/staff-panel-client';
+import { staffAuthClient, isErroDeAutenticacao } from '../../../../../../lib/staff-auth-client';
 
 function parseIds(texto: string): string[] {
   return texto
@@ -39,14 +40,18 @@ export default function EditarVagaPage() {
         setRecrutadorIdsTexto(recrutadorIds.join(', '));
         recrutadorIdsIniciaisRef.current = recrutadorIds;
       })
-      .catch(() => {
-        // Falha ao carregar a vaga atual: deixamos recrutadorIdsIniciaisRef
-        // em null de propósito. handleSubmit trata null como "não mude nada"
-        // -- nunca envia atribuirRecrutadores com base em um estado que não
-        // conseguimos confirmar como o atual, para não apagar atribuições
-        // existentes por engano.
+      .catch((e) => {
+        if (isErroDeAutenticacao(e)) {
+          router.push('/staff/entrar');
+          return;
+        }
+        // Falha ao carregar a vaga atual (ex.: vaga não encontrada): deixamos
+        // recrutadorIdsIniciaisRef em null de propósito. handleSubmit trata
+        // null como "não mude nada" -- nunca envia atribuirRecrutadores com
+        // base em um estado que não conseguimos confirmar como o atual, para
+        // não apagar atribuições existentes por engano.
       });
-  }, [params.id]);
+  }, [params.id, router]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -66,39 +71,50 @@ export default function EditarVagaPage() {
       }
       router.push(`/staff/painel/vagas/${params.id}`);
     } catch (e) {
+      if (isErroDeAutenticacao(e)) {
+        router.push('/staff/entrar');
+        return;
+      }
       setErro((e as Error).message);
     }
   }
 
+  function handleSair() {
+    staffAuthClient.logout();
+    router.push('/staff/entrar');
+  }
+
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-4 max-w-md p-6">
-      <h1 className="font-display text-xl">Editar vaga</h1>
-      {erro && <p className="text-danger-text">{erro}</p>}
-      <label className="flex flex-col gap-1 font-ui text-sm">
-        Título
-        <input className="rounded-control px-3 py-2 border border-border" value={titulo} onChange={(e) => setTitulo(e.target.value)} />
-      </label>
-      <label className="flex flex-col gap-1 font-ui text-sm">
-        Descrição
-        <textarea className="rounded-control px-3 py-2 border border-border" value={descricao} onChange={(e) => setDescricao(e.target.value)} />
-      </label>
-      <label className="flex flex-col gap-1 font-ui text-sm">
-        Habilidades exigidas (separadas por vírgula)
-        <input
-          className="rounded-control px-3 py-2 border border-border"
-          value={habilidadesTexto}
-          onChange={(e) => setHabilidadesTexto(e.target.value)}
-        />
-      </label>
-      <label className="flex flex-col gap-1 font-ui text-sm">
-        IDs dos recrutadores (separados por vírgula)
-        <input
-          className="rounded-control px-3 py-2 border border-border"
-          value={recrutadorIdsTexto}
-          onChange={(e) => setRecrutadorIdsTexto(e.target.value)}
-        />
-      </label>
-      <Button>Salvar</Button>
-    </form>
+    <PanelLayout nomeStaff="" nomeTenant="" onSair={handleSair}>
+      <form onSubmit={handleSubmit} className="flex flex-col gap-4 max-w-md p-6">
+        <h1 className="font-display text-xl">Editar vaga</h1>
+        {erro && <p className="text-danger-text">{erro}</p>}
+        <label className="flex flex-col gap-1 font-ui text-sm">
+          Título
+          <input className="rounded-control px-3 py-2 border border-border" value={titulo} onChange={(e) => setTitulo(e.target.value)} />
+        </label>
+        <label className="flex flex-col gap-1 font-ui text-sm">
+          Descrição
+          <textarea className="rounded-control px-3 py-2 border border-border" value={descricao} onChange={(e) => setDescricao(e.target.value)} />
+        </label>
+        <label className="flex flex-col gap-1 font-ui text-sm">
+          Habilidades exigidas (separadas por vírgula)
+          <input
+            className="rounded-control px-3 py-2 border border-border"
+            value={habilidadesTexto}
+            onChange={(e) => setHabilidadesTexto(e.target.value)}
+          />
+        </label>
+        <label className="flex flex-col gap-1 font-ui text-sm">
+          IDs dos recrutadores (separados por vírgula)
+          <input
+            className="rounded-control px-3 py-2 border border-border"
+            value={recrutadorIdsTexto}
+            onChange={(e) => setRecrutadorIdsTexto(e.target.value)}
+          />
+        </label>
+        <Button>Salvar</Button>
+      </form>
+    </PanelLayout>
   );
 }

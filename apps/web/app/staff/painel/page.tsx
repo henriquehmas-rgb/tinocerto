@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Table, Button, PanelLayout } from '@tinocerto/design-system';
 import { staffPanelClient, VagaResumo } from '../../../lib/staff-panel-client';
-import { staffAuthClient } from '../../../lib/staff-auth-client';
+import { staffAuthClient, isErroDeAutenticacao } from '../../../lib/staff-auth-client';
 
 export default function PainelPage() {
   const router = useRouter();
@@ -17,9 +17,15 @@ export default function PainelPage() {
     staffPanelClient
       .listarVagas()
       .then(setVagas)
-      .catch((e) => setErro(e.message))
+      .catch((e) => {
+        if (isErroDeAutenticacao(e)) {
+          router.push('/staff/entrar');
+          return;
+        }
+        setErro(e.message);
+      })
       .finally(() => setCarregando(false));
-  }, []);
+  }, [router]);
 
   function handleSair() {
     staffAuthClient.logout();

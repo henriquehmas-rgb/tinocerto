@@ -3,7 +3,9 @@ import { render, screen, waitFor } from '@testing-library/react';
 import CandidaturaPage from '../page';
 import { staffPanelClient } from '../../../../../../lib/staff-panel-client';
 
-vi.mock('next/navigation', () => ({ useParams: () => ({ id: 'app-1' }) }));
+const pushMock = vi.fn();
+const routerMock = { push: pushMock };
+vi.mock('next/navigation', () => ({ useParams: () => ({ id: 'app-1' }), useRouter: () => routerMock }));
 vi.mock('../../../../../../lib/staff-panel-client', () => ({
   staffPanelClient: { obterRelatorioAssessment: vi.fn(), obterCandidatura: vi.fn() },
 }));
@@ -44,5 +46,12 @@ describe('CandidaturaPage', () => {
     render(<CandidaturaPage />);
     await waitFor(() => expect(screen.getByText('Assessment ainda não concluído')).toBeInTheDocument());
     expect(screen.getByText('Bruno Lima')).toBeInTheDocument();
+  });
+
+  it('redireciona para /staff/entrar quando o carregamento falha por sessão ausente', async () => {
+    vi.mocked(staffPanelClient.obterRelatorioAssessment).mockRejectedValue(new Error('Usuário não autenticado'));
+    vi.mocked(staffPanelClient.obterCandidatura).mockRejectedValue(new Error('Usuário não autenticado'));
+    render(<CandidaturaPage />);
+    await waitFor(() => expect(pushMock).toHaveBeenCalledWith('/staff/entrar'));
   });
 });

@@ -3,7 +3,9 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import FunilPage from '../page';
 import { staffPanelClient } from '../../../../../../lib/staff-panel-client';
 
-vi.mock('next/navigation', () => ({ useParams: () => ({ id: 'job-1' }) }));
+const pushMock = vi.fn();
+const routerMock = { push: pushMock };
+vi.mock('next/navigation', () => ({ useParams: () => ({ id: 'job-1' }), useRouter: () => routerMock }));
 vi.mock('../../../../../../lib/staff-panel-client', () => ({
   staffPanelClient: { obterFunil: vi.fn(), moverEtapa: vi.fn() },
 }));
@@ -58,5 +60,11 @@ describe('FunilPage', () => {
     render(<FunilPage />);
     await waitFor(() => expect(screen.getByText('Bruno')).toBeInTheDocument());
     expect(screen.getByText('Oferta')).toBeInTheDocument();
+  });
+
+  it('redireciona para /staff/entrar quando o carregamento do funil falha por sessão ausente', async () => {
+    vi.mocked(staffPanelClient.obterFunil).mockRejectedValue(new Error('Usuário não autenticado'));
+    render(<FunilPage />);
+    await waitFor(() => expect(pushMock).toHaveBeenCalledWith('/staff/entrar'));
   });
 });

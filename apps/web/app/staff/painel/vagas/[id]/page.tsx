@@ -1,10 +1,11 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { KanbanBoard } from '@tinocerto/design-system';
+import { KanbanBoard, PanelLayout } from '@tinocerto/design-system';
 import { staffPanelClient, CandidaturaResumo } from '../../../../../lib/staff-panel-client';
+import { staffAuthClient, isErroDeAutenticacao } from '../../../../../lib/staff-auth-client';
 
 // Colunas usadas apenas enquanto o funil ainda nao carregou, para evitar
 // uma tela vazia por um instante. Assim que o funil chega, as colunas
@@ -23,6 +24,7 @@ function capitalizar(texto: string): string {
 
 export default function FunilPage() {
   const params = useParams<{ id: string }>();
+  const router = useRouter();
   const [funil, setFunil] = useState<Record<string, CandidaturaResumo[]>>({});
   const [funilCarregado, setFunilCarregado] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
@@ -34,8 +36,14 @@ export default function FunilPage() {
         setFunil(dados);
         setFunilCarregado(true);
       })
-      .catch((e) => setErro(e.message));
-  }, [params.id]);
+      .catch((e) => {
+        if (isErroDeAutenticacao(e)) {
+          router.push('/staff/entrar');
+          return;
+        }
+        setErro(e.message);
+      });
+  }, [params.id, router]);
 
   useEffect(() => {
     carregar();
@@ -46,28 +54,35 @@ export default function FunilPage() {
     carregar();
   }
 
+  function handleSair() {
+    staffAuthClient.logout();
+    router.push('/staff/entrar');
+  }
+
   const colunas = funilCarregado
     ? Object.keys(funil).map((chave) => ({ chave, titulo: capitalizar(chave) }))
     : COLUNAS_PADRAO;
 
   return (
-    <div className="p-6">
-      <div className="flex items-center justify-between mb-4">
-        <h1 className="font-display text-xl">Funil</h1>
-        <Link href={`/staff/painel/vagas/${params.id}/editar`} className="font-ui text-sm text-accent underline">
-          Editar vaga
-        </Link>
+    <PanelLayout nomeStaff="" nomeTenant="" onSair={handleSair}>
+      <div className="p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h1 className="font-display text-xl">Funil</h1>
+          <Link href={`/staff/painel/vagas/${params.id}/editar`} className="font-ui text-sm text-accent underline">
+            Editar vaga
+          </Link>
+        </div>
+        {erro && <p className="text-danger-text">{erro}</p>}
+        <KanbanBoard
+          colunas={colunas}
+          itens={funil}
+          renderItem={(item: CandidaturaResumo) => (
+            <Link href={`/staff/painel/candidaturas/${item.id}`}>{item.nomeCandidato}</Link>
+          )}
+          labelMover={(item: CandidaturaResumo) => `Mover ${item.nomeCandidato}`}
+          onMoverItem={handleMover}
+        />
       </div>
-      {erro && <p className="text-danger-text">{erro}</p>}
-      <KanbanBoard
-        colunas={colunas}
-        itens={funil}
-        renderItem={(item: CandidaturaResumo) => (
-          <Link href={`/staff/painel/candidaturas/${item.id}`}>{item.nomeCandidato}</Link>
-        )}
-        labelMover={(item: CandidaturaResumo) => `Mover ${item.nomeCandidato}`}
-        onMoverItem={handleMover}
-      />
-    </div>
+    </PanelLayout>
   );
 }

@@ -3,7 +3,9 @@ import { render, screen, waitFor } from '@testing-library/react';
 import PainelPage from '../page';
 import { staffPanelClient } from '../../../../lib/staff-panel-client';
 
-vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
+const pushMock = vi.fn();
+const routerMock = { push: pushMock };
+vi.mock('next/navigation', () => ({ useRouter: () => routerMock }));
 vi.mock('../../../../lib/staff-panel-client', () => ({
   staffPanelClient: { listarVagas: vi.fn() },
 }));
@@ -23,5 +25,11 @@ describe('PainelPage', () => {
     vi.mocked(staffPanelClient.listarVagas).mockResolvedValue([]);
     render(<PainelPage />);
     await waitFor(() => expect(screen.getByText('Nenhum item encontrado')).toBeInTheDocument());
+  });
+
+  it('redireciona para /staff/entrar quando o carregamento falha por sessão ausente', async () => {
+    vi.mocked(staffPanelClient.listarVagas).mockRejectedValue(new Error('Usuário não autenticado'));
+    render(<PainelPage />);
+    await waitFor(() => expect(pushMock).toHaveBeenCalledWith('/staff/entrar'));
   });
 });

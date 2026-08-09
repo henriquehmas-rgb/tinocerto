@@ -4,7 +4,8 @@ import EditarVagaPage from '../page';
 import { staffPanelClient } from '../../../../../../../lib/staff-panel-client';
 
 const pushMock = vi.fn();
-vi.mock('next/navigation', () => ({ useRouter: () => ({ push: pushMock }), useParams: () => ({ id: 'job-1' }) }));
+const routerMock = { push: pushMock };
+vi.mock('next/navigation', () => ({ useRouter: () => routerMock, useParams: () => ({ id: 'job-1' }) }));
 vi.mock('../../../../../../../lib/staff-panel-client', () => ({
   staffPanelClient: { editarVaga: vi.fn(), atribuirRecrutadores: vi.fn(), obterVaga: vi.fn() },
 }));
@@ -72,6 +73,21 @@ describe('EditarVagaPage', () => {
 
     await waitFor(() => expect(staffPanelClient.editarVaga).toHaveBeenCalled());
     expect(staffPanelClient.atribuirRecrutadores).not.toHaveBeenCalled();
+  });
+
+  it('redireciona para /staff/entrar quando o carregamento da vaga falha por sessão ausente', async () => {
+    vi.mocked(staffPanelClient.obterVaga).mockRejectedValue(new Error('Usuário não autenticado'));
+    render(<EditarVagaPage />);
+    await waitFor(() => expect(pushMock).toHaveBeenCalledWith('/staff/entrar'));
+  });
+
+  it('redireciona para /staff/entrar quando editarVaga falha por sessão expirada', async () => {
+    vi.mocked(staffPanelClient.obterVaga).mockResolvedValue(vagaBase);
+    vi.mocked(staffPanelClient.editarVaga).mockRejectedValue(new Error('Sessão expirada, faça login novamente'));
+    render(<EditarVagaPage />);
+    await waitFor(() => expect(screen.getByLabelText('Título')).toHaveValue('Engenheiro de Dados'));
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar' }));
+    await waitFor(() => expect(pushMock).toHaveBeenCalledWith('/staff/entrar'));
   });
 
   it('mostra erro quando editarVaga falha', async () => {
