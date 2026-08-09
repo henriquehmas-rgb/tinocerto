@@ -13,7 +13,7 @@ export type { KanbanColumnProps } from './components/KanbanColumn';
 export { KanbanBoard } from './components/KanbanBoard';
 export type { KanbanBoardProps } from './components/KanbanBoard';
 export { PanelNav } from './components/PanelNav';
-export type { PanelNavProps } from './components/PanelNav';
+export type { PanelNavProps, PanelNavLink } from './components/PanelNav';
 export { PanelLayout } from './components/PanelLayout';
 export type { PanelLayoutProps } from './components/PanelLayout';
 export { ScoreChart } from './components/ScoreChart';

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 236 44" width="236" height="44" role="img" aria-label="Tinocerto">
+  <title>Tinocerto</title>
+  <defs></defs>
+  <g transform="translate(0,2)">
+    <path d="M17 1V13" stroke="#6B6784" stroke-width="2"></path>
+    <path d="M17 13L29 22H5L17 13Z" fill="#5A17E0"></path>
+    <path d="M5 22H29L17 39L5 22Z" fill="#6D28FF"></path>
+  </g>
+  <text x="46" y="34" font-family="Archivo, 'Helvetica Neue', Arial, sans-serif" font-weight="800" font-size="34" letter-spacing="-1.1" fill="#14121C">Tinocerto</text>
+</svg>
