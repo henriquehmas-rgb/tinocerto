@@ -3,9 +3,9 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Table, Button, PanelLayout } from '@tinocerto/design-system';
+import { Table, Button, PanelLayout, Badge } from '@tinocerto/design-system';
 import { staffPanelClient, VagaResumo } from '../../../lib/staff-panel-client';
-import { staffAuthClient } from '../../../lib/staff-auth-client';
+import { staffAuthClient, isErroDeAutenticacao } from '../../../lib/staff-auth-client';
 
 export default function PainelPage() {
   const router = useRouter();
@@ -17,9 +17,15 @@ export default function PainelPage() {
     staffPanelClient
       .listarVagas()
       .then(setVagas)
-      .catch((e) => setErro(e.message))
+      .catch((e) => {
+        if (isErroDeAutenticacao(e)) {
+          router.push('/staff/entrar');
+          return;
+        }
+        setErro(e.message);
+      })
       .finally(() => setCarregando(false));
-  }, []);
+  }, [router]);
 
   function handleSair() {
     staffAuthClient.logout();
@@ -34,12 +40,16 @@ export default function PainelPage() {
           <Button>Nova vaga</Button>
         </Link>
       </div>
-      {erro && <p className="text-danger">{erro}</p>}
+      {erro && <p className="text-danger-text">{erro}</p>}
       {!carregando && (
         <Table
           columns={[
             { header: 'Título', render: (vaga: VagaResumo) => <Link href={`/staff/painel/vagas/${vaga.id}`}>{vaga.titulo}</Link> },
-            { header: 'Status', render: (vaga: VagaResumo) => (vaga.publicadoEm ? 'Publicada' : 'Rascunho') },
+            {
+              header: 'Status',
+              render: (vaga: VagaResumo) =>
+                vaga.publicadoEm ? <Badge tone="sucesso">Publicada</Badge> : <Badge tone="neutro">Rascunho</Badge>,
+            },
           ]}
           rows={vagas}
         />

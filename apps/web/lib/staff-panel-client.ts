@@ -9,6 +9,22 @@ export interface VagaResumo {
   criadoEm: string;
 }
 
+export interface VagaCompleta {
+  id: string;
+  titulo: string;
+  descricao: string;
+  habilidadesExigidas: string[];
+  publicadoEm: string | null;
+  criadoEm: string;
+  recrutadorIds: string[];
+}
+
+export interface PerfilStaff {
+  userId: string;
+  tenantId: string;
+  roles: string[];
+}
+
 export interface CriarVagaInput {
   requisitionId: string;
   titulo: string;
@@ -21,6 +37,18 @@ export interface CandidaturaResumo {
   personId: string;
   nomeCandidato: string;
   criadoEm: string;
+}
+
+export interface CandidaturaDetalhe {
+  id: string;
+  jobId: string;
+  etapaFunil: string;
+  criadoEm: string;
+  person: {
+    id: string;
+    nome: string;
+    emailPrincipal: string;
+  };
 }
 
 async function tratarResposta<T>(response: Response, mensagemErroPadrao: string): Promise<T> {
@@ -40,6 +68,11 @@ export const staffPanelClient = {
   async listarVagas(): Promise<VagaResumo[]> {
     const response = await staffAuthClient.authenticatedFetch('/v1/jobs');
     return tratarResposta(response, 'Não foi possível carregar as vagas');
+  },
+
+  async obterVaga(jobId: string): Promise<VagaCompleta> {
+    const response = await staffAuthClient.authenticatedFetch(`/v1/jobs/${jobId}`);
+    return tratarResposta(response, 'Não foi possível carregar a vaga');
   },
 
   async criarVaga(input: CriarVagaInput): Promise<{ id: string }> {
@@ -86,5 +119,15 @@ export const staffPanelClient = {
   async obterRelatorioAssessment(applicationId: string): Promise<RelatorioAssessment> {
     const response = await staffAuthClient.authenticatedFetch(`/v1/applications/${applicationId}/assessment-report`);
     return tratarResposta(response, 'Não foi possível carregar o relatório de assessment');
+  },
+
+  async obterCandidatura(applicationId: string): Promise<CandidaturaDetalhe> {
+    const response = await staffAuthClient.authenticatedFetch(`/v1/applications/${applicationId}`);
+    return tratarResposta(response, 'Não foi possível carregar a candidatura');
+  },
+
+  async obterPerfil(): Promise<PerfilStaff> {
+    const response = await staffAuthClient.authenticatedFetch('/v1/staff/auth/me');
+    return tratarResposta(response, 'Não foi possível carregar o perfil');
   },
 };

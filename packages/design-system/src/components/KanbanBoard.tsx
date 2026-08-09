@@ -25,7 +25,7 @@ export function KanbanBoard<T extends { id: string | number; nome?: string }>({
           itens={itens[coluna.chave] ?? []}
           colunasDestino={colunas.filter((c) => c.chave !== coluna.chave)}
           renderItem={renderItem}
-          labelMover={labelMover ?? ((item) => `Mover ${(item as any).nome ?? 'item'}`)}
+          labelMover={labelMover ?? ((item) => `Mover ${item.nome ?? 'item'}`)}
           onMoverItem={onMoverItem}
         />
       ))}
