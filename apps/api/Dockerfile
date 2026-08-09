@@ -1,6 +1,6 @@
 # apps/api/Dockerfile
 FROM node:20-slim AS base
-RUN corepack enable && corepack prepare pnpm@9.12.0 --activate
+RUN npm install -g pnpm@9.12.0
 
 FROM base AS deps
 WORKDIR /workspace
