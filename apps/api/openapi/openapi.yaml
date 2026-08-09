@@ -50,6 +50,8 @@ paths:
     $ref: './paths/applications.yaml#/offers'
   /v1/applications/{id}/actions/mark-started-work:
     $ref: './paths/applications.yaml#/markStartedWork'
+  /v1/applications/{id}/assessment-report:
+    $ref: './paths/applications.yaml#/assessmentReport'
   /v1/requisitions:
     $ref: './paths/requisitions.yaml#/root'
   /v1/requisitions/{id}/actions/approve:
@@ -58,6 +60,12 @@ paths:
     $ref: './paths/jobs.yaml#/root'
   /v1/jobs/{id}/actions/publish:
     $ref: './paths/jobs.yaml#/publish'
+  /v1/jobs/{id}:
+    $ref: './paths/jobs.yaml#/byId'
+  /v1/jobs/{id}/funil:
+    $ref: './paths/jobs.yaml#/funil'
+  /v1/jobs/{id}/actions/atribuir-recrutadores:
+    $ref: './paths/jobs.yaml#/atribuirRecrutadores'
   /v1/jobs/{id}/actions/declarar-habilidades-exigidas:
     $ref: './paths/jobs.yaml#/declararHabilidadesExigidas'
   /v1/offers/{id}/actions/accept:

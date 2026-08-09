@@ -166,3 +166,108 @@ schemas:
         items: { $ref: '#/schemas/PlatformApplicationListItem' }
       has_more: { type: boolean }
       next_cursor: { type: [string, "null"] }
+
+  JobResumo:
+    type: object
+    required: [id, titulo, publicadoEm, criadoEm]
+    properties:
+      id: { type: string, format: uuid }
+      titulo: { type: string }
+      publicadoEm: { type: [string, "null"], format: date-time }
+      criadoEm: { type: string, format: date-time }
+
+  EditarJobRequest:
+    type: object
+    properties:
+      titulo: { type: string }
+      descricao: { type: string }
+      habilidadesExigidas:
+        type: array
+        items: { type: string }
+
+  AtribuirRecrutadoresRequest:
+    type: object
+    required: [recrutadorIds]
+    properties:
+      recrutadorIds:
+        type: array
+        items: { type: string, format: uuid }
+
+  AtribuirRecrutadoresResponse:
+    type: object
+    required: [id, recrutadorIds]
+    properties:
+      id: { type: string, format: uuid }
+      recrutadorIds:
+        type: array
+        items: { type: string, format: uuid }
+
+  CandidaturaResumo:
+    type: object
+    required: [id, personId, nomeCandidato, criadoEm]
+    properties:
+      id: { type: string, format: uuid }
+      personId: { type: string, format: uuid }
+      nomeCandidato: { type: string }
+      criadoEm: { type: string, format: date-time }
+
+  JobFunilResponse:
+    type: object
+    description: Candidaturas da vaga agrupadas por etapa do funil (chave = etapa_funil, ex. "triagem").
+    additionalProperties:
+      type: array
+      items: { $ref: '#/schemas/CandidaturaResumo' }
+
+  SecaoRelatorio:
+    type: object
+    required: [dimensao, titulo, texto, estimativaTheta, erroPadrao]
+    properties:
+      dimensao: { type: string }
+      titulo: { type: string }
+      texto: { type: string }
+      estimativaTheta: { type: number }
+      erroPadrao: { type: number }
+
+  RelatorioTrilhoA:
+    type: object
+    required: [assessmentResultId, secoes, indiceConfiancaProtocolo, calibracaoProvisoria, avisoCalibracao, rodape]
+    properties:
+      assessmentResultId: { type: string, format: uuid }
+      secoes:
+        type: array
+        items: { $ref: '#/schemas/SecaoRelatorio' }
+      indiceConfiancaProtocolo: { type: [number, "null"] }
+      calibracaoProvisoria: { type: boolean }
+      avisoCalibracao: { type: [string, "null"] }
+      rodape: { type: string }
+
+  ScoreAderencia:
+    type: object
+    required: [scoreAderencia, skillsBatidas, skillsFaltantes, totalExigidas]
+    properties:
+      scoreAderencia: { type: [integer, "null"] }
+      skillsBatidas:
+        type: array
+        items: { type: string }
+      skillsFaltantes:
+        type: array
+        items: { type: string }
+      totalExigidas: { type: integer }
+
+  AssessmentReportResponse:
+    type: object
+    description: >-
+      Relatório comportamental (Trilho A) e score de aderência de skills da
+      candidatura. `relatorio` é null quando não existe result_grant válido
+      (consent revogado/expirado ou nenhum assessment concluído); `aderencia`
+      é null quando a vaga não declarou habilidadesExigidas.
+    required: [relatorio, aderencia]
+    properties:
+      relatorio:
+        oneOf:
+          - { $ref: '#/schemas/RelatorioTrilhoA' }
+          - type: "null"
+      aderencia:
+        oneOf:
+          - { $ref: '#/schemas/ScoreAderencia' }
+          - type: "null"
