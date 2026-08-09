@@ -39,7 +39,6 @@ export class MfaSetupPrecisaCodigoAtualError extends Error {}
 export function isErroDeAutenticacao(erro: unknown): boolean {
   const mensagem = erro instanceof Error ? erro.message : '';
   return mensagem === 'Usuário não autenticado' || mensagem === 'Sessão expirada, faça login novamente';
-
 }
 
 export const staffAuthClient = {
