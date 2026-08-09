@@ -27,6 +27,18 @@ root:
           application/json:
             schema: { $ref: '../components/schemas/common.yaml#/schemas/IdResponse' }
 
+dashboardMetrics:
+  get:
+    operationId: getJobDashboardMetrics
+    summary: Métricas agregadas do painel (vagas ativas/rascunho e candidaturas em andamento por etapa), filtradas por posse quando aplicável.
+    x-tinocerto-auth: session-only
+    responses:
+      '200':
+        description: Métricas agregadas.
+        content:
+          application/json:
+            schema: { $ref: '../components/schemas/hiring.yaml#/schemas/DashboardMetricas' }
+
 publish:
   post:
     operationId: publishJob

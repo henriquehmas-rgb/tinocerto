@@ -176,6 +176,19 @@ schemas:
       publicadoEm: { type: [string, "null"], format: date-time }
       criadoEm: { type: string, format: date-time }
 
+  DashboardMetricas:
+    type: object
+    required: [vagasAtivas, vagasRascunho, candidaturasEmAndamento, porEstagio]
+    properties:
+      vagasAtivas: { type: integer }
+      vagasRascunho: { type: integer }
+      candidaturasEmAndamento: { type: integer }
+      porEstagio:
+        type: object
+        description: Contagem de candidaturas por etapa do funil (chave = etapa_funil, ex. "triagem").
+        additionalProperties:
+          type: integer
+
   EditarJobRequest:
     type: object
     properties:

@@ -58,6 +58,8 @@ paths:
     $ref: './paths/requisitions.yaml#/approve'
   /v1/jobs:
     $ref: './paths/jobs.yaml#/root'
+  /v1/jobs/dashboard-metrics:
+    $ref: './paths/jobs.yaml#/dashboardMetrics'
   /v1/jobs/{id}/actions/publish:
     $ref: './paths/jobs.yaml#/publish'
   /v1/jobs/{id}:

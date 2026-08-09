@@ -242,9 +242,13 @@ export class StaffAuthController {
 
   // I1 da revisão de coerência do Painel do Recrutador: um recrutador não
   // tinha nenhum jeito de descobrir o próprio userId de staff (necessário,
-  // por exemplo, para conferir se já está atribuído a uma vaga). Os dados
-  // já vêm do JWT decodificado por TenantResolutionMiddleware -- nenhuma
-  // consulta ao banco é necessária.
+  // por exemplo, para conferir se já está atribuído a uma vaga). `userId`/
+  // `tenantId`/`roles` já vêm do JWT decodificado por
+  // TenantResolutionMiddleware -- nenhuma consulta ao banco é necessária
+  // para esses três. `email`/`razaoSocial` (achado I2 da revisão final,
+  // usados pelo painel para exibir a identidade do staff/tenant logado)
+  // não estão no JWT, então exigem uma consulta via
+  // `StaffAccountService.getPerfil`, escopada por `userId` E `tenantId`.
   @Get('me')
   async me(@Req() req: RequestWithAuthContext) {
     return this.tenantContext.run(req.tenantId, async (client) => {

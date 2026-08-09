@@ -439,18 +439,4 @@ describe('StaffAuthController', () => {
     expect(getPerfil).toHaveBeenCalledWith(expect.anything(), 'user-1', 'tenant-1');
     expect(result).toEqual({ userId: 'user-1', tenantId: 'tenant-1', roles: ['recrutador'], email: 'recrutador@empresa.example', razaoSocial: 'Empresa Exemplo' });
   });
-  it('me devolve userId/tenantId/roles do request mais email/razaoSocial de StaffAccountService.getPerfil', async () => {
-    const getPerfil = jest.fn().mockResolvedValue({ email: 'ana@empresa.example', razaoSocial: 'Empresa Exemplo Ltda' });
-    const controller = await build({ accountService: { getPerfil } });
-    const req = { tenantId: 'tenant-1', userId: 'user-1', userRoles: ['admin_tenant'] } as any;
-    const result = await controller.me(req);
-    expect(getPerfil).toHaveBeenCalledWith(expect.anything(), 'user-1', 'tenant-1');
-    expect(result).toEqual({
-      userId: 'user-1',
-      tenantId: 'tenant-1',
-      roles: ['admin_tenant'],
-      email: 'ana@empresa.example',
-      razaoSocial: 'Empresa Exemplo Ltda',
-    });
-  });
 });

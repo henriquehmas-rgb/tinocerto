@@ -188,6 +188,10 @@ const ALLOWLIST: Record<string, string> = {
     'POST /v1/jobs cria uma vaga NOVA -- não existe recurso preexistente para checar posse contra. O ' +
     'próprio handler garante que o criador (req.userId) é SEMPRE incluído em recrutadorIds (achado C1 da ' +
     'revisão de coerência, ver comentário em job.controller.ts), o que dá posse imediata sobre a vaga recém-criada.',
+  'JobController.dashboardMetrics':
+    'GET /v1/jobs/dashboard-metrics não opera sobre um :id de vaga específica -- agrega métricas sobre ' +
+    'TODAS as vagas visíveis ao requisitante. JobService.obterMetricas já recebe userId/userRoles e filtra ' +
+    'internamente (mesmo padrão de JobController.list acima); não há um único jobId para checar posse contra.',
   'PlatformApplicationController.list':
     'GET /v1/applications (Plataforma API, prefixo v1/applications mas classe distinta de ' +
     'ApplicationController -- ver comentário em platform-application.controller.ts) é autenticada via ' +

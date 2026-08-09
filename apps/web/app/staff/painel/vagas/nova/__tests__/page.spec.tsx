@@ -13,7 +13,13 @@ vi.mock('../../../../../../lib/staff-panel-client', () => ({
 describe('NovaVagaPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue({ userId: 'u1', tenantId: 't1', roles: ['recrutador'] });
+    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue({
+      userId: 'u1',
+      tenantId: 't1',
+      roles: ['recrutador'],
+      email: 'ana@empresa.example',
+      razaoSocial: 'Empresa Exemplo Ltda',
+    });
   });
 
   it('submete o formulário e navega para a lista ao criar com sucesso', async () => {
