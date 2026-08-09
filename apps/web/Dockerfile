@@ -15,6 +15,7 @@ FROM base AS builder
 WORKDIR /workspace
 COPY --from=deps /workspace ./
 COPY . .
+RUN mkdir -p apps/web/public
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NEXT_PUBLIC_API_URL=https://api.tinocerto.com.br
 RUN pnpm --filter @tinocerto/web build
