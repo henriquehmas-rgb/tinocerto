@@ -173,3 +173,22 @@ markStartedWork:
             schema: { $ref: '../components/schemas/common.yaml#/schemas/IdResponse' }
       '409':
         description: Sem oferta aceita registrada, ou início de trabalho já registrado.
+
+assessmentReport:
+  get:
+    operationId: getApplicationAssessmentReport
+    summary: Relatório comportamental (Trilho A) e score de aderência de skills da candidatura.
+    x-tinocerto-auth: session-only
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    responses:
+      '200':
+        description: Relatório e aderência (ambos podem vir null -- ver descrição do schema).
+        content:
+          application/json:
+            schema: { $ref: '../components/schemas/hiring.yaml#/schemas/AssessmentReportResponse' }
+      '404':
+        description: Candidatura não encontrada.
