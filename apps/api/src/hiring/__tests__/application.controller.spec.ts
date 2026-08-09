@@ -339,6 +339,69 @@ describe('ApplicationController', () => {
     });
   });
 
+  // [Onda 2 de correção pós-revisão do Painel do Recrutador] reject,
+  // extend-offer, GET :id/offers e mark-started-work ficaram sem a guarda
+  // de posse por recrutador na Fase 5a/Task 4 (comentário TODO(fase-5b?)
+  // removido do controller) por não serem consumidas pelo painel ainda --
+  // a revisão de segurança da onda 1 apontou (Critical) que isso é
+  // inaceitável: a rota existe e é explorável via chamada direta à API,
+  // independente de UI. Mesmo padrão de findOne/moveStage acima: busca
+  // application.jobId via findByIdWithPersonView, exige posse, só então
+  // delega -- 404 (não 403) quando o recrutador não está atribuído.
+  describe('guarda de posse por recrutador em reject/extend-offer/offers/mark-started-work (onda 2)', () => {
+    it('POST :id/actions/reject lança NotFoundException quando o recrutador não está atribuído à vaga', async () => {
+      const exigirAcessoMock = jest.fn().mockRejectedValue(new NotFoundException('Vaga não encontrada'));
+      const recordMock = jest.fn();
+      const controller = await buildController(jest.fn(), recordMock, {}, {}, exigirAcessoMock);
+      const req = { tenantId: 'tenant-1', userId: 'recrutador-nao-atribuido', userRoles: ['recrutador'] } as any;
+
+      await expect(
+        controller.reject(req, 'application-1', { motivoCodigo: 'perfil_nao_aderente' }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(recordMock).not.toHaveBeenCalled();
+    });
+
+    it('POST :id/actions/extend-offer lança NotFoundException quando o recrutador não está atribuído à vaga', async () => {
+      const exigirAcessoMock = jest.fn().mockRejectedValue(new NotFoundException('Vaga não encontrada'));
+      const extendMock = jest.fn();
+      const controller = await buildController(jest.fn(), jest.fn(), { extend: extendMock }, {}, exigirAcessoMock);
+      const req = { tenantId: 'tenant-1', userId: 'recrutador-nao-atribuido', userRoles: ['recrutador'] } as any;
+
+      await expect(controller.extendOffer(req, 'application-1', { valor: '8500.00' })).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+      expect(extendMock).not.toHaveBeenCalled();
+    });
+
+    it('GET :id/offers lança NotFoundException quando o recrutador não está atribuído à vaga', async () => {
+      const exigirAcessoMock = jest.fn().mockRejectedValue(new NotFoundException('Vaga não encontrada'));
+      const listByApplicationMock = jest.fn();
+      const controller = await buildController(
+        jest.fn(),
+        jest.fn(),
+        { listByApplication: listByApplicationMock },
+        {},
+        exigirAcessoMock,
+      );
+      const req = { tenantId: 'tenant-1', userId: 'recrutador-nao-atribuido', userRoles: ['recrutador'] } as any;
+
+      await expect(controller.listOffers(req, 'application-1')).rejects.toBeInstanceOf(NotFoundException);
+      expect(listByApplicationMock).not.toHaveBeenCalled();
+    });
+
+    it('POST :id/actions/mark-started-work lança NotFoundException quando o recrutador não está atribuído à vaga', async () => {
+      const exigirAcessoMock = jest.fn().mockRejectedValue(new NotFoundException('Vaga não encontrada'));
+      const registrarMock = jest.fn();
+      const controller = await buildController(jest.fn(), jest.fn(), {}, { registrar: registrarMock }, exigirAcessoMock);
+      const req = { tenantId: 'tenant-1', userId: 'recrutador-nao-atribuido', userRoles: ['recrutador'] } as any;
+
+      await expect(controller.markStartedWork(req, 'application-1', { startDate: '2026-09-01' })).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+      expect(registrarMock).not.toHaveBeenCalled();
+    });
+  });
+
   // [Fase 5a, Task 4] GET :id/assessment-report: combina o relatório por
   // dimensão (Fase 2a, ReportService.gerar) com o score de aderência
   // (Fase 2b, AdherenceService.porCandidatura). O relatório só é gerado
