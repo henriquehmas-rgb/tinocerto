@@ -24,6 +24,12 @@ async function tratarResposta<T>(response: Response, mensagemErroPadrao: string)
   return response.json();
 }
 
+
+export interface RelatorioAssessment {
+  relatorio: { secoes: { dimensao: string; titulo: string; estimativaTheta: number }[] } | null;
+  aderencia: { scoreAderencia: number | null; skillsBatidas: string[]; skillsFaltantes: string[] } | null;
+}
+
 export const staffPanelClient = {
   async listarVagas(): Promise<VagaResumo[]> {
     const response = await staffAuthClient.authenticatedFetch('/v1/jobs');
@@ -55,5 +61,9 @@ export const staffPanelClient = {
       body: JSON.stringify(input),
     });
     await tratarResposta(response, 'Não foi possível editar a vaga');
+  },
+  async obterRelatorioAssessment(applicationId: string): Promise<RelatorioAssessment> {
+    const response = await staffAuthClient.authenticatedFetch(`/v1/applications/${applicationId}/assessment-report`);
+    return tratarResposta(response, 'Não foi possível carregar o relatório de assessment');
   },
 };
