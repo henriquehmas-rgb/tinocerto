@@ -36,18 +36,23 @@
 // platform-api/__tests__/openapi-contract.spec.ts (prova contra a
 // aplicação real, não uma lista mantida à mão que poderia divergir
 // silenciosamente).
+import { readdirSync } from 'fs';
+import path from 'path';
 import { PATH_METADATA } from '@nestjs/common/constants';
 import { CERBOS_CHECK_KEY, CerbosCheckMetadata } from '../../authz/cerbos-check.decorator';
 
 import { JobController } from '../../hiring/job.controller';
 import { ApplicationController } from '../../hiring/application.controller';
 import { OfferController } from '../../hiring/offer.controller';
+import { RequisitionController } from '../../hiring/requisition.controller';
+import { DecisionController } from '../../hiring/decision.controller';
 import { JobDescriptionCopilotController } from '../../copilot/job-description-copilot.controller';
 import { InterviewQuestionSuggestionController } from '../../copilot/interview-question-suggestion.controller';
 import { CandidateSummaryController } from '../../copilot/candidate-summary.controller';
 import { InterviewGuideController } from '../../interview/interview-guide.controller';
 import { InterviewScheduleController } from '../../interview/interview-schedule.controller';
 import { ScorecardController } from '../../interview/scorecard.controller';
+import { GoogleCalendarConnectionController } from '../../interview/scheduling/google-calendar-connection.controller';
 import { PlatformApplicationController } from '../../platform-api/platform-application.controller';
 import { AdherenceController } from '../../matching/adherence.controller';
 import { AdverseImpactController } from '../../insights/adverse-impact.controller';
@@ -193,16 +198,36 @@ const ALLOWLIST: Record<string, string> = {
 };
 
 describe('Cobertura estrutural da guarda de posse por recrutador (onda 3, Item 4)', () => {
+  // Item 2 do "Fix round 1": esta lista continua estática (import TS
+  // exige um símbolo concreto para type-safety -- não há como expressar
+  // "importe dinamicamente qualquer .controller.ts que aparecer" em
+  // tempo de compilação sem um require()/import() dinâmico, que o setup
+  // de Jest deste projeto não usa em nenhum outro teste, ver
+  // openapi-contract.spec.ts, que também mantém imports estáticos). O
+  // buraco que a revisão achou não era "a lista está desatualizada
+  // hoje" -- era "nada FALHA quando ela fica desatualizada amanhã". O
+  // teste `readdirSync` logo abaixo fecha exatamente esse buraco:
+  // compara esta lista contra os arquivos *.controller.ts reais nos 5
+  // diretórios de domínio, e falha se um novo controller for adicionado
+  // ao código sem seu import aparecer aqui -- é isso que torna incluir
+  // RequisitionController/DecisionController/GoogleCalendarConnectionController
+  // (que não interceptam nenhum resourceKind do domínio da vaga, mas
+  // *são* controllers reais destes diretórios) obrigatório: sem eles,
+  // o teste de sincronização abaixo falharia sozinho, provando que o
+  // mecanismo funciona.
   const CONTROLLERS = [
     JobController,
     ApplicationController,
     OfferController,
+    RequisitionController,
+    DecisionController,
     JobDescriptionCopilotController,
     InterviewQuestionSuggestionController,
     CandidateSummaryController,
     InterviewGuideController,
     InterviewScheduleController,
     ScorecardController,
+    GoogleCalendarConnectionController,
     PlatformApplicationController,
     AdherenceController,
     AdverseImpactController,
@@ -260,4 +285,99 @@ describe('Cobertura estrutural da guarda de posse por recrutador (onda 3, Item 4
     const allowlistObsoleta = Object.keys(ALLOWLIST).filter((k) => !chavesReais.has(k));
     expect({ guardaObsoleta, allowlistObsoleta }).toEqual({ guardaObsoleta: [], allowlistObsoleta: [] });
   });
+});
+
+// ---------------------------------------------------------------------
+// Item 2 do "Fix round 1" (correção da vulnerabilidade introduzida pela
+// própria onda 3): a lista CONTROLLERS acima é mantida à mão -- a revisão
+// provou por mutação que um controller NOVO registrado num módulo, com
+// uma rota @CerbosCheck para um resourceKind do domínio da vaga mas SEM
+// guarda nem allowlist, não é pego pelo teste sistêmico se ninguém se
+// lembrar de adicionar seu import a CONTROLLERS.
+//
+// Este bloco fecha o buraco descobrindo TODOS os arquivos *.controller.ts
+// reais sob os 5 diretórios de domínio via readdirSync recursivo (mesma
+// técnica de listYamlFiles em platform-api/__tests__/openapi-contract.spec.ts,
+// adaptada para *.controller.ts) e comparando contra CONTROLLERS. Um
+// require()/import() dinâmico de um arquivo .ts dentro do teste foi
+// descartado -- nenhum outro teste deste projeto faz isso, e o próprio
+// openapi-contract.spec.ts (mesmo problema de fundo: "não deixe uma
+// entrada nova escapar despercebida") resolve com a MESMA estratégia de
+// import estático + comparação estrutural que usamos aqui. Se um
+// controller novo for criado num destes 5 diretórios e seu import não for
+// adicionado a CONTROLLERS (acima), este teste falha pedindo
+// explicitamente para adicionar o import -- é isso que garante que um
+// controller novo entra automaticamente na varredura da suíte anterior,
+// e não fica esquecido como as rotas das ondas 1 e 2.
+describe('Item 2 do Fix round 1 -- CONTROLLERS não pode divergir dos *.controller.ts reais nos diretórios de domínio', () => {
+  // Mesmos 5 diretórios que a revisão já mapeou como "dentro do escopo de
+  // vaga" no comentário de RESOURCE_KINDS_DOMINIO_VAGA acima.
+  const DOMINIO_DIRS = ['hiring', 'copilot', 'matching', 'insights', 'interview'];
+  const SRC_ROOT = path.resolve(__dirname, '../../');
+
+  function listControllerFiles(dir: string, acc: string[] = []): string[] {
+    for (const entrada of readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entrada.name);
+      if (entrada.isDirectory()) listControllerFiles(full, acc);
+      else if (entrada.name.endsWith('.controller.ts') && !entrada.name.endsWith('.spec.ts')) acc.push(full);
+    }
+    return acc;
+  }
+
+  // kebab-case.controller.ts -> PascalCaseController -- mesma convenção
+  // de nomenclatura usada em TODO controller deste projeto (confirmado
+  // pelos nomes reais importados no topo deste arquivo).
+  function inferClassName(filePath: string): string {
+    const base = path.basename(filePath, '.controller.ts');
+    const pascal = base
+      .split('-')
+      .map((segmento) => segmento.charAt(0).toUpperCase() + segmento.slice(1))
+      .join('');
+    return `${pascal}Controller`;
+  }
+
+  const arquivosReais = DOMINIO_DIRS.flatMap((dominio) => listControllerFiles(path.join(SRC_ROOT, dominio)));
+
+  it('sanity check: a varredura de arquivos encontrou pelo menos um *.controller.ts por diretório de domínio', () => {
+    // Mesmo raciocínio dos sanity checks da suíte anterior: um teste que
+    // sempre passa com 0 arquivos encontrados (ex.: SRC_ROOT calculado
+    // errado) não prova nada.
+    for (const dominio of DOMINIO_DIRS) {
+      expect(listControllerFiles(path.join(SRC_ROOT, dominio)).length).toBeGreaterThan(0);
+    }
+  });
+
+  it(
+    'todo *.controller.ts real sob hiring/copilot/matching/insights/interview tem um import estático ' +
+      'correspondente entre os controllers testados pela suíte de cobertura estrutural acima',
+    () => {
+      const nomesClassesImportadas = new Set([
+        JobController.name,
+        ApplicationController.name,
+        OfferController.name,
+        RequisitionController.name,
+        DecisionController.name,
+        JobDescriptionCopilotController.name,
+        InterviewQuestionSuggestionController.name,
+        CandidateSummaryController.name,
+        InterviewGuideController.name,
+        InterviewScheduleController.name,
+        ScorecardController.name,
+        GoogleCalendarConnectionController.name,
+        AdherenceController.name,
+        AdverseImpactController.name,
+      ]);
+
+      const faltando = arquivosReais
+        .map((f) => ({ arquivo: path.relative(SRC_ROOT, f), classeEsperada: inferClassName(f) }))
+        .filter(({ classeEsperada }) => !nomesClassesImportadas.has(classeEsperada));
+
+      // Mensagem de falha explícita: se um controller novo aparecer aqui,
+      // é o alerta -- adicione o import no topo deste arquivo e a classe
+      // ao Set acima (e, se ele expuser uma rota @CerbosCheck para um
+      // resourceKind do domínio da vaga, também a CONTROLLERS da suíte
+      // anterior).
+      expect(faltando).toEqual([]);
+    },
+  );
 });
