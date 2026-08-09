@@ -9,6 +9,16 @@ export interface VagaResumo {
   criadoEm: string;
 }
 
+export interface VagaCompleta {
+  id: string;
+  titulo: string;
+  descricao: string;
+  habilidadesExigidas: string[];
+  publicadoEm: string | null;
+  criadoEm: string;
+  recrutadorIds: string[];
+}
+
 export interface CriarVagaInput {
   requisitionId: string;
   titulo: string;
@@ -40,6 +50,11 @@ export const staffPanelClient = {
   async listarVagas(): Promise<VagaResumo[]> {
     const response = await staffAuthClient.authenticatedFetch('/v1/jobs');
     return tratarResposta(response, 'Não foi possível carregar as vagas');
+  },
+
+  async obterVaga(jobId: string): Promise<VagaCompleta> {
+    const response = await staffAuthClient.authenticatedFetch(`/v1/jobs/${jobId}`);
+    return tratarResposta(response, 'Não foi possível carregar a vaga');
   },
 
   async criarVaga(input: CriarVagaInput): Promise<{ id: string }> {
