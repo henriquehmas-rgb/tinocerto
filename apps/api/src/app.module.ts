@@ -14,6 +14,7 @@ import { LlmRouterModule } from './llm-router/llm-router.module';
 import { InterviewModule } from './interview/interview.module';
 import { CopilotModule } from './copilot/copilot.module';
 import { PlatformApiModule } from './platform-api/platform-api.module';
+import { HealthModule } from './health/health.module';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { PlatformApiModule } from './platform-api/platform-api.module';
     InterviewModule,
     CopilotModule,
     PlatformApiModule,
+    HealthModule,
   ],
   // TenantResolutionMiddleware (Task 8) agora injeta StaffJwtService via
   // construtor -- NestMiddleware com DI exige que a classe seja um provider
@@ -91,6 +93,9 @@ export class AppModule implements NestModule {
         'v1/staff/auth/login',
         'v1/staff/auth/login/mfa',
         'v1/staff/auth/refresh',
+        // '/health' nao pode depender de resolucao de tenant -- e usado pelo
+        // HEALTHCHECK do Docker antes de qualquer contexto de request existir.
+        'health',
       )
       .forRoutes('*');
   }
