@@ -29,7 +29,7 @@ describe('NovaVagaPage', () => {
         expect.objectContaining({ titulo: 'Engenheiro de Dados', requisitionId: 'req-1' }),
       ),
     );
-    expect(pushMock).toHaveBeenCalledWith('/staff/painel');
+    expect(pushMock).toHaveBeenCalledWith('/staff/painel/vagas');
   });
 
   it('mostra erro quando a criação falha', async () => {

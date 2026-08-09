@@ -6,6 +6,11 @@ import { Button, PanelLayout } from '@tinocerto/design-system';
 import { staffPanelClient } from '../../../../../lib/staff-panel-client';
 import { staffAuthClient, isErroDeAutenticacao } from '../../../../../lib/staff-auth-client';
 
+const NAV_LINKS = [
+  { href: '/staff/painel', label: 'Dashboard' },
+  { href: '/staff/painel/vagas', label: 'Vagas' },
+];
+
 export default function NovaVagaPage() {
   const router = useRouter();
   const [titulo, setTitulo] = useState('');
@@ -30,7 +35,7 @@ export default function NovaVagaPage() {
     setEnviando(true);
     try {
       await staffPanelClient.criarVaga({ titulo, requisitionId });
-      router.push('/staff/painel');
+      router.push('/staff/painel/vagas');
     } catch (e) {
       if (isErroDeAutenticacao(e)) {
         router.push('/staff/entrar');
@@ -48,7 +53,7 @@ export default function NovaVagaPage() {
   }
 
   return (
-    <PanelLayout nomeStaff="" nomeTenant="" onSair={handleSair}>
+    <PanelLayout nomeStaff="" nomeTenant="" links={NAV_LINKS} onSair={handleSair}>
       <form onSubmit={handleSubmit} className="flex flex-col gap-4 max-w-md p-6">
         <h1 className="font-display text-xl">Nova vaga</h1>
         {erro && <p className="text-danger-text">{erro}</p>}
