@@ -34,7 +34,6 @@ export default function ConfiguracoesPage() {
   useEffect(() => {
     carregar();
     staffPanelClient.obterPerfil().then(setPerfil).catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router]);
 
   async function handleConectar() {
