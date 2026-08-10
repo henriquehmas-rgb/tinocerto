@@ -21,4 +21,13 @@ describe('Button', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Salvar' }));
     expect(onClick).toHaveBeenCalledTimes(1);
   });
+
+  it('fica desabilitado quando disabled=true e nao dispara onClick', () => {
+    const onClick = vi.fn();
+    render(<Button disabled onClick={onClick}>Enviar</Button>);
+    const button = screen.getByRole('button', { name: 'Enviar' });
+    expect(button).toBeDisabled();
+    fireEvent.click(button);
+    expect(onClick).not.toHaveBeenCalled();
+  });
 });
