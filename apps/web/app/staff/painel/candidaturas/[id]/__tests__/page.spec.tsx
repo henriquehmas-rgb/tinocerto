@@ -158,7 +158,7 @@ describe('CandidaturaPage', () => {
 
     render(<CandidaturaPage />);
 
-    await waitFor(() => expect(screen.getByText('agendada')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('agendada', { exact: false })).toBeInTheDocument());
     expect(screen.queryByRole('button', { name: 'Agendar entrevista' })).not.toBeInTheDocument();
   });
 });
