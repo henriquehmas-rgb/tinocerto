@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Get,
   Param,
   Patch,
   Post,
@@ -190,4 +191,23 @@ export class InterviewGuideController {
       throw err;
     }
   }
+  @Get('by-job/:jobId')
+  @CerbosCheck('interview_guide', 'read')
+  async obterPorVaga(@Req() req: RequestWithAuthContext, @Param('jobId') jobId: string) {
+    return this.tenantContext.run(req.tenantId, async (client) => {
+      await this.jobRecrutadorService.exigirAcesso(client, {
+        tenantId: req.tenantId,
+        jobId,
+        userId: req.userId,
+        userRoles: req.userRoles,
+      });
+      const guide = await this.guideService.obterParaVaga(client, req.tenantId, jobId);
+      if (!guide) {
+        throw new NotFoundException(`Nenhum roteiro de entrevista encontrado para a vaga ${jobId}`);
+      }
+      return guide;
+    });
+  }
+
+
 }

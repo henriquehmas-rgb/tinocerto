@@ -136,4 +136,63 @@ describe('InterviewGuideService', () => {
       ),
     ).rejects.toBeInstanceOf(InterviewGuideNotFoundError);
   });
+  describe('obterParaVaga', () => {
+    it('retorna null quando a vaga não tem nenhum roteiro', async () => {
+      const semGuia = await adminPool.query<{ id: string }>(
+        `INSERT INTO job (tenant_id, requisition_id, titulo, seo_slug) VALUES ($1, $2, 'Vaga Sem Guia', 'vaga-sem-guia-0079') RETURNING id`,
+        [tenantId, (await adminPool.query<{ id: string }>(
+          `SELECT id FROM requisition WHERE tenant_id = $1 LIMIT 1`,
+          [tenantId],
+        )).rows[0].id],
+      );
+      const resultado = await tenantContext.run(tenantId, (client) =>
+        guideService.obterParaVaga(client, tenantId, semGuia.rows[0].id),
+      );
+      expect(resultado).toBeNull();
+      await adminPool.query('DELETE FROM job WHERE id = $1', [semGuia.rows[0].id]);
+    });
+
+    it('retorna as competências do rascunho quando o guia ainda não foi publicado', async () => {
+      const { id: guideId } = await tenantContext.run(tenantId, (client) =>
+        guideService.criarRascunho(client, {
+          tenantId,
+          jobId,
+          competencias: [COMPETENCIAS_5_ANCORAS('Trabalho em equipe')],
+        }),
+      );
+
+      const resultado = await tenantContext.run(tenantId, (client) =>
+        guideService.obterParaVaga(client, tenantId, jobId),
+      );
+
+      expect(resultado).not.toBeNull();
+      expect(resultado?.id).toBe(guideId);
+      expect(resultado?.status).toBe('rascunho');
+      expect(resultado?.publishedVersionId).toBeNull();
+      expect(resultado?.competencias).toEqual(
+        expect.arrayContaining([expect.objectContaining({ nome: 'Trabalho em equipe' })]),
+      );
+    });
+
+    it('retorna a versão publicada mais recente quando o guia já foi publicado', async () => {
+      const { id: guideId } = await tenantContext.run(tenantId, (client) =>
+        guideService.criarRascunho(client, {
+          tenantId,
+          jobId,
+          competencias: [COMPETENCIAS_5_ANCORAS('Liderança')],
+        }),
+      );
+      const v1 = await tenantContext.run(tenantId, (client) => guideService.publicar(client, tenantId, guideId));
+
+      const resultado = await tenantContext.run(tenantId, (client) =>
+        guideService.obterParaVaga(client, tenantId, jobId),
+      );
+
+      expect(resultado?.status).toBe('publicado');
+      expect(resultado?.publishedVersionId).toBe(v1.id);
+      expect(resultado?.competencias).toEqual(
+        expect.arrayContaining([expect.objectContaining({ nome: 'Liderança' })]),
+      );
+    });
+  });
 });

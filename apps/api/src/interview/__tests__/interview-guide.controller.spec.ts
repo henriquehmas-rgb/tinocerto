@@ -9,7 +9,7 @@ import { CerbosGuard } from '../../authz/cerbos.guard';
 
 describe('InterviewGuideController', () => {
   async function buildController(
-    guideServiceMock: { criarRascunho?: jest.Mock; editarRascunho?: jest.Mock; publicar?: jest.Mock } = {},
+    guideServiceMock: { criarRascunho?: jest.Mock; editarRascunho?: jest.Mock; publicar?: jest.Mock; obterParaVaga?: jest.Mock } = {},
     barsGenerationMock: { gerarRascunho?: jest.Mock } = {},
     // Guarda de posse por recrutador (onda 3 de correção pós-revisão) --
     // default: o requisitante tem acesso, e (para editar/publicar) o SELECT
@@ -30,6 +30,7 @@ describe('InterviewGuideController', () => {
             criarRascunho: guideServiceMock.criarRascunho ?? jest.fn(),
             editarRascunho: guideServiceMock.editarRascunho ?? jest.fn(),
             publicar: guideServiceMock.publicar ?? jest.fn(),
+            obterParaVaga: guideServiceMock.obterParaVaga ?? jest.fn(),
           },
         },
         { provide: BarsGenerationService, useValue: { gerarRascunho: barsGenerationMock.gerarRascunho ?? jest.fn() } },
@@ -167,5 +168,48 @@ describe('InterviewGuideController', () => {
       await expect(controller.publicar(req, 'guide-1')).rejects.toBeInstanceOf(NotFoundException);
       expect(publicarMock).not.toHaveBeenCalled();
     });
+
+    it('obterPorVaga delega para guideService.obterParaVaga após exigir posse, e devolve 404 quando não há roteiro', async () => {
+      const exigirAcessoMock = jest.fn().mockResolvedValue(undefined);
+      const obterParaVagaMock = jest.fn().mockResolvedValue(null);
+      const controller = await buildController(
+        { obterParaVaga: obterParaVagaMock },
+        {},
+        jest.fn().mockResolvedValue({ rows: [{ job_id: 'job-1' }] }),
+        exigirAcessoMock,
+      );
+      const req = { tenantId: 'tenant-1', userId: 'user-1', userRoles: ['recrutador'] } as any;
+
+      await expect(controller.obterPorVaga(req, 'job-1')).rejects.toThrow('Nenhum roteiro de entrevista encontrado para a vaga job-1');
+
+      expect(exigirAcessoMock).toHaveBeenCalledWith(expect.anything(), {
+        tenantId: 'tenant-1',
+        jobId: 'job-1',
+        userId: 'user-1',
+        userRoles: ['recrutador'],
+      });
+    });
+
+    it('obterPorVaga devolve o roteiro quando guideService.obterParaVaga encontra um', async () => {
+      const exigirAcessoMock = jest.fn().mockResolvedValue(undefined);
+      const obterParaVagaMock = jest.fn().mockResolvedValue({
+        id: 'guide-1',
+        status: 'publicado',
+        competencias: [],
+        publishedVersionId: 'version-1',
+      });
+      const controller = await buildController(
+        { obterParaVaga: obterParaVagaMock },
+        {},
+        jest.fn().mockResolvedValue({ rows: [{ job_id: 'job-1' }] }),
+        exigirAcessoMock,
+      );
+      const req = { tenantId: 'tenant-1', userId: 'user-1', userRoles: ['recrutador'] } as any;
+
+      const result = await controller.obterPorVaga(req, 'job-1');
+
+      expect(result).toEqual({ id: 'guide-1', status: 'publicado', competencias: [], publishedVersionId: 'version-1' });
+    });
+
   });
 });

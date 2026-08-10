@@ -9,6 +9,14 @@ export interface InterviewGuideCriarInput {
   competencias: CompetenciaComAncorasInput[];
 }
 
+export interface InterviewGuideResumo {
+  id: string;
+  status: 'rascunho' | 'publicado';
+  competencias: CompetenciaComAncorasInput[];
+  publishedVersionId: string | null;
+}
+
+
 // [Minor 1/2 da revisão final] Erros discriminados por classe -- antes
 // publicar() e editarRascunho() lançavam `Error` genérico para casos que
 // merecem respostas HTTP diferentes (404 vs 400). O controller mapeia cada
@@ -88,4 +96,32 @@ export class InterviewGuideService {
 
     return { id: inserted.rows[0].id, versao: novaVersao };
   }
+
+  async obterParaVaga(client: PoolClient, tenantId: string, jobId: string): Promise<InterviewGuideResumo | null> {
+    const guide = await client.query<{ id: string; status: 'rascunho' | 'publicado'; competencias_rascunho: CompetenciaComAncorasInput[] }>(
+      `SELECT id, status, competencias_rascunho FROM interview_guide
+       WHERE tenant_id = $1 AND job_id = $2 ORDER BY criado_em DESC LIMIT 1`,
+      [tenantId, jobId],
+    );
+    if (guide.rows.length === 0) return null;
+    const row = guide.rows[0];
+
+    if (row.status === 'rascunho') {
+      return { id: row.id, status: 'rascunho', competencias: row.competencias_rascunho, publishedVersionId: null };
+    }
+
+    const versao = await client.query<{ id: string; competencias_snapshot: CompetenciaComAncorasInput[] }>(
+      `SELECT id, competencias_snapshot FROM interview_guide_version
+       WHERE tenant_id = $1 AND interview_guide_id = $2 ORDER BY versao DESC LIMIT 1`,
+      [tenantId, row.id],
+    );
+    return {
+      id: row.id,
+      status: 'publicado',
+      competencias: versao.rows[0].competencias_snapshot,
+      publishedVersionId: versao.rows[0].id,
+    };
+  }
+
+
 }
