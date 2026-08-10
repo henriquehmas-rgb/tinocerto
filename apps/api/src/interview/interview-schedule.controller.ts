@@ -1,4 +1,4 @@
-import { Body, Controller, NotFoundException, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, NotFoundException, Param, Post, Req, UseGuards } from '@nestjs/common';
 import { IsArray, IsDateString, IsNotEmpty, IsString } from 'class-validator';
 import { Request } from 'express';
 import { TenantContext } from '../database/tenant-context';
@@ -8,6 +8,7 @@ import { CerbosCheck } from '../authz/cerbos-check.decorator';
 import { ApplicationService } from '../hiring/application.service';
 import { JobRecrutadorService } from '../hiring/job-recrutador.service';
 import { InterviewSchedulingService } from './scheduling/interview-scheduling.service';
+import { InterviewScheduleService } from './interview-schedule.service';
 
 class CriarAgendaDto {
   @IsString() @IsNotEmpty() applicationId!: string;
@@ -31,6 +32,7 @@ export class InterviewScheduleController {
     private readonly schedulingService: InterviewSchedulingService,
     private readonly applicationService: ApplicationService,
     private readonly jobRecrutadorService: JobRecrutadorService,
+    private readonly interviewScheduleService: InterviewScheduleService,
     databaseService: DatabaseService,
   ) {
     this.tenantContext = new TenantContext(databaseService.pool);
@@ -87,6 +89,28 @@ export class InterviewScheduleController {
       dataHora: new Date(dto.dataHora),
       avaliadorIds: dto.avaliadorIds,
       organizadoPorUserId: req.userId,
+    });
+  }
+
+  @Get('by-application/:applicationId')
+  @CerbosCheck('interview_schedule', 'read')
+  async obterPorCandidatura(@Req() req: RequestWithAuthContext, @Param('applicationId') applicationId: string) {
+    return this.tenantContext.run(req.tenantId, async (client) => {
+      const view = await this.applicationService.findByIdWithPersonView(client, applicationId);
+      if (!view) {
+        throw new NotFoundException(`Candidatura ${applicationId} não encontrada`);
+      }
+      await this.jobRecrutadorService.exigirAcesso(client, {
+        tenantId: req.tenantId,
+        jobId: view.jobId,
+        userId: req.userId,
+        userRoles: req.userRoles,
+      });
+      const schedule = await this.interviewScheduleService.obterPorCandidatura(client, req.tenantId, applicationId);
+      if (!schedule) {
+        throw new NotFoundException(`Nenhum agendamento encontrado para a candidatura ${applicationId}`);
+      }
+      return schedule;
     });
   }
 }

@@ -26,4 +26,19 @@ export class InterviewScheduleService {
     }
     return { id: scheduleId };
   }
+
+  async obterPorCandidatura(
+    client: PoolClient,
+    tenantId: string,
+    applicationId: string,
+  ): Promise<{ id: string; dataHora: Date; status: string } | null> {
+    const result = await client.query<{ id: string; data_hora: Date; status: string }>(
+      `SELECT id, data_hora, status FROM interview_schedule
+       WHERE tenant_id = $1 AND application_id = $2 ORDER BY criado_em DESC LIMIT 1`,
+      [tenantId, applicationId],
+    );
+    if (result.rows.length === 0) return null;
+    const row = result.rows[0];
+    return { id: row.id, dataHora: row.data_hora, status: row.status };
+  }
 }

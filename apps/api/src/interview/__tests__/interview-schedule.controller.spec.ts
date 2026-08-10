@@ -2,6 +2,7 @@ import { Test } from '@nestjs/testing';
 import { NotFoundException } from '@nestjs/common';
 import { InterviewScheduleController } from '../interview-schedule.controller';
 import { InterviewSchedulingService } from '../scheduling/interview-scheduling.service';
+import { InterviewScheduleService } from '../interview-schedule.service';
 import { ApplicationService } from '../../hiring/application.service';
 import { JobRecrutadorService } from '../../hiring/job-recrutador.service';
 import { DatabaseService } from '../../database/database.service';
@@ -18,6 +19,7 @@ describe('InterviewScheduleController', () => {
     // padrao de AdherenceController.spec.ts.
     findByIdWithPersonViewMock: jest.Mock = jest.fn().mockResolvedValue({ id: 'application-1', jobId: 'job-1' }),
     exigirAcessoMock: jest.Mock = jest.fn().mockResolvedValue(undefined),
+    obterPorCandidaturaMock: jest.Mock = jest.fn().mockResolvedValue(null),
   ) {
     const fakeClient = { query: jest.fn().mockResolvedValue({ rows: [] }), release: jest.fn() };
     const fakePool = { connect: jest.fn().mockResolvedValue(fakeClient) };
@@ -25,6 +27,7 @@ describe('InterviewScheduleController', () => {
       controllers: [InterviewScheduleController],
       providers: [
         { provide: InterviewSchedulingService, useValue: { agendar: agendarMock } },
+        { provide: InterviewScheduleService, useValue: { obterPorCandidatura: obterPorCandidaturaMock } },
         { provide: ApplicationService, useValue: { findByIdWithPersonView: findByIdWithPersonViewMock } },
         { provide: JobRecrutadorService, useValue: { exigirAcesso: exigirAcessoMock } },
         { provide: DatabaseService, useValue: { pool: fakePool } },
@@ -111,6 +114,42 @@ describe('InterviewScheduleController', () => {
         userId: 'recrutador-nao-atribuido',
         userRoles: ['recrutador'],
       });
+    });
+  });
+
+  describe('GET by-application/:applicationId', () => {
+    it('delega para interviewScheduleService.obterPorCandidatura após exigir posse', async () => {
+      const findByIdMock = jest.fn().mockResolvedValue({ jobId: 'job-1' });
+      const exigirAcessoMock = jest.fn().mockResolvedValue(undefined);
+      const obterPorCandidaturaMock = jest.fn().mockResolvedValue(null);
+      const controller = await buildController(undefined, findByIdMock, exigirAcessoMock, obterPorCandidaturaMock);
+      const req = { tenantId: 'tenant-1', userId: 'user-1', userRoles: ['recrutador'] } as any;
+
+      await expect(controller.obterPorCandidatura(req, 'app-1')).rejects.toThrow(
+        'Nenhum agendamento encontrado para a candidatura app-1',
+      );
+
+      expect(findByIdMock).toHaveBeenCalledWith(expect.anything(), 'app-1');
+      expect(exigirAcessoMock).toHaveBeenCalledWith(expect.anything(), {
+        tenantId: 'tenant-1',
+        jobId: 'job-1',
+        userId: 'user-1',
+        userRoles: ['recrutador'],
+      });
+      expect(obterPorCandidaturaMock).toHaveBeenCalledWith(expect.anything(), 'tenant-1', 'app-1');
+    });
+
+    it('retorna o agendamento quando existe', async () => {
+      const schedule = { id: 'schedule-1', dataHora: new Date('2026-09-01T14:00:00Z'), status: 'agendada' };
+      const findByIdMock = jest.fn().mockResolvedValue({ jobId: 'job-1' });
+      const exigirAcessoMock = jest.fn().mockResolvedValue(undefined);
+      const obterPorCandidaturaMock = jest.fn().mockResolvedValue(schedule);
+      const controller = await buildController(undefined, findByIdMock, exigirAcessoMock, obterPorCandidaturaMock);
+      const req = { tenantId: 'tenant-1', userId: 'user-1', userRoles: ['recrutador'] } as any;
+
+      const result = await controller.obterPorCandidatura(req, 'app-1');
+
+      expect(result).toEqual(schedule);
     });
   });
 });
