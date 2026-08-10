@@ -59,12 +59,13 @@ export default function CandidaturaPage() {
 
   async function handleAgendar(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!roteiro?.publishedVersionId) return;
+    if (!roteiro?.publishedVersionId || !perfil) return;
     try {
       await staffPanelClient.agendarEntrevista({
         applicationId: params.id,
         interviewGuideVersionId: roteiro.publishedVersionId,
         dataHora: new Date(dataHoraInput).toISOString(),
+        avaliadorIds: [perfil.userId],
       });
       staffPanelClient.obterAgendaEntrevista(params.id).then(setAgenda).catch(() => {});
     } catch (e) {

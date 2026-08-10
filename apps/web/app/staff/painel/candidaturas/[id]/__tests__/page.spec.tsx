@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import CandidaturaPage from '../page';
 import { staffPanelClient } from '../../../../../../lib/staff-panel-client';
 
@@ -160,5 +160,31 @@ describe('CandidaturaPage', () => {
 
     await waitFor(() => expect(screen.getByText('agendada', { exact: false })).toBeInTheDocument());
     expect(screen.queryByRole('button', { name: 'Agendar entrevista' })).not.toBeInTheDocument();
+  });
+
+  it('envia avaliadorIds com o id do usuário logado ao agendar a entrevista', async () => {
+    vi.mocked(staffPanelClient.obterRelatorioAssessment).mockResolvedValue({ relatorio: null, aderencia: null });
+    vi.mocked(staffPanelClient.obterCandidatura).mockResolvedValue({
+      id: 'app-1', jobId: 'job-1', etapaFunil: 'entrevista', criadoEm: '2026-08-01T00:00:00Z',
+      person: { id: 'p1', nome: 'Fulano', emailPrincipal: 'fulano@example.com' },
+    });
+    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue(PERFIL_MOCK);
+    vi.mocked(staffPanelClient.obterRoteiroEntrevista).mockResolvedValue({
+      id: 'guide-1', status: 'publicado', publishedVersionId: 'version-1', competencias: [],
+    });
+    vi.mocked(staffPanelClient.obterAgendaEntrevista).mockResolvedValue(null);
+    vi.mocked(staffPanelClient.agendarEntrevista).mockResolvedValue(undefined);
+
+    render(<CandidaturaPage />);
+
+    const input = await screen.findByLabelText('Data e hora');
+    fireEvent.change(input, { target: { value: '2026-09-01T14:00' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Agendar entrevista' }));
+
+    await waitFor(() =>
+      expect(staffPanelClient.agendarEntrevista).toHaveBeenCalledWith(
+        expect.objectContaining({ avaliadorIds: ['u1'] }),
+      ),
+    );
   });
 });

@@ -202,11 +202,11 @@ export const staffPanelClient = {
     return tratarResposta(response, 'Não foi possível carregar o agendamento');
   },
 
-  async agendarEntrevista(input: { applicationId: string; interviewGuideVersionId: string; dataHora: string }): Promise<void> {
+  async agendarEntrevista(input: { applicationId: string; interviewGuideVersionId: string; dataHora: string; avaliadorIds: string[] }): Promise<void> {
     const response = await staffAuthClient.authenticatedFetch('/v1/interview-schedules', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...input, avaliadorIds: [] }),
+      body: JSON.stringify(input),
     });
     await tratarResposta(response, 'Não foi possível agendar a entrevista');
   },
