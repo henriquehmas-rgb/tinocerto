@@ -9,6 +9,7 @@ import { staffAuthClient, isErroDeAutenticacao } from '../../../../../lib/staff-
 const NAV_LINKS = [
   { href: '/staff/painel', label: 'Dashboard' },
   { href: '/staff/painel/vagas', label: 'Vagas' },
+  { href: '/staff/painel/configuracoes', label: 'Configurações' },
 ];
 
 export default function CandidaturaPage() {
