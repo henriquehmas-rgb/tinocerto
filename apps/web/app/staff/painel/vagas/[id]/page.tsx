@@ -3,8 +3,8 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { KanbanBoard, PanelLayout } from '@tinocerto/design-system';
-import { staffPanelClient, CandidaturaResumo, PerfilStaff } from '../../../../../lib/staff-panel-client';
+import { KanbanBoard, PanelLayout, Card, Badge, Button } from '@tinocerto/design-system';
+import { staffPanelClient, CandidaturaResumo, PerfilStaff, RoteiroEntrevista, VagaCompleta } from '../../../../../lib/staff-panel-client';
 import { staffAuthClient, isErroDeAutenticacao } from '../../../../../lib/staff-auth-client';
 
 // Etapas conhecidas hoje, sempre mostradas como coluna (e como destino no
@@ -40,6 +40,8 @@ export default function FunilPage() {
   const [funil, setFunil] = useState<Record<string, CandidaturaResumo[]>>({});
   const [erro, setErro] = useState<string | null>(null);
   const [perfil, setPerfil] = useState<PerfilStaff | null>(null);
+  const [vaga, setVaga] = useState<VagaCompleta | null>(null);
+  const [roteiro, setRoteiro] = useState<RoteiroEntrevista | null>(null);
 
   const carregar = useCallback(() => {
     staffPanelClient
@@ -59,7 +61,25 @@ export default function FunilPage() {
   useEffect(() => {
     carregar();
     staffPanelClient.obterPerfil().then(setPerfil).catch(() => {});
-  }, [carregar]);
+    staffPanelClient.obterVaga(params.id).then(setVaga).catch(() => {});
+    staffPanelClient.obterRoteiroEntrevista(params.id).then(setRoteiro).catch(() => {});
+  }, [carregar, params.id]);
+
+  async function handleGerarRoteiro() {
+    if (!vaga) return;
+    await staffPanelClient.gerarRoteiroEntrevista({
+      jobId: params.id,
+      tituloVaga: vaga.titulo,
+      textoRequisicao: vaga.descricao,
+    });
+    staffPanelClient.obterRoteiroEntrevista(params.id).then(setRoteiro).catch(() => {});
+  }
+
+  async function handlePublicarRoteiro() {
+    if (!roteiro) return;
+    await staffPanelClient.publicarRoteiroEntrevista(roteiro.id);
+    staffPanelClient.obterRoteiroEntrevista(params.id).then(setRoteiro).catch(() => {});
+  }
 
   async function handleMover(candidatura: CandidaturaResumo, novaColuna: string) {
     await staffPanelClient.moverEtapa(candidatura.id, novaColuna);
@@ -89,7 +109,28 @@ export default function FunilPage() {
           </Link>
         </div>
         {erro && <p className="text-danger-text">{erro}</p>}
-        <KanbanBoard
+        <Card>
+          <div className="flex items-center justify-between mb-2">
+            <p className="font-ui text-sm font-medium text-text">Roteiro de entrevista</p>
+            {roteiro?.status === 'publicado' && <Badge tone="sucesso">Publicado</Badge>}
+          </div>
+          {!roteiro && (
+            <Button onClick={handleGerarRoteiro}>Gerar roteiro de entrevista</Button>
+          )}
+          {roteiro && (
+            <div className="flex flex-col gap-2">
+              {roteiro.competencias.map((competencia) => (
+                <div key={competencia.nome}>
+                  <p className="font-ui text-sm font-medium text-text">{competencia.nome}</p>
+                </div>
+              ))}
+              {roteiro.status === 'rascunho' && (
+                <Button onClick={handlePublicarRoteiro}>Publicar</Button>
+              )}
+            </div>
+          )}
+        </Card>
+                <KanbanBoard
           colunas={colunas}
           itens={funil}
           renderItem={(item: CandidaturaResumo) => (

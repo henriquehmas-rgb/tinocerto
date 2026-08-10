@@ -6,12 +6,28 @@ import { staffPanelClient } from '../../../../../../lib/staff-panel-client';
 const pushMock = vi.fn();
 const routerMock = { push: pushMock };
 vi.mock('next/navigation', () => ({ useParams: () => ({ id: 'job-1' }), useRouter: () => routerMock }));
-vi.mock('../../../../../../lib/staff-panel-client', () => ({
-  staffPanelClient: { obterFunil: vi.fn(), moverEtapa: vi.fn(), obterPerfil: vi.fn() },
+const PERFIL_MOCK = {  userId: 'u1',  tenantId: 't1',  roles: ['admin_tenant'],  email: 'ana@empresa.example',  razaoSocial: 'Empresa Exemplo Ltda',};vi.mock('../../../../../../lib/staff-panel-client', () => ({
+  staffPanelClient: {
+    obterFunil: vi.fn(),
+    moverEtapa: vi.fn(),
+    obterPerfil: vi.fn(),
+    obterVaga: vi.fn(),
+    obterRoteiroEntrevista: vi.fn(),
+    gerarRoteiroEntrevista: vi.fn(),
+    publicarRoteiroEntrevista: vi.fn(),
+  },
 }));
 
+
 describe('FunilPage', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Provide default mock returns for new methods
+    vi.mocked(staffPanelClient.obterVaga).mockResolvedValue(null);
+    vi.mocked(staffPanelClient.obterRoteiroEntrevista).mockResolvedValue(null);
+    vi.mocked(staffPanelClient.gerarRoteiroEntrevista).mockResolvedValue(undefined);
+    vi.mocked(staffPanelClient.publicarRoteiroEntrevista).mockResolvedValue(undefined);
+  });
 
   it('renderiza as colunas do funil com as candidaturas carregadas', async () => {
     // Payload moldado como o backend real retorna: JobService.funil() só inclui
@@ -135,4 +151,55 @@ describe('FunilPage', () => {
     render(<FunilPage />);
     await waitFor(() => expect(pushMock).toHaveBeenCalledWith('/staff/entrar'));
   });
+
+
+  it('mostra botão de gerar roteiro quando a vaga ainda não tem nenhum', async () => {
+    vi.mocked(staffPanelClient.obterFunil).mockResolvedValue({});
+    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue(PERFIL_MOCK);
+    vi.mocked(staffPanelClient.obterVaga).mockResolvedValue({
+      id: 'job-1', titulo: 'Vaga X', descricao: 'Descrição da vaga X',
+      habilidadesExigidas: [], publicadoEm: null, criadoEm: '2026-08-01T00:00:00Z', recrutadorIds: [],
+    });
+    vi.mocked(staffPanelClient.obterRoteiroEntrevista).mockResolvedValue(null);
+
+    render(<FunilPage />);
+
+    await waitFor(() => expect(screen.getByText('Gerar roteiro de entrevista')).toBeInTheDocument());
+  });
+
+  it('mostra botão de publicar quando o roteiro está em rascunho', async () => {
+    vi.mocked(staffPanelClient.obterFunil).mockResolvedValue({});
+    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue(PERFIL_MOCK);
+    vi.mocked(staffPanelClient.obterVaga).mockResolvedValue({
+      id: 'job-1', titulo: 'Vaga X', descricao: 'Descrição da vaga X',
+      habilidadesExigidas: [], publicadoEm: null, criadoEm: '2026-08-01T00:00:00Z', recrutadorIds: [],
+    });
+    vi.mocked(staffPanelClient.obterRoteiroEntrevista).mockResolvedValue({
+      id: 'guide-1', status: 'rascunho', publishedVersionId: null,
+      competencias: [{ nome: 'Comunicação', ancoras: [{ nivel: 1, descricaoComportamental: 'Não se comunica bem' }] }],
+    });
+
+    render(<FunilPage />);
+
+    await waitFor(() => expect(screen.getByText('Comunicação')).toBeInTheDocument());
+    expect(screen.getByRole('button', { name: 'Publicar' })).toBeInTheDocument();
+  });
+
+  it('mostra badge "Publicado" quando o roteiro já foi publicado', async () => {
+    vi.mocked(staffPanelClient.obterFunil).mockResolvedValue({});
+    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue(PERFIL_MOCK);
+    vi.mocked(staffPanelClient.obterVaga).mockResolvedValue({
+      id: 'job-1', titulo: 'Vaga X', descricao: 'Descrição da vaga X',
+      habilidadesExigidas: [], publicadoEm: null, criadoEm: '2026-08-01T00:00:00Z', recrutadorIds: [],
+    });
+    vi.mocked(staffPanelClient.obterRoteiroEntrevista).mockResolvedValue({
+      id: 'guide-1', status: 'publicado', publishedVersionId: 'version-1',
+      competencias: [{ nome: 'Liderança', ancoras: [] }],
+    });
+
+    render(<FunilPage />);
+
+    await waitFor(() => expect(screen.getByText('Publicado')).toBeInTheDocument());
+  });
+
 });
