@@ -42,6 +42,7 @@ export default function FunilPage() {
   const [perfil, setPerfil] = useState<PerfilStaff | null>(null);
   const [vaga, setVaga] = useState<VagaCompleta | null>(null);
   const [roteiro, setRoteiro] = useState<RoteiroEntrevista | null>(null);
+  const [carregandoRoteiro, setCarregandoRoteiro] = useState(true);
 
   const carregar = useCallback(() => {
     staffPanelClient
@@ -62,23 +63,35 @@ export default function FunilPage() {
     carregar();
     staffPanelClient.obterPerfil().then(setPerfil).catch(() => {});
     staffPanelClient.obterVaga(params.id).then(setVaga).catch(() => {});
-    staffPanelClient.obterRoteiroEntrevista(params.id).then(setRoteiro).catch(() => {});
+    staffPanelClient
+      .obterRoteiroEntrevista(params.id)
+      .then(setRoteiro)
+      .catch(() => {})
+      .finally(() => setCarregandoRoteiro(false));
   }, [carregar, params.id]);
 
   async function handleGerarRoteiro() {
     if (!vaga) return;
-    await staffPanelClient.gerarRoteiroEntrevista({
-      jobId: params.id,
-      tituloVaga: vaga.titulo,
-      textoRequisicao: vaga.descricao,
-    });
-    staffPanelClient.obterRoteiroEntrevista(params.id).then(setRoteiro).catch(() => {});
+    try {
+      await staffPanelClient.gerarRoteiroEntrevista({
+        jobId: params.id,
+        tituloVaga: vaga.titulo,
+        textoRequisicao: vaga.descricao,
+      });
+      staffPanelClient.obterRoteiroEntrevista(params.id).then(setRoteiro).catch(() => {});
+    } catch (e) {
+      setErro((e as Error).message);
+    }
   }
 
   async function handlePublicarRoteiro() {
     if (!roteiro) return;
-    await staffPanelClient.publicarRoteiroEntrevista(roteiro.id);
-    staffPanelClient.obterRoteiroEntrevista(params.id).then(setRoteiro).catch(() => {});
+    try {
+      await staffPanelClient.publicarRoteiroEntrevista(roteiro.id);
+      staffPanelClient.obterRoteiroEntrevista(params.id).then(setRoteiro).catch(() => {});
+    } catch (e) {
+      setErro((e as Error).message);
+    }
   }
 
   async function handleMover(candidatura: CandidaturaResumo, novaColuna: string) {
@@ -114,7 +127,7 @@ export default function FunilPage() {
             <p className="font-ui text-sm font-medium text-text">Roteiro de entrevista</p>
             {roteiro?.status === 'publicado' && <Badge tone="sucesso">Publicado</Badge>}
           </div>
-          {!roteiro && (
+          {!carregandoRoteiro && !roteiro && (
             <Button onClick={handleGerarRoteiro}>Gerar roteiro de entrevista</Button>
           )}
           {roteiro && (

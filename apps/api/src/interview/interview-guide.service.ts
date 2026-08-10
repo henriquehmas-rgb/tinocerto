@@ -115,6 +115,12 @@ export class InterviewGuideService {
        WHERE tenant_id = $1 AND interview_guide_id = $2 ORDER BY versao DESC LIMIT 1`,
       [tenantId, row.id],
     );
+    // Guarda defensiva (achado I1 da revisao final de branch): publicar()
+    // sempre insere a versao antes de marcar o guia como 'publicado' (mesma
+    // transacao), entao este caso nao deveria ocorrer -- mas um guia
+    // 'publicado' sem nenhuma linha em interview_guide_version nao pode
+    // derrubar este endpoint de leitura com TypeError; melhor um 404 limpo.
+    if (versao.rows.length === 0) return null;
     return {
       id: row.id,
       status: 'publicado',

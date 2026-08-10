@@ -156,11 +156,21 @@ const ROTAS_COM_GUARDA = new Set<string>([
   'InterviewGuideController.publicar',
   'InterviewGuideController.gerar',
 
+  // InterviewGuideController.obterPorVaga (fix C1 da revisao final de
+  // branch -- rota GET nova, chama JobRecrutadorService.exigirAcesso
+  // explicitamente no corpo antes de qualquer leitura)
+  'InterviewGuideController.obterPorVaga',
+
   // InterviewScheduleController (onda 3, Item 3; guarda pulada quando o
   // principal tem o papel "entrevistador" -- ver comentário em
   // interview-schedule.controller.ts. A rota AINDA está "com guarda":
   // ela roda condicionalmente, não foi simplesmente omitida)
   'InterviewScheduleController.criar',
+
+  // InterviewScheduleController.obterPorCandidatura (fix C1 da revisao
+  // final de branch -- rota GET nova, chama JobRecrutadorService.exigirAcesso
+  // explicitamente no corpo antes de qualquer leitura)
+  'InterviewScheduleController.obterPorCandidatura',
 
   // ScorecardController (onda 3, Item 3; mesma exceção documentada para
   // o papel "entrevistador")

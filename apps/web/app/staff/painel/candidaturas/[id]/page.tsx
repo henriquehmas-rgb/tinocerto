@@ -20,6 +20,7 @@ export default function CandidaturaPage() {
   const [perfil, setPerfil] = useState<PerfilStaff | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [roteiro, setRoteiro] = useState<RoteiroEntrevista | null>(null);
+  const [carregandoRoteiro, setCarregandoRoteiro] = useState(true);
   const [agenda, setAgenda] = useState<AgendaEntrevista | null>(null);
   const [dataHoraInput, setDataHoraInput] = useState("");
 
@@ -37,8 +38,14 @@ export default function CandidaturaPage() {
       .then((c) => {
         setCandidatura(c);
         if (c.etapaFunil === 'entrevista') {
-          staffPanelClient.obterRoteiroEntrevista(c.jobId).then(setRoteiro).catch(() => {});
+          staffPanelClient
+            .obterRoteiroEntrevista(c.jobId)
+            .then(setRoteiro)
+            .catch(() => {})
+            .finally(() => setCarregandoRoteiro(false));
           staffPanelClient.obterAgendaEntrevista(params.id).then(setAgenda).catch(() => {});
+        } else {
+          setCarregandoRoteiro(false);
         }
       })
       .catch(tratarFalha);
@@ -53,12 +60,16 @@ export default function CandidaturaPage() {
   async function handleAgendar(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!roteiro?.publishedVersionId) return;
-    await staffPanelClient.agendarEntrevista({
-      applicationId: params.id,
-      interviewGuideVersionId: roteiro.publishedVersionId,
-      dataHora: new Date(dataHoraInput).toISOString(),
-    });
-    staffPanelClient.obterAgendaEntrevista(params.id).then(setAgenda).catch(() => {});
+    try {
+      await staffPanelClient.agendarEntrevista({
+        applicationId: params.id,
+        interviewGuideVersionId: roteiro.publishedVersionId,
+        dataHora: new Date(dataHoraInput).toISOString(),
+      });
+      staffPanelClient.obterAgendaEntrevista(params.id).then(setAgenda).catch(() => {});
+    } catch (e) {
+      setErro((e as Error).message);
+    }
   }
 
   const aderencia = dados?.aderencia ?? null;
@@ -101,7 +112,7 @@ export default function CandidaturaPage() {
         {candidatura?.etapaFunil === 'entrevista' && (
           <Card>
             <p className="font-ui text-sm font-medium text-text mb-2">Entrevista</p>
-            {!roteiro?.publishedVersionId && (
+            {!carregandoRoteiro && !roteiro?.publishedVersionId && (
               <p className="font-ui text-sm text-text-secondary">
                 Publique o roteiro de entrevista na vaga antes de agendar
               </p>

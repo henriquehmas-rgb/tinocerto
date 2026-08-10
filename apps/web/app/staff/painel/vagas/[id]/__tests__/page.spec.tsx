@@ -23,10 +23,18 @@ describe('FunilPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     // Provide default mock returns for new methods
-    vi.mocked(staffPanelClient.obterVaga).mockResolvedValue(null);
+    vi.mocked(staffPanelClient.obterVaga).mockResolvedValue({
+      id: 'job-1',
+      titulo: 'Vaga de teste',
+      descricao: 'Descricao de teste',
+      habilidadesExigidas: [],
+      publicadoEm: null,
+      criadoEm: '2026-08-01T00:00:00Z',
+      recrutadorIds: ['u1'],
+    });
     vi.mocked(staffPanelClient.obterRoteiroEntrevista).mockResolvedValue(null);
-    vi.mocked(staffPanelClient.gerarRoteiroEntrevista).mockResolvedValue(undefined);
-    vi.mocked(staffPanelClient.publicarRoteiroEntrevista).mockResolvedValue(undefined);
+    vi.mocked(staffPanelClient.gerarRoteiroEntrevista).mockResolvedValue({ id: 'guide-1' });
+    vi.mocked(staffPanelClient.publicarRoteiroEntrevista).mockResolvedValue({ id: 'guide-1', versao: 1 });
   });
 
   it('renderiza as colunas do funil com as candidaturas carregadas', async () => {

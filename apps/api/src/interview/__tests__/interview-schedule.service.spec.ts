@@ -15,7 +15,7 @@ describe('InterviewScheduleService', () => {
   let jobId: string;
   let applicationId: string;
   let guideVersionId: string;
-  const uniqueCnpj = '00000000000091'; // Use unique CNPJ to avoid conflicts
+  const uniqueCnpj = '00000000000036'; // Use unique CNPJ to avoid conflicts
   const uniqueSlug = 'test-interview-schedule-service-' + Date.now();
   const uniqueCpfHash = 'hash-schedule-' + Date.now();
 
