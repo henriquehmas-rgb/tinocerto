@@ -339,4 +339,36 @@ describe('CandidaturaPage', () => {
     await waitFor(() => expect(screen.getByText('Você não é avaliador desta entrevista.')).toBeInTheDocument());
     expect(screen.queryByRole('button', { name: 'Enviar avaliação' })).not.toBeInTheDocument();
   });
+
+  it('nao mostra formulario de avaliacao em branco antes do perfil carregar', async () => {
+    vi.mocked(staffPanelClient.obterRelatorioAssessment).mockResolvedValue({ relatorio: null, aderencia: null });
+    vi.mocked(staffPanelClient.obterCandidatura).mockResolvedValue({
+      id: 'app-1', jobId: 'job-1', etapaFunil: 'entrevista', criadoEm: '2026-08-01T00:00:00Z',
+      person: { id: 'p1', nome: 'Fulano', emailPrincipal: 'fulano@example.com' },
+    });
+    let resolverPerfil: (p: typeof PERFIL_MOCK) => void = () => {};
+    vi.mocked(staffPanelClient.obterPerfil).mockReturnValue(
+      new Promise((resolve) => { resolverPerfil = resolve; }),
+    );
+    vi.mocked(staffPanelClient.obterRoteiroEntrevista).mockResolvedValue({
+      id: 'guide-1', status: 'publicado', publishedVersionId: 'version-1', competencias: [{ competencyId: 'comp-1', nome: 'Comunicação', ancoras: [
+        { nivel: 1, descricaoComportamental: 'a' }, { nivel: 2, descricaoComportamental: 'b' },
+        { nivel: 3, descricaoComportamental: 'c' }, { nivel: 4, descricaoComportamental: 'd' },
+        { nivel: 5, descricaoComportamental: 'e' },
+      ] }],
+    });
+    vi.mocked(staffPanelClient.obterAgendaEntrevista).mockResolvedValue({
+      id: 'schedule-1', dataHora: '2026-09-01T14:00:00Z', status: 'agendada',
+    });
+    vi.mocked(staffPanelClient.obterScorecards).mockResolvedValue([]);
+
+    render(<CandidaturaPage />);
+
+    await waitFor(() => expect(screen.getByText('Avaliação da entrevista')).toBeInTheDocument());
+    expect(screen.queryByRole('button', { name: 'Enviar avaliação' })).not.toBeInTheDocument();
+
+    resolverPerfil(PERFIL_MOCK);
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Enviar avaliação' })).toBeInTheDocument());
+  });
 });

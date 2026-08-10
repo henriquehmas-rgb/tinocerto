@@ -78,7 +78,11 @@ export default function CandidaturaPage() {
 
   async function handleAgendar(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!roteiro?.publishedVersionId || !perfil) return;
+    if (!roteiro?.publishedVersionId) return;
+    if (!perfil) {
+      setErro('Carregando seu perfil, tente novamente em instantes.');
+      return;
+    }
     try {
       await staffPanelClient.agendarEntrevista({
         applicationId: params.id,
@@ -184,11 +188,11 @@ export default function CandidaturaPage() {
         {agenda && (
           <Card>
             <p className="font-ui text-sm font-medium text-text mb-2">Avaliação da entrevista</p>
-            {carregandoScorecards && <p className="font-ui text-sm text-text-secondary">Carregando…</p>}
-            {!carregandoScorecards && !minhaAvaliacao && erroScorecard === 'Você não é avaliador desta entrevista.' && (
+            {(carregandoScorecards || !perfil) && <p className="font-ui text-sm text-text-secondary">Carregando…</p>}
+            {!carregandoScorecards && perfil && !minhaAvaliacao && erroScorecard === 'Você não é avaliador desta entrevista.' && (
               <p className="text-danger-text">{erroScorecard}</p>
             )}
-            {!carregandoScorecards && !minhaAvaliacao && erroScorecard !== 'Você não é avaliador desta entrevista.' && (
+            {!carregandoScorecards && perfil && !minhaAvaliacao && erroScorecard !== 'Você não é avaliador desta entrevista.' && (
               <form onSubmit={handleSubmeterScorecard} className="flex flex-col gap-4">
                 {roteiro?.competencias.map((competencia) => (
                   <fieldset key={competencia.competencyId} className="flex flex-col gap-2">
@@ -224,7 +228,7 @@ export default function CandidaturaPage() {
                 </Button>
               </form>
             )}
-            {!carregandoScorecards && minhaAvaliacao && (
+            {!carregandoScorecards && perfil && minhaAvaliacao && (
               <div className="flex flex-col gap-3">
                 {roteiro?.competencias.map((competencia) => {
                   const nivel = minhaAvaliacao.notasPorCompetencia[competencia.competencyId];
