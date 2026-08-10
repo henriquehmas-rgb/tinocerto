@@ -184,7 +184,7 @@ describe('FunilPage', () => {
     });
     vi.mocked(staffPanelClient.obterRoteiroEntrevista).mockResolvedValue({
       id: 'guide-1', status: 'rascunho', publishedVersionId: null,
-      competencias: [{ nome: 'Comunicação', ancoras: [{ nivel: 1, descricaoComportamental: 'Não se comunica bem' }] }],
+      competencias: [{ competencyId: 'comp-1', nome: 'Comunicação', ancoras: [{ nivel: 1, descricaoComportamental: 'Não se comunica bem' }] }],
     });
 
     render(<FunilPage />);
@@ -202,7 +202,7 @@ describe('FunilPage', () => {
     });
     vi.mocked(staffPanelClient.obterRoteiroEntrevista).mockResolvedValue({
       id: 'guide-1', status: 'publicado', publishedVersionId: 'version-1',
-      competencias: [{ nome: 'Liderança', ancoras: [] }],
+      competencias: [{ competencyId: 'comp-1', nome: 'Liderança', ancoras: [] }],
     });
 
     render(<FunilPage />);

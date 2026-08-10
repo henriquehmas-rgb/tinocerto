@@ -14,6 +14,8 @@ vi.mock('../../../../../../lib/staff-panel-client', () => ({
     obterRoteiroEntrevista: vi.fn(),
     obterAgendaEntrevista: vi.fn(),
     agendarEntrevista: vi.fn(),
+    obterScorecards: vi.fn(),
+    submeterScorecard: vi.fn(),
   },
 }));
 
@@ -186,5 +188,155 @@ describe('CandidaturaPage', () => {
         expect.objectContaining({ avaliadorIds: ['u1'] }),
       ),
     );
+  });
+
+  const ROTEIRO_COM_COMPETENCIA = {
+    id: 'guide-1',
+    status: 'publicado' as const,
+    publishedVersionId: 'version-1',
+    competencias: [
+      {
+        competencyId: 'comp-1',
+        nome: 'Comunicação',
+        ancoras: [
+          { nivel: 1, descricaoComportamental: 'Não se comunica com clareza' },
+          { nivel: 2, descricaoComportamental: 'Comunica-se com dificuldade' },
+          { nivel: 3, descricaoComportamental: 'Comunica-se adequadamente' },
+          { nivel: 4, descricaoComportamental: 'Comunica-se com clareza' },
+          { nivel: 5, descricaoComportamental: 'Comunica-se com excelência' },
+        ],
+      },
+    ],
+  };
+
+  it('nao mostra bloco de avaliacao quando nao ha agendamento', async () => {
+    vi.mocked(staffPanelClient.obterRelatorioAssessment).mockResolvedValue({ relatorio: null, aderencia: null });
+    vi.mocked(staffPanelClient.obterCandidatura).mockResolvedValue({
+      id: 'app-1', jobId: 'job-1', etapaFunil: 'entrevista', criadoEm: '2026-08-01T00:00:00Z',
+      person: { id: 'p1', nome: 'Fulano', emailPrincipal: 'fulano@example.com' },
+    });
+    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue(PERFIL_MOCK);
+    vi.mocked(staffPanelClient.obterRoteiroEntrevista).mockResolvedValue(ROTEIRO_COM_COMPETENCIA);
+    vi.mocked(staffPanelClient.obterAgendaEntrevista).mockResolvedValue(null);
+
+    render(<CandidaturaPage />);
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Agendar entrevista' })).toBeInTheDocument());
+    expect(screen.queryByText('Avaliação da entrevista')).not.toBeInTheDocument();
+  });
+
+  it('mostra formulario de avaliacao com as ancoras da competencia quando ha agendamento e ainda nao enviei minha nota', async () => {
+    vi.mocked(staffPanelClient.obterRelatorioAssessment).mockResolvedValue({ relatorio: null, aderencia: null });
+    vi.mocked(staffPanelClient.obterCandidatura).mockResolvedValue({
+      id: 'app-1', jobId: 'job-1', etapaFunil: 'entrevista', criadoEm: '2026-08-01T00:00:00Z',
+      person: { id: 'p1', nome: 'Fulano', emailPrincipal: 'fulano@example.com' },
+    });
+    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue(PERFIL_MOCK);
+    vi.mocked(staffPanelClient.obterRoteiroEntrevista).mockResolvedValue(ROTEIRO_COM_COMPETENCIA);
+    vi.mocked(staffPanelClient.obterAgendaEntrevista).mockResolvedValue({
+      id: 'schedule-1', dataHora: '2026-09-01T14:00:00Z', status: 'agendada',
+    });
+    vi.mocked(staffPanelClient.obterScorecards).mockResolvedValue([]);
+
+    render(<CandidaturaPage />);
+
+    await waitFor(() => expect(screen.getByText('Avaliação da entrevista')).toBeInTheDocument());
+    expect(screen.getByText('Comunica-se com excelência')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Enviar avaliação' })).toBeDisabled();
+  });
+
+  it('envia a avaliacao com a nota escolhida por competencia e mostra o estado enviado', async () => {
+    vi.mocked(staffPanelClient.obterRelatorioAssessment).mockResolvedValue({ relatorio: null, aderencia: null });
+    vi.mocked(staffPanelClient.obterCandidatura).mockResolvedValue({
+      id: 'app-1', jobId: 'job-1', etapaFunil: 'entrevista', criadoEm: '2026-08-01T00:00:00Z',
+      person: { id: 'p1', nome: 'Fulano', emailPrincipal: 'fulano@example.com' },
+    });
+    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue(PERFIL_MOCK);
+    vi.mocked(staffPanelClient.obterRoteiroEntrevista).mockResolvedValue(ROTEIRO_COM_COMPETENCIA);
+    vi.mocked(staffPanelClient.obterAgendaEntrevista).mockResolvedValue({
+      id: 'schedule-1', dataHora: '2026-09-01T14:00:00Z', status: 'agendada',
+    });
+    vi.mocked(staffPanelClient.obterScorecards)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          id: 'scorecard-1',
+          interviewScheduleId: 'schedule-1',
+          avaliadorId: 'u1',
+          notasPorCompetencia: { 'comp-1': 5 },
+          comentario: 'Excelente candidato',
+          submetidoEm: '2026-09-01T15:00:00Z',
+        },
+      ]);
+    vi.mocked(staffPanelClient.submeterScorecard).mockResolvedValue(undefined);
+
+    render(<CandidaturaPage />);
+
+    await waitFor(() => expect(screen.getByText('Comunica-se com excelência')).toBeInTheDocument());
+    fireEvent.click(screen.getByLabelText('Comunica-se com excelência'));
+    fireEvent.click(screen.getByRole('button', { name: 'Enviar avaliação' }));
+
+    await waitFor(() =>
+      expect(staffPanelClient.submeterScorecard).toHaveBeenCalledWith('schedule-1', {
+        notasPorCompetencia: { 'comp-1': 5 },
+        comentario: undefined,
+      }),
+    );
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Enviar avaliação' })).not.toBeInTheDocument());
+    expect(screen.getByText('Comunica-se com excelência')).toBeInTheDocument();
+  });
+
+  it('mostra minha avaliacao ja enviada em modo leitura sem formulario', async () => {
+    vi.mocked(staffPanelClient.obterRelatorioAssessment).mockResolvedValue({ relatorio: null, aderencia: null });
+    vi.mocked(staffPanelClient.obterCandidatura).mockResolvedValue({
+      id: 'app-1', jobId: 'job-1', etapaFunil: 'entrevista', criadoEm: '2026-08-01T00:00:00Z',
+      person: { id: 'p1', nome: 'Fulano', emailPrincipal: 'fulano@example.com' },
+    });
+    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue(PERFIL_MOCK);
+    vi.mocked(staffPanelClient.obterRoteiroEntrevista).mockResolvedValue(ROTEIRO_COM_COMPETENCIA);
+    vi.mocked(staffPanelClient.obterAgendaEntrevista).mockResolvedValue({
+      id: 'schedule-1', dataHora: '2026-09-01T14:00:00Z', status: 'agendada',
+    });
+    vi.mocked(staffPanelClient.obterScorecards).mockResolvedValue([
+      {
+        id: 'scorecard-1',
+        interviewScheduleId: 'schedule-1',
+        avaliadorId: 'u1',
+        notasPorCompetencia: { 'comp-1': 4 },
+        comentario: null,
+        submetidoEm: '2026-09-01T15:00:00Z',
+      },
+    ]);
+
+    render(<CandidaturaPage />);
+
+    await waitFor(() => expect(screen.getByText('Comunica-se com clareza')).toBeInTheDocument());
+    expect(screen.queryByRole('button', { name: 'Enviar avaliação' })).not.toBeInTheDocument();
+  });
+
+  it('mostra mensagem clara quando o backend recusa por eu nao ser avaliador desta entrevista', async () => {
+    vi.mocked(staffPanelClient.obterRelatorioAssessment).mockResolvedValue({ relatorio: null, aderencia: null });
+    vi.mocked(staffPanelClient.obterCandidatura).mockResolvedValue({
+      id: 'app-1', jobId: 'job-1', etapaFunil: 'entrevista', criadoEm: '2026-08-01T00:00:00Z',
+      person: { id: 'p1', nome: 'Fulano', emailPrincipal: 'fulano@example.com' },
+    });
+    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue(PERFIL_MOCK);
+    vi.mocked(staffPanelClient.obterRoteiroEntrevista).mockResolvedValue(ROTEIRO_COM_COMPETENCIA);
+    vi.mocked(staffPanelClient.obterAgendaEntrevista).mockResolvedValue({
+      id: 'schedule-1', dataHora: '2026-09-01T14:00:00Z', status: 'agendada',
+    });
+    vi.mocked(staffPanelClient.obterScorecards).mockResolvedValue([]);
+    vi.mocked(staffPanelClient.submeterScorecard).mockRejectedValue(
+      new Error('Você não é avaliador desta entrevista.'),
+    );
+
+    render(<CandidaturaPage />);
+
+    await waitFor(() => expect(screen.getByText('Comunica-se com excelência')).toBeInTheDocument());
+    fireEvent.click(screen.getByLabelText('Comunica-se com excelência'));
+    fireEvent.click(screen.getByRole('button', { name: 'Enviar avaliação' }));
+
+    await waitFor(() => expect(screen.getByText('Você não é avaliador desta entrevista.')).toBeInTheDocument());
+    expect(screen.queryByRole('button', { name: 'Enviar avaliação' })).not.toBeInTheDocument();
   });
 });

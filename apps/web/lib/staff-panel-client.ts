@@ -73,6 +73,7 @@ export interface AncoraComportamental {
 }
 
 export interface CompetenciaComAncoras {
+  competencyId: string;
   nome: string;
   ancoras: AncoraComportamental[];
 }
@@ -88,6 +89,15 @@ export interface AgendaEntrevista {
   id: string;
   dataHora: string;
   status: 'agendada' | 'realizada' | 'cancelada';
+}
+
+export interface ScorecardRow {
+  id: string;
+  interviewScheduleId: string;
+  avaliadorId: string;
+  notasPorCompetencia: Record<string, number>;
+  comentario: string | null;
+  submetidoEm: string | null;
 }
 
 export interface ConexaoGoogleCalendar {
@@ -209,6 +219,25 @@ export const staffPanelClient = {
       body: JSON.stringify(input),
     });
     await tratarResposta(response, 'Não foi possível agendar a entrevista');
+  },
+
+  async obterScorecards(scheduleId: string): Promise<ScorecardRow[]> {
+    const response = await staffAuthClient.authenticatedFetch(`/v1/interview-schedules/${scheduleId}/scorecards`);
+    return tratarResposta(response, 'Não foi possível carregar as avaliações da entrevista');
+  },
+
+  async submeterScorecard(
+    scheduleId: string,
+    input: { notasPorCompetencia: Record<string, number>; comentario?: string },
+  ): Promise<void> {
+    const response = await staffAuthClient.authenticatedFetch(`/v1/interview-schedules/${scheduleId}/scorecards`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    });
+    if (response.status === 403) throw new Error('Você não é avaliador desta entrevista.');
+    if (response.status === 409) throw new Error('Você já enviou sua avaliação para esta entrevista.');
+    await tratarResposta(response, 'Não foi possível enviar a avaliação');
   },
 
   async obterConexaoGoogleCalendar(): Promise<ConexaoGoogleCalendar> {
