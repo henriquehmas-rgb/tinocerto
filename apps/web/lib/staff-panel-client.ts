@@ -67,6 +67,34 @@ export interface RelatorioAssessment {
   aderencia: { scoreAderencia: number | null; skillsBatidas: string[]; skillsFaltantes: string[] } | null;
 }
 
+export interface AncoraComportamental {
+  nivel: number;
+  descricaoComportamental: string;
+}
+
+export interface CompetenciaComAncoras {
+  nome: string;
+  ancoras: AncoraComportamental[];
+}
+
+export interface RoteiroEntrevista {
+  id: string;
+  status: 'rascunho' | 'publicado';
+  competencias: CompetenciaComAncoras[];
+  publishedVersionId: string | null;
+}
+
+export interface AgendaEntrevista {
+  id: string;
+  dataHora: string;
+  status: 'agendada' | 'realizada' | 'cancelada';
+}
+
+export interface ConexaoGoogleCalendar {
+  connected: boolean;
+  googleEmail?: string;
+}
+
 export interface DashboardMetricas {
   vagasAtivas: number;
   vagasRascunho: number;
@@ -144,5 +172,57 @@ export const staffPanelClient = {
   async obterMetricas(): Promise<DashboardMetricas> {
     const response = await staffAuthClient.authenticatedFetch('/v1/jobs/dashboard-metrics');
     return tratarResposta(response, 'Não foi possível carregar as métricas');
+  },
+
+  async obterRoteiroEntrevista(jobId: string): Promise<RoteiroEntrevista | null> {
+    const response = await staffAuthClient.authenticatedFetch(`/v1/interview-guides/by-job/${jobId}`);
+    if (response.status === 404) return null;
+    return tratarResposta(response, 'Não foi possível carregar o roteiro de entrevista');
+  },
+
+  async gerarRoteiroEntrevista(input: { jobId: string; tituloVaga: string; textoRequisicao: string }): Promise<{ id: string }> {
+    const response = await staffAuthClient.authenticatedFetch('/v1/interview-guides/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    });
+    return tratarResposta(response, 'Não foi possível gerar o roteiro de entrevista');
+  },
+
+  async publicarRoteiroEntrevista(guideId: string): Promise<{ id: string; versao: number }> {
+    const response = await staffAuthClient.authenticatedFetch(`/v1/interview-guides/${guideId}/publish`, {
+      method: 'POST',
+    });
+    return tratarResposta(response, 'Não foi possível publicar o roteiro de entrevista');
+  },
+
+  async obterAgendaEntrevista(applicationId: string): Promise<AgendaEntrevista | null> {
+    const response = await staffAuthClient.authenticatedFetch(`/v1/interview-schedules/by-application/${applicationId}`);
+    if (response.status === 404) return null;
+    return tratarResposta(response, 'Não foi possível carregar o agendamento');
+  },
+
+  async agendarEntrevista(input: { applicationId: string; interviewGuideVersionId: string; dataHora: string }): Promise<void> {
+    const response = await staffAuthClient.authenticatedFetch('/v1/interview-schedules', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...input, avaliadorIds: [] }),
+    });
+    await tratarResposta(response, 'Não foi possível agendar a entrevista');
+  },
+
+  async obterConexaoGoogleCalendar(): Promise<ConexaoGoogleCalendar> {
+    const response = await staffAuthClient.authenticatedFetch('/v1/calendar-connections/google');
+    return tratarResposta(response, 'Não foi possível verificar a conexão com o Google Calendar');
+  },
+
+  async obterUrlAutorizacaoGoogleCalendar(): Promise<{ url: string }> {
+    const response = await staffAuthClient.authenticatedFetch('/v1/calendar-connections/google/auth-url');
+    return tratarResposta(response, 'Não foi possível iniciar a conexão com o Google Calendar');
+  },
+
+  async desconectarGoogleCalendar(): Promise<void> {
+    const response = await staffAuthClient.authenticatedFetch('/v1/calendar-connections/google', { method: 'DELETE' });
+    await tratarResposta(response, 'Não foi possível desconectar o Google Calendar');
   },
 };
