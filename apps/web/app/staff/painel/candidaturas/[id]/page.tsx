@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { Card, ScoreChart, PanelLayout } from '@tinocerto/design-system';
-import { staffPanelClient, RelatorioAssessment, CandidaturaDetalhe, PerfilStaff } from '../../../../../lib/staff-panel-client';
+import { Button, Card, ScoreChart, PanelLayout } from '@tinocerto/design-system';
+import { staffPanelClient, RelatorioAssessment, CandidaturaDetalhe, PerfilStaff, RoteiroEntrevista, AgendaEntrevista } from '../../../../../lib/staff-panel-client';
 import { staffAuthClient, isErroDeAutenticacao } from '../../../../../lib/staff-auth-client';
 
 const NAV_LINKS = [
@@ -19,6 +19,9 @@ export default function CandidaturaPage() {
   const [candidatura, setCandidatura] = useState<CandidaturaDetalhe | null>(null);
   const [perfil, setPerfil] = useState<PerfilStaff | null>(null);
   const [erro, setErro] = useState<string | null>(null);
+  const [roteiro, setRoteiro] = useState<RoteiroEntrevista | null>(null);
+  const [agenda, setAgenda] = useState<AgendaEntrevista | null>(null);
+  const [dataHoraInput, setDataHoraInput] = useState("");
 
   useEffect(() => {
     function tratarFalha(e: unknown) {
@@ -29,13 +32,33 @@ export default function CandidaturaPage() {
       setErro((e as Error).message);
     }
     staffPanelClient.obterRelatorioAssessment(params.id).then(setDados).catch(tratarFalha);
-    staffPanelClient.obterCandidatura(params.id).then(setCandidatura).catch(tratarFalha);
+    staffPanelClient
+      .obterCandidatura(params.id)
+      .then((c) => {
+        setCandidatura(c);
+        if (c.etapaFunil === 'entrevista') {
+          staffPanelClient.obterRoteiroEntrevista(c.jobId).then(setRoteiro).catch(() => {});
+          staffPanelClient.obterAgendaEntrevista(params.id).then(setAgenda).catch(() => {});
+        }
+      })
+      .catch(tratarFalha);
     staffPanelClient.obterPerfil().then(setPerfil).catch(() => {});
   }, [params.id, router]);
 
   function handleSair() {
     staffAuthClient.logout();
     router.push('/staff/entrar');
+  }
+
+  async function handleAgendar(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!roteiro?.publishedVersionId) return;
+    await staffPanelClient.agendarEntrevista({
+      applicationId: params.id,
+      interviewGuideVersionId: roteiro.publishedVersionId,
+      dataHora: new Date(dataHoraInput).toISOString(),
+    });
+    staffPanelClient.obterAgendaEntrevista(params.id).then(setAgenda).catch(() => {});
   }
 
   const aderencia = dados?.aderencia ?? null;
@@ -75,6 +98,36 @@ export default function CandidaturaPage() {
             </div>
           )}
         </Card>
+        {candidatura?.etapaFunil === 'entrevista' && (
+          <Card>
+            <p className="font-ui text-sm font-medium text-text mb-2">Entrevista</p>
+            {!roteiro?.publishedVersionId && (
+              <p className="font-ui text-sm text-text-secondary">
+                Publique o roteiro de entrevista na vaga antes de agendar
+              </p>
+            )}
+            {roteiro?.publishedVersionId && !agenda && (
+              <form onSubmit={handleAgendar} className="flex flex-col gap-2">
+                <label className="flex flex-col gap-1 font-ui text-sm">
+                  Data e hora
+                  <input
+                    type="datetime-local"
+                    className="rounded-control px-3 py-2 border border-border bg-surface text-text"
+                    value={dataHoraInput}
+                    onChange={(e) => setDataHoraInput(e.target.value)}
+                    required
+                  />
+                </label>
+                <Button>Agendar entrevista</Button>
+              </form>
+            )}
+            {agenda && (
+              <p className="font-ui text-sm text-text">
+                {new Date(agenda.dataHora).toLocaleString('pt-BR')} — {agenda.status}
+              </p>
+            )}
+          </Card>
+        )}
       </div>
     </PanelLayout>
   );
