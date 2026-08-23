@@ -16,6 +16,10 @@ vi.mock('../../../../../../lib/staff-panel-client', () => ({
     agendarEntrevista: vi.fn(),
     obterScorecards: vi.fn(),
     submeterScorecard: vi.fn(),
+    obterOfertas: vi.fn(),
+    estenderOferta: vi.fn(),
+    aceitarOferta: vi.fn(),
+    recusarOferta: vi.fn(),
   },
 }));
 
@@ -28,7 +32,10 @@ const PERFIL_MOCK = {
 };
 
 describe('CandidaturaPage', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(staffPanelClient.obterOfertas).mockResolvedValue([]);
+  });
 
   it('mostra o score de aderência e as dimensões do relatório quando disponíveis', async () => {
     vi.mocked(staffPanelClient.obterRelatorioAssessment).mockResolvedValue({
@@ -371,4 +378,114 @@ describe('CandidaturaPage', () => {
 
     await waitFor(() => expect(screen.getByRole('button', { name: 'Enviar avaliação' })).toBeInTheDocument());
   });
+
+  const CANDIDATURA_TRIAGEM = {
+    id: 'app-1', jobId: 'job-1', etapaFunil: 'triagem', criadoEm: '2026-08-01T00:00:00Z',
+    person: { id: 'p1', nome: 'Fulano', emailPrincipal: 'fulano@example.com' },
+  };
+
+  it('mostra formulario de estender oferta quando nao ha oferta pendente', async () => {
+    vi.mocked(staffPanelClient.obterRelatorioAssessment).mockResolvedValue({ relatorio: null, aderencia: null });
+    vi.mocked(staffPanelClient.obterCandidatura).mockResolvedValue(CANDIDATURA_TRIAGEM);
+    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue(PERFIL_MOCK);
+    vi.mocked(staffPanelClient.obterOfertas).mockResolvedValue([]);
+
+    render(<CandidaturaPage />);
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Estender oferta' })).toBeInTheDocument());
+  });
+
+  it('envia a oferta com o valor informado', async () => {
+    vi.mocked(staffPanelClient.obterRelatorioAssessment).mockResolvedValue({ relatorio: null, aderencia: null });
+    vi.mocked(staffPanelClient.obterCandidatura).mockResolvedValue(CANDIDATURA_TRIAGEM);
+    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue(PERFIL_MOCK);
+    vi.mocked(staffPanelClient.obterOfertas)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { id: 'offer-1', applicationId: 'app-1', valor: '8500.00', moeda: 'BRL', status: 'estendida', estendidoPor: 'u1', estendidoEm: '2026-08-10T10:00:00Z', respondidoPor: null, respondidoEm: null, motivoRecusaCodigo: null },
+      ]);
+    vi.mocked(staffPanelClient.estenderOferta).mockResolvedValue({ id: 'offer-1' });
+
+    render(<CandidaturaPage />);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Estender oferta' })).toBeInTheDocument());
+
+    fireEvent.change(screen.getByPlaceholderText('8500.00'), { target: { value: '8500.00' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Estender oferta' }));
+
+    await waitFor(() =>
+      expect(staffPanelClient.estenderOferta).toHaveBeenCalledWith('app-1', { valor: '8500.00' }),
+    );
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Registrar aceite' })).toBeInTheDocument());
+  });
+
+  it('mostra botoes de aceite e recusa quando ha oferta pendente, e nao mostra o formulario de estender', async () => {
+    vi.mocked(staffPanelClient.obterRelatorioAssessment).mockResolvedValue({ relatorio: null, aderencia: null });
+    vi.mocked(staffPanelClient.obterCandidatura).mockResolvedValue(CANDIDATURA_TRIAGEM);
+    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue(PERFIL_MOCK);
+    vi.mocked(staffPanelClient.obterOfertas).mockResolvedValue([
+      { id: 'offer-1', applicationId: 'app-1', valor: '8500.00', moeda: 'BRL', status: 'estendida', estendidoPor: 'u1', estendidoEm: '2026-08-10T10:00:00Z', respondidoPor: null, respondidoEm: null, motivoRecusaCodigo: null },
+    ]);
+
+    render(<CandidaturaPage />);
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Registrar aceite' })).toBeInTheDocument());
+    expect(screen.getByRole('button', { name: 'Registrar recusa' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Estender oferta' })).not.toBeInTheDocument();
+  });
+
+  it('registrar aceite pede confirmacao e chama o endpoint', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    vi.mocked(staffPanelClient.obterRelatorioAssessment).mockResolvedValue({ relatorio: null, aderencia: null });
+    vi.mocked(staffPanelClient.obterCandidatura).mockResolvedValue(CANDIDATURA_TRIAGEM);
+    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue(PERFIL_MOCK);
+    vi.mocked(staffPanelClient.obterOfertas)
+      .mockResolvedValueOnce([
+        { id: 'offer-1', applicationId: 'app-1', valor: '8500.00', moeda: 'BRL', status: 'estendida', estendidoPor: 'u1', estendidoEm: '2026-08-10T10:00:00Z', respondidoPor: null, respondidoEm: null, motivoRecusaCodigo: null },
+      ])
+      .mockResolvedValueOnce([
+        { id: 'offer-1', applicationId: 'app-1', valor: '8500.00', moeda: 'BRL', status: 'aceita', estendidoPor: 'u1', estendidoEm: '2026-08-10T10:00:00Z', respondidoPor: 'u1', respondidoEm: '2026-08-11T10:00:00Z', motivoRecusaCodigo: null },
+      ]);
+    vi.mocked(staffPanelClient.aceitarOferta).mockResolvedValue({ id: 'offer-1', applicationId: 'app-1' });
+
+    render(<CandidaturaPage />);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Registrar aceite' })).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Registrar aceite' }));
+
+    await waitFor(() => expect(staffPanelClient.aceitarOferta).toHaveBeenCalledWith('offer-1'));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Registrar aceite' })).not.toBeInTheDocument());
+  });
+
+  it('nao chama o endpoint de aceite se a confirmacao for cancelada', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(false);
+    vi.mocked(staffPanelClient.obterRelatorioAssessment).mockResolvedValue({ relatorio: null, aderencia: null });
+    vi.mocked(staffPanelClient.obterCandidatura).mockResolvedValue(CANDIDATURA_TRIAGEM);
+    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue(PERFIL_MOCK);
+    vi.mocked(staffPanelClient.obterOfertas).mockResolvedValue([
+      { id: 'offer-1', applicationId: 'app-1', valor: '8500.00', moeda: 'BRL', status: 'estendida', estendidoPor: 'u1', estendidoEm: '2026-08-10T10:00:00Z', respondidoPor: null, respondidoEm: null, motivoRecusaCodigo: null },
+    ]);
+
+    render(<CandidaturaPage />);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Registrar aceite' })).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Registrar aceite' }));
+
+    await waitFor(() => expect(staffPanelClient.aceitarOferta).not.toHaveBeenCalled());
+  });
+
+  it('mostra o historico de ofertas anteriores', async () => {
+    vi.mocked(staffPanelClient.obterRelatorioAssessment).mockResolvedValue({ relatorio: null, aderencia: null });
+    vi.mocked(staffPanelClient.obterCandidatura).mockResolvedValue(CANDIDATURA_TRIAGEM);
+    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue(PERFIL_MOCK);
+    vi.mocked(staffPanelClient.obterOfertas).mockResolvedValue([
+      { id: 'offer-2', applicationId: 'app-1', valor: '9000.00', moeda: 'BRL', status: 'estendida', estendidoPor: 'u1', estendidoEm: '2026-08-12T10:00:00Z', respondidoPor: null, respondidoEm: null, motivoRecusaCodigo: null },
+      { id: 'offer-1', applicationId: 'app-1', valor: '8500.00', moeda: 'BRL', status: 'recusada', estendidoPor: 'u1', estendidoEm: '2026-08-10T10:00:00Z', respondidoPor: 'u1', respondidoEm: '2026-08-11T10:00:00Z', motivoRecusaCodigo: null },
+    ]);
+
+    render(<CandidaturaPage />);
+
+    await waitFor(() => expect(screen.getByText('Histórico')).toBeInTheDocument());
+    expect(screen.getByText(/recusada/)).toBeInTheDocument();
+  });
 });
+

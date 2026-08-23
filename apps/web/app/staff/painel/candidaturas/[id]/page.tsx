@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Button, Card, ScoreChart, PanelLayout } from '@tinocerto/design-system';
-import { staffPanelClient, RelatorioAssessment, CandidaturaDetalhe, PerfilStaff, RoteiroEntrevista, AgendaEntrevista, ScorecardRow } from '../../../../../lib/staff-panel-client';
+import { staffPanelClient, RelatorioAssessment, CandidaturaDetalhe, PerfilStaff, RoteiroEntrevista, AgendaEntrevista, ScorecardRow, OfferRow } from '../../../../../lib/staff-panel-client';
 import { staffAuthClient, isErroDeAutenticacao } from '../../../../../lib/staff-auth-client';
 
 const NAV_LINKS = [
@@ -28,6 +28,11 @@ export default function CandidaturaPage() {
   const [notas, setNotas] = useState<Record<string, number>>({});
   const [comentarioScorecard, setComentarioScorecard] = useState('');
   const [erroScorecard, setErroScorecard] = useState<string | null>(null);
+  const [ofertas, setOfertas] = useState<OfferRow[] | null>(null);
+  const [carregandoOfertas, setCarregandoOfertas] = useState(true);
+  const [valorOfertaInput, setValorOfertaInput] = useState('');
+  const [motivoRecusaInput, setMotivoRecusaInput] = useState('');
+  const [erroOferta, setErroOferta] = useState<string | null>(null);
 
   useEffect(() => {
     function tratarFalha(e: unknown) {
@@ -69,6 +74,7 @@ export default function CandidaturaPage() {
       })
       .catch(tratarFalha);
     staffPanelClient.obterPerfil().then(setPerfil).catch(() => {});
+    staffPanelClient.obterOfertas(params.id).then(setOfertas).catch(() => {}).finally(() => setCarregandoOfertas(false));
   }, [params.id, router]);
 
   function handleSair() {
@@ -116,7 +122,48 @@ export default function CandidaturaPage() {
     }
   }
 
+  async function handleEstenderOferta(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setErroOferta(null);
+    try {
+      await staffPanelClient.estenderOferta(params.id, { valor: valorOfertaInput });
+      staffPanelClient.obterOfertas(params.id).then(setOfertas).catch(() => {});
+      setValorOfertaInput('');
+    } catch (e) {
+      setErroOferta((e as Error).message);
+    }
+  }
+
+  async function handleAceitarOferta(offerId: string) {
+    if (!window.confirm('Confirma que o candidato aceitou esta oferta? Essa ação não pode ser desfeita.')) return;
+    setErroOferta(null);
+    try {
+      await staffPanelClient.aceitarOferta(offerId);
+      staffPanelClient.obterOfertas(params.id).then(setOfertas).catch(() => {});
+    } catch (e) {
+      setErroOferta((e as Error).message);
+    }
+  }
+
+  async function handleRecusarOferta(offerId: string) {
+    if (!window.confirm('Confirma que o candidato recusou esta oferta? Essa ação não pode ser desfeita.')) return;
+    setErroOferta(null);
+    try {
+      await staffPanelClient.recusarOferta(offerId, { motivoCodigo: motivoRecusaInput || undefined });
+      staffPanelClient.obterOfertas(params.id).then(setOfertas).catch(() => {});
+      setMotivoRecusaInput('');
+    } catch (e) {
+      setErroOferta((e as Error).message);
+    }
+  }
+
+  function formatarValorOferta(valor: string, moeda: string): string {
+    return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: moeda }).format(Number(valor));
+  }
+
   const minhaAvaliacao = scorecards?.find((s) => s.avaliadorId === perfil?.userId) ?? null;
+
+  const ofertaPendente = ofertas?.find((o) => o.status === 'estendida') ?? null;
 
   const aderencia = dados?.aderencia ?? null;
 
@@ -252,6 +299,60 @@ export default function CandidaturaPage() {
             )}
           </Card>
         )}
+        <Card>
+          <p className="font-ui text-sm font-medium text-text mb-2">Oferta</p>
+          {carregandoOfertas && <p className="font-ui text-sm text-text-secondary">Carregando…</p>}
+          {!carregandoOfertas && !ofertaPendente && (
+            <form onSubmit={handleEstenderOferta} className="flex flex-col gap-2">
+              <label className="flex flex-col gap-1 font-ui text-sm">
+                Valor da oferta (R$)
+                <input
+                  type="text"
+                  className="rounded-control px-3 py-2 border border-border bg-surface text-text"
+                  value={valorOfertaInput}
+                  onChange={(e) => setValorOfertaInput(e.target.value)}
+                  placeholder="8500.00"
+                  required
+                />
+              </label>
+              {erroOferta && <p className="text-danger-text">{erroOferta}</p>}
+              <Button>Estender oferta</Button>
+            </form>
+          )}
+          {!carregandoOfertas && ofertaPendente && (
+            <div className="flex flex-col gap-2">
+              <p className="font-ui text-sm text-text">
+                {formatarValorOferta(ofertaPendente.valor, ofertaPendente.moeda)} — pendente
+              </p>
+              <label className="flex flex-col gap-1 font-ui text-sm">
+                Motivo da recusa (opcional)
+                <input
+                  type="text"
+                  className="rounded-control px-3 py-2 border border-border bg-surface text-text"
+                  value={motivoRecusaInput}
+                  onChange={(e) => setMotivoRecusaInput(e.target.value)}
+                />
+              </label>
+              {erroOferta && <p className="text-danger-text">{erroOferta}</p>}
+              <div className="flex gap-2">
+                <Button onClick={() => handleAceitarOferta(ofertaPendente.id)}>Registrar aceite</Button>
+                <Button variant="secondary" onClick={() => handleRecusarOferta(ofertaPendente.id)}>
+                  Registrar recusa
+                </Button>
+              </div>
+            </div>
+          )}
+          {ofertas && ofertas.length > 0 && (
+            <div className="mt-4 flex flex-col gap-2">
+              <p className="font-ui text-sm font-medium text-text">Histórico</p>
+              {ofertas.map((o) => (
+                <p key={o.id} className="font-ui text-sm text-text-secondary">
+                  {formatarValorOferta(o.valor, o.moeda)} — {o.status} ({new Date(o.estendidoEm).toLocaleDateString('pt-BR')})
+                </p>
+              ))}
+            </div>
+          )}
+        </Card>
       </div>
     </PanelLayout>
   );

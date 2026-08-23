@@ -102,6 +102,19 @@ export interface ScorecardRow {
   submetidoEm: string | null;
 }
 
+export interface OfferRow {
+  id: string;
+  applicationId: string;
+  valor: string;
+  moeda: string;
+  status: 'estendida' | 'aceita' | 'recusada';
+  estendidoPor: string;
+  estendidoEm: string;
+  respondidoPor: string | null;
+  respondidoEm: string | null;
+  motivoRecusaCodigo: string | null;
+}
+
 export interface ConexaoGoogleCalendar {
   connected: boolean;
   googleEmail?: string;
@@ -245,6 +258,37 @@ export const staffPanelClient = {
     if (response.status === 403) throw new Error('Você não é avaliador desta entrevista.');
     if (response.status === 409) throw new Error('Você já enviou sua avaliação para esta entrevista.');
     await tratarResposta(response, 'Não foi possível enviar a avaliação');
+  },
+
+  async obterOfertas(applicationId: string): Promise<OfferRow[]> {
+    const response = await staffAuthClient.authenticatedFetch(`/v1/applications/${applicationId}/offers`);
+    return tratarResposta(response, 'Não foi possível carregar as ofertas');
+  },
+
+  async estenderOferta(applicationId: string, input: { valor: string }): Promise<{ id: string }> {
+    const response = await staffAuthClient.authenticatedFetch(`/v1/applications/${applicationId}/actions/extend-offer`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    });
+    if (response.status === 409) throw new Error('Já existe uma oferta pendente para esta candidatura.');
+    return tratarResposta(response, 'Não foi possível estender a oferta');
+  },
+
+  async aceitarOferta(offerId: string): Promise<{ id: string; applicationId: string }> {
+    const response = await staffAuthClient.authenticatedFetch(`/v1/offers/${offerId}/actions/accept`, { method: 'POST' });
+    if (response.status === 409) throw new Error('Esta oferta já foi respondida.');
+    return tratarResposta(response, 'Não foi possível registrar o aceite');
+  },
+
+  async recusarOferta(offerId: string, input: { motivoCodigo?: string }): Promise<{ id: string; applicationId: string }> {
+    const response = await staffAuthClient.authenticatedFetch(`/v1/offers/${offerId}/actions/decline`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    });
+    if (response.status === 409) throw new Error('Esta oferta já foi respondida.');
+    return tratarResposta(response, 'Não foi possível registrar a recusa');
   },
 
   async obterConexaoGoogleCalendar(): Promise<ConexaoGoogleCalendar> {
