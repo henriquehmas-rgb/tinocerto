@@ -12,6 +12,12 @@ const NAV_LINKS = [
   { href: '/staff/painel/configuracoes', label: 'Configurações' },
 ];
 
+const SECAO_LABEL: Record<string, string> = {
+  experiencia: 'Experiência',
+  formacao: 'Formação',
+  habilidade: 'Habilidade',
+};
+
 export default function CandidaturaPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
@@ -34,6 +40,7 @@ export default function CandidaturaPage() {
   const [motivoRecusaInput, setMotivoRecusaInput] = useState('');
   const [erroOferta, setErroOferta] = useState<string | null>(null);
   const [resumoCandidato, setResumoCandidato] = useState<CandidateSummaryDraft | null>(null);
+  const [resumoAplicado, setResumoAplicado] = useState(false);
   const [erroResumo, setErroResumo] = useState<string | null>(null);
   const [gerandoResumo, setGerandoResumo] = useState(false);
 
@@ -78,7 +85,13 @@ export default function CandidaturaPage() {
       .catch(tratarFalha);
     staffPanelClient.obterPerfil().then(setPerfil).catch(() => {});
     staffPanelClient.obterOfertas(params.id).then(setOfertas).catch(() => {}).finally(() => setCarregandoOfertas(false));
-    staffPanelClient.obterResumoCandidatoAtual(params.id).then(setResumoCandidato).catch(() => {});
+    staffPanelClient
+      .obterResumoCandidatoAtual(params.id)
+      .then((r) => {
+        setResumoCandidato(r);
+        setResumoAplicado(true);
+      })
+      .catch((e) => setErroResumo((e as Error).message));
   }, [params.id, router]);
 
   function handleSair() {
@@ -167,6 +180,7 @@ export default function CandidaturaPage() {
     try {
       const rascunho = await staffPanelClient.gerarResumoCandidato(params.id);
       setResumoCandidato(rascunho);
+      setResumoAplicado(false);
     } catch (e) {
       setErroResumo((e as Error).message);
     } finally {
@@ -179,6 +193,7 @@ export default function CandidaturaPage() {
     setErroResumo(null);
     try {
       await staffPanelClient.aplicarResumoCandidato(params.id, resumoCandidato.id);
+      setResumoAplicado(true);
     } catch (e) {
       setErroResumo((e as Error).message);
     }
@@ -234,15 +249,21 @@ export default function CandidaturaPage() {
           {erroResumo && <p className="text-danger-text">{erroResumo}</p>}
           {resumoCandidato && (
             <div className="flex flex-col gap-3">
+              <p className="font-ui text-xs text-text-secondary font-medium">
+                {resumoAplicado ? 'Resumo vigente' : 'Rascunho gerado agora — ainda não aplicado'}
+              </p>
               {resumoCandidato.frases.map((frase, i) => (
                 <div key={i}>
+                  <p className="font-ui text-xs text-text-secondary font-medium">
+                    {SECAO_LABEL[frase.secao] ?? frase.secao} #{frase.itemIndex + 1}
+                  </p>
                   <p className="font-ui text-sm text-text">{frase.texto}</p>
                   <blockquote className="font-ui text-xs text-text-secondary border-l-2 border-border pl-2 mt-1">
                     {frase.citacaoVerbatim}
                   </blockquote>
                 </div>
               ))}
-              <Button onClick={handleAplicarResumo}>Aplicar resumo</Button>
+              {!resumoAplicado && <Button onClick={handleAplicarResumo}>Aplicar resumo</Button>}
             </div>
           )}
           <Button variant="secondary" onClick={handleGerarResumo}>

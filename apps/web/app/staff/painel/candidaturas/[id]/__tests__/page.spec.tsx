@@ -507,6 +507,9 @@ describe('CandidaturaPage', () => {
 
     await waitFor(() => expect(screen.getByText('Tem 5 anos de experiência em vendas.')).toBeInTheDocument());
     expect(screen.getByText('5 anos como vendedor na Acme')).toBeInTheDocument();
+    expect(screen.getByText('Experiência #1')).toBeInTheDocument();
+    expect(screen.getByText('Resumo vigente')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Aplicar resumo' })).not.toBeInTheDocument();
   });
 
   it('gerar resumo produz um rascunho com botao de aplicar', async () => {
@@ -527,6 +530,8 @@ describe('CandidaturaPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Gerar resumo' }));
 
     await waitFor(() => expect(screen.getByText('Formado em Administração.')).toBeInTheDocument());
+    expect(screen.getByText('Formação #1')).toBeInTheDocument();
+    expect(screen.getByText('Rascunho gerado agora — ainda não aplicado')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Aplicar resumo' })).toBeInTheDocument();
   });
 
@@ -547,6 +552,22 @@ describe('CandidaturaPage', () => {
 
     await waitFor(() =>
       expect(screen.getByText('Não foi possível gerar um resumo citável para este candidato agora.')).toBeInTheDocument(),
+    );
+  });
+
+  it('erro 503 ao carregar o resumo vigente mostra mensagem padrao', async () => {
+    vi.mocked(staffPanelClient.obterRelatorioAssessment).mockResolvedValue({ relatorio: null, aderencia: null });
+    vi.mocked(staffPanelClient.obterCandidatura).mockResolvedValue(CANDIDATURA_TRIAGEM);
+    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue(PERFIL_MOCK);
+    vi.mocked(staffPanelClient.obterOfertas).mockResolvedValue([]);
+    vi.mocked(staffPanelClient.obterResumoCandidatoAtual).mockRejectedValue(
+      new Error('Geração por IA indisponível no momento, tente novamente.'),
+    );
+
+    render(<CandidaturaPage />);
+
+    await waitFor(() =>
+      expect(screen.getByText('Geração por IA indisponível no momento, tente novamente.')).toBeInTheDocument(),
     );
   });
 });
