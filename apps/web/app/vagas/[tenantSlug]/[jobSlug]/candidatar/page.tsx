@@ -67,7 +67,13 @@ export default function ApplyPage() {
         const errBody = await response.json().catch(() => ({}));
         throw new Error(errBody.message ?? 'Não foi possível enviar a candidatura');
       }
-      router.push('/candidato/candidaturas');
+      const { applicationId, assessmentId }: { applicationId: string; assessmentId: string | null } =
+        await response.json();
+      if (assessmentId) {
+        router.push(`/candidato/candidaturas/${applicationId}/assessment`);
+      } else {
+        router.push('/candidato/candidaturas');
+      }
     } catch (err) {
       setErro(err instanceof Error ? err.message : 'Erro ao enviar candidatura');
     } finally {
@@ -84,7 +90,7 @@ export default function ApplyPage() {
       <form onSubmit={handleSubmit} className="space-y-4">
         <label className="block">
           <span className="text-sm text-text-secondary">Currículo (PDF)</span>
-          <input name="curriculo" type="file" accept="application/pdf" required className="block w-full mt-1" />
+          <input name="curriculo" type="file" accept="application/pdf" className="block w-full mt-1" />
         </label>
         {job.camposCustomizados
           .filter((campo) => campo.faseColeta === 'inscricao')
