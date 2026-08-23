@@ -1,4 +1,4 @@
-import { Body, Controller, Get, NotFoundException, Param, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, ConflictException, Controller, Get, NotFoundException, Param, Post, Req, UseGuards } from '@nestjs/common';
 import { ArrayNotEmpty, IsArray, IsNotEmpty, IsOptional, IsInt, IsString } from 'class-validator';
 import { Request } from 'express';
 import { Pool, PoolClient } from 'pg';
@@ -154,12 +154,17 @@ export class CandidateAssessmentController {
       try {
         await this.assessmentService.concluir(client, this.encryption, assessment.id);
         return { concluido: true };
-      } catch {
+      } catch (err) {
         // AssessmentService.concluir lança ConflictException quando ainda
         // faltam blocos ("incompleto: X de Y") -- esperado na maioria das
         // respostas, não é um erro real desta rota. Só a última resposta
-        // (que completa os 20 blocos) faz concluir ter sucesso.
-        return { concluido: false };
+        // (que completa os 20 blocos) faz concluir ter sucesso. Qualquer
+        // outro erro (status inesperado, integridade de dados, etc.) deve
+        // propagar em vez de ser mascarado como "ainda não concluído".
+        if (err instanceof ConflictException && err.message.includes('incompleto:')) {
+          return { concluido: false };
+        }
+        throw err;
       }
     });
   }

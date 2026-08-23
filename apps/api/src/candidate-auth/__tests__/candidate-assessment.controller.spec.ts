@@ -1,4 +1,4 @@
-import { NotFoundException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { CandidateAssessmentController } from '../candidate-assessment.controller';
 
 describe('CandidateAssessmentController', () => {
@@ -66,7 +66,7 @@ describe('CandidateAssessmentController', () => {
       .mockResolvedValueOnce({ rows: [{ tenant_id: 't1' }] }) // resolveOwnedApplicationTenant
       .mockResolvedValueOnce({ rows: [{ id: 'aa-1' }] }); // resolve assessmentApplicationId
     assessmentService.responderBloco.mockResolvedValue({ id: 'resp-1' });
-    assessmentService.concluir.mockRejectedValue(new Error('Assessment aa-1 incompleto: 5 de 20 blocos respondidos'));
+    assessmentService.concluir.mockRejectedValue(new ConflictException('Assessment aa-1 incompleto: 5 de 20 blocos respondidos'));
 
     const result = await controller.responder(
       { personId: 'p1' } as never,
@@ -100,5 +100,22 @@ describe('CandidateAssessmentController', () => {
     );
 
     expect(result).toEqual({ concluido: true });
+  });
+
+  it('propaga erro inesperado de concluir em vez de mascarar como concluido=false', async () => {
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ tenant_id: 't1' }] })
+      .mockResolvedValueOnce({ rows: [{ id: 'aa-1' }] });
+    assessmentService.responderBloco.mockResolvedValue({ id: 'resp-1' });
+    assessmentService.concluir.mockRejectedValue(new ConflictException('Assessment aa-1 não pode ser concluído (status atual: cancelado)'));
+
+    await expect(
+      controller.responder(
+        { personId: 'p1' } as never,
+        'app-1',
+        'b-5',
+        { itemIds: ['i-1', 'i-2'], maisId: 'i-1', menosId: 'i-2' } as never,
+      ),
+    ).rejects.toThrow(ConflictException);
   });
 });
