@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { candidateAuthClient } from '../../../lib/candidate-auth-client';
 
 interface CandidateApplicationSummaryView {
@@ -43,10 +44,12 @@ export default function MyApplicationsPage() {
       <ul className="space-y-3">
         {applications.map((app) => (
           <li key={app.applicationId} className="border border-border rounded-card p-4 bg-surface">
-            <p className="font-ui font-medium">{app.jobTitulo}</p>
-            <p className="text-sm text-text-secondary">
-              {app.reprovadoEm ? 'Não seguiu nesta etapa' : (ETAPA_LABEL[app.etapaFunil] ?? app.etapaFunil)}
-            </p>
+            <Link href={`/candidato/candidaturas/${app.applicationId}`} className="block">
+              <p className="font-ui font-medium">{app.jobTitulo}</p>
+              <p className="text-sm text-text-secondary">
+                {app.reprovadoEm ? 'Não seguiu nesta etapa' : (ETAPA_LABEL[app.etapaFunil] ?? app.etapaFunil)}
+              </p>
+            </Link>
           </li>
         ))}
       </ul>
