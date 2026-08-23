@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Button, Card, ScoreChart, PanelLayout } from '@tinocerto/design-system';
-import { staffPanelClient, RelatorioAssessment, CandidaturaDetalhe, PerfilStaff, RoteiroEntrevista, AgendaEntrevista, ScorecardRow, OfferRow } from '../../../../../lib/staff-panel-client';
+import { staffPanelClient, RelatorioAssessment, CandidaturaDetalhe, PerfilStaff, RoteiroEntrevista, AgendaEntrevista, ScorecardRow, OfferRow, CandidateSummaryDraft } from '../../../../../lib/staff-panel-client';
 import { staffAuthClient, isErroDeAutenticacao } from '../../../../../lib/staff-auth-client';
 
 const NAV_LINKS = [
@@ -33,6 +33,9 @@ export default function CandidaturaPage() {
   const [valorOfertaInput, setValorOfertaInput] = useState('');
   const [motivoRecusaInput, setMotivoRecusaInput] = useState('');
   const [erroOferta, setErroOferta] = useState<string | null>(null);
+  const [resumoCandidato, setResumoCandidato] = useState<CandidateSummaryDraft | null>(null);
+  const [erroResumo, setErroResumo] = useState<string | null>(null);
+  const [gerandoResumo, setGerandoResumo] = useState(false);
 
   useEffect(() => {
     function tratarFalha(e: unknown) {
@@ -75,6 +78,7 @@ export default function CandidaturaPage() {
       .catch(tratarFalha);
     staffPanelClient.obterPerfil().then(setPerfil).catch(() => {});
     staffPanelClient.obterOfertas(params.id).then(setOfertas).catch(() => {}).finally(() => setCarregandoOfertas(false));
+    staffPanelClient.obterResumoCandidatoAtual(params.id).then(setResumoCandidato).catch(() => {});
   }, [params.id, router]);
 
   function handleSair() {
@@ -157,6 +161,29 @@ export default function CandidaturaPage() {
     }
   }
 
+  async function handleGerarResumo() {
+    setErroResumo(null);
+    setGerandoResumo(true);
+    try {
+      const rascunho = await staffPanelClient.gerarResumoCandidato(params.id);
+      setResumoCandidato(rascunho);
+    } catch (e) {
+      setErroResumo((e as Error).message);
+    } finally {
+      setGerandoResumo(false);
+    }
+  }
+
+  async function handleAplicarResumo() {
+    if (!resumoCandidato) return;
+    setErroResumo(null);
+    try {
+      await staffPanelClient.aplicarResumoCandidato(params.id, resumoCandidato.id);
+    } catch (e) {
+      setErroResumo((e as Error).message);
+    }
+  }
+
   function formatarValorOferta(valor: string, moeda: string): string {
     return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: moeda }).format(Number(valor));
   }
@@ -201,6 +228,26 @@ export default function CandidaturaPage() {
               </div>
             </div>
           )}
+        </Card>
+        <Card>
+          <p className="font-ui text-sm font-medium text-text mb-2">Resumo do candidato (IA)</p>
+          {erroResumo && <p className="text-danger-text">{erroResumo}</p>}
+          {resumoCandidato && (
+            <div className="flex flex-col gap-3">
+              {resumoCandidato.frases.map((frase, i) => (
+                <div key={i}>
+                  <p className="font-ui text-sm text-text">{frase.texto}</p>
+                  <blockquote className="font-ui text-xs text-text-secondary border-l-2 border-border pl-2 mt-1">
+                    {frase.citacaoVerbatim}
+                  </blockquote>
+                </div>
+              ))}
+              <Button onClick={handleAplicarResumo}>Aplicar resumo</Button>
+            </div>
+          )}
+          <Button variant="secondary" onClick={handleGerarResumo}>
+            {gerandoResumo ? 'Gerando...' : 'Gerar resumo'}
+          </Button>
         </Card>
         {candidatura?.etapaFunil === 'entrevista' && (
           <Card>

@@ -20,6 +20,9 @@ vi.mock('../../../../../../lib/staff-panel-client', () => ({
     estenderOferta: vi.fn(),
     aceitarOferta: vi.fn(),
     recusarOferta: vi.fn(),
+    gerarResumoCandidato: vi.fn(),
+    obterResumoCandidatoAtual: vi.fn(),
+    aplicarResumoCandidato: vi.fn(),
   },
 }));
 
@@ -35,6 +38,7 @@ describe('CandidaturaPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(staffPanelClient.obterOfertas).mockResolvedValue([]);
+    vi.mocked(staffPanelClient.obterResumoCandidatoAtual).mockResolvedValue(null);
   });
 
   it('mostra o score de aderência e as dimensões do relatório quando disponíveis', async () => {
@@ -486,6 +490,64 @@ describe('CandidaturaPage', () => {
 
     await waitFor(() => expect(screen.getByText('Histórico')).toBeInTheDocument());
     expect(screen.getByText(/recusada/)).toBeInTheDocument();
+  });
+
+  it('mostra o resumo vigente ao carregar, se ja existir um aplicado', async () => {
+    vi.mocked(staffPanelClient.obterRelatorioAssessment).mockResolvedValue({ relatorio: null, aderencia: null });
+    vi.mocked(staffPanelClient.obterCandidatura).mockResolvedValue(CANDIDATURA_TRIAGEM);
+    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue(PERFIL_MOCK);
+    vi.mocked(staffPanelClient.obterOfertas).mockResolvedValue([]);
+    vi.mocked(staffPanelClient.obterResumoCandidatoAtual).mockResolvedValue({
+      id: 'draft-1', applicationId: 'app-1',
+      frases: [{ texto: 'Tem 5 anos de experiência em vendas.', fonteId: 'experiencia:0', secao: 'experiencia', itemIndex: 0, citacaoVerbatim: '5 anos como vendedor na Acme' }],
+      criadoEm: '2026-08-10T00:00:00Z',
+    });
+
+    render(<CandidaturaPage />);
+
+    await waitFor(() => expect(screen.getByText('Tem 5 anos de experiência em vendas.')).toBeInTheDocument());
+    expect(screen.getByText('5 anos como vendedor na Acme')).toBeInTheDocument();
+  });
+
+  it('gerar resumo produz um rascunho com botao de aplicar', async () => {
+    vi.mocked(staffPanelClient.obterRelatorioAssessment).mockResolvedValue({ relatorio: null, aderencia: null });
+    vi.mocked(staffPanelClient.obterCandidatura).mockResolvedValue(CANDIDATURA_TRIAGEM);
+    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue(PERFIL_MOCK);
+    vi.mocked(staffPanelClient.obterOfertas).mockResolvedValue([]);
+    vi.mocked(staffPanelClient.obterResumoCandidatoAtual).mockResolvedValue(null);
+    vi.mocked(staffPanelClient.gerarResumoCandidato).mockResolvedValue({
+      id: 'draft-2', applicationId: 'app-1',
+      frases: [{ texto: 'Formado em Administração.', fonteId: 'formacao:0', secao: 'formacao', itemIndex: 0, citacaoVerbatim: 'Bacharel em Administração pela USP' }],
+      criadoEm: '2026-08-10T00:00:00Z',
+    });
+
+    render(<CandidaturaPage />);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Gerar resumo' })).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Gerar resumo' }));
+
+    await waitFor(() => expect(screen.getByText('Formado em Administração.')).toBeInTheDocument());
+    expect(screen.getByRole('button', { name: 'Aplicar resumo' })).toBeInTheDocument();
+  });
+
+  it('erro 422 ao gerar mostra mensagem amigavel', async () => {
+    vi.mocked(staffPanelClient.obterRelatorioAssessment).mockResolvedValue({ relatorio: null, aderencia: null });
+    vi.mocked(staffPanelClient.obterCandidatura).mockResolvedValue(CANDIDATURA_TRIAGEM);
+    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue(PERFIL_MOCK);
+    vi.mocked(staffPanelClient.obterOfertas).mockResolvedValue([]);
+    vi.mocked(staffPanelClient.obterResumoCandidatoAtual).mockResolvedValue(null);
+    vi.mocked(staffPanelClient.gerarResumoCandidato).mockRejectedValue(
+      new Error('Não foi possível gerar um resumo citável para este candidato agora.'),
+    );
+
+    render(<CandidaturaPage />);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Gerar resumo' })).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Gerar resumo' }));
+
+    await waitFor(() =>
+      expect(screen.getByText('Não foi possível gerar um resumo citável para este candidato agora.')).toBeInTheDocument(),
+    );
   });
 });
 
