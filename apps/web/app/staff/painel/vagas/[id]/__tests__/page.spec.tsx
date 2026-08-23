@@ -26,6 +26,7 @@ const VAGA_MOCK = {
     gerarRoteiroEntrevista: vi.fn(),
     publicarRoteiroEntrevista: vi.fn(),
     obterImpactoAdverso: vi.fn(),
+    gerarPerguntasEntrevista: vi.fn(),
   },
 }));
 
@@ -257,6 +258,44 @@ describe('FunilPage', () => {
     await waitFor(() => expect(screen.getByText('feminino')).toBeInTheDocument());
     expect(screen.getByText('masculino')).toBeInTheDocument();
     expect(screen.getByText('Abaixo de 0,8')).toBeInTheDocument();
+  });
+
+  it('botao de sugerir perguntas fica desabilitado sem roteiro publicado', async () => {
+    vi.mocked(staffPanelClient.obterFunil).mockResolvedValue({});
+    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue(PERFIL_MOCK);
+    vi.mocked(staffPanelClient.obterVaga).mockResolvedValue(VAGA_MOCK);
+    vi.mocked(staffPanelClient.obterRoteiroEntrevista).mockResolvedValue(null);
+    vi.mocked(staffPanelClient.obterImpactoAdverso).mockResolvedValue([]);
+
+    render(<FunilPage />);
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Gerar roteiro de entrevista' })).toBeInTheDocument());
+    expect(screen.queryByRole('button', { name: 'Sugerir perguntas' })).not.toBeInTheDocument();
+  });
+
+  it('gera e mostra perguntas agrupadas por competencia quando o roteiro esta publicado', async () => {
+    vi.mocked(staffPanelClient.obterFunil).mockResolvedValue({});
+    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue(PERFIL_MOCK);
+    vi.mocked(staffPanelClient.obterVaga).mockResolvedValue(VAGA_MOCK);
+    vi.mocked(staffPanelClient.obterRoteiroEntrevista).mockResolvedValue({
+      id: 'guide-1', status: 'publicado', publishedVersionId: 'version-1',
+      competencias: [{ competencyId: 'comp-1', nome: 'Comunicação', ancoras: [] }],
+    });
+    vi.mocked(staffPanelClient.obterImpactoAdverso).mockResolvedValue([]);
+    vi.mocked(staffPanelClient.gerarPerguntasEntrevista).mockResolvedValue({
+      id: 'sug-1', interviewGuideVersionId: 'version-1',
+      itens: [{ competencyId: 'comp-1', nome: 'Comunicação', perguntas: ['Conte uma situação em que precisou explicar algo complexo.'] }],
+      criadoEm: '2026-08-10T00:00:00Z',
+    });
+
+    render(<FunilPage />);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Sugerir perguntas' })).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sugerir perguntas' }));
+
+    await waitFor(() =>
+      expect(screen.getByText('Conte uma situação em que precisou explicar algo complexo.')).toBeInTheDocument(),
+    );
   });
 
 });

@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { KanbanBoard, PanelLayout, Card, Badge, Button, Table } from '@tinocerto/design-system';
-import { staffPanelClient, CandidaturaResumo, PerfilStaff, RoteiroEntrevista, VagaCompleta, ImpactoAdversoRow } from '../../../../../lib/staff-panel-client';
+import { staffPanelClient, CandidaturaResumo, PerfilStaff, RoteiroEntrevista, VagaCompleta, ImpactoAdversoRow, InterviewQuestionSuggestion } from '../../../../../lib/staff-panel-client';
 import { staffAuthClient, isErroDeAutenticacao } from '../../../../../lib/staff-auth-client';
 
 // Etapas conhecidas hoje, sempre mostradas como coluna (e como destino no
@@ -56,6 +56,9 @@ export default function FunilPage() {
   const [carregandoRoteiro, setCarregandoRoteiro] = useState(true);
   const [impactoAdverso, setImpactoAdverso] = useState<ImpactoAdversoRow[]>([]);
   const [carregandoImpacto, setCarregandoImpacto] = useState(true);
+  const [perguntasSugeridas, setPerguntasSugeridas] = useState<InterviewQuestionSuggestion | null>(null);
+  const [erroPerguntas, setErroPerguntas] = useState<string | null>(null);
+  const [gerandoPerguntas, setGerandoPerguntas] = useState(false);
 
   const carregar = useCallback(() => {
     staffPanelClient
@@ -112,6 +115,20 @@ export default function FunilPage() {
     }
   }
 
+  async function handleGerarPerguntas() {
+    if (!roteiro?.publishedVersionId) return;
+    setErroPerguntas(null);
+    setGerandoPerguntas(true);
+    try {
+      const sugestao = await staffPanelClient.gerarPerguntasEntrevista(roteiro.publishedVersionId);
+      setPerguntasSugeridas(sugestao);
+    } catch (e) {
+      setErroPerguntas((e as Error).message);
+    } finally {
+      setGerandoPerguntas(false);
+    }
+  }
+
   async function handleMover(candidatura: CandidaturaResumo, novaColuna: string) {
     await staffPanelClient.moverEtapa(candidatura.id, novaColuna);
     carregar();
@@ -157,6 +174,30 @@ export default function FunilPage() {
               ))}
               {roteiro.status === 'rascunho' && (
                 <Button onClick={handlePublicarRoteiro}>Publicar</Button>
+              )}
+              {roteiro.publishedVersionId && (
+                <div className="mt-2 flex flex-col gap-2">
+                  <Button variant="secondary" onClick={handleGerarPerguntas}>
+                    {gerandoPerguntas ? 'Gerando...' : 'Sugerir perguntas'}
+                  </Button>
+                  {erroPerguntas && <p className="text-danger-text">{erroPerguntas}</p>}
+                  {perguntasSugeridas && (
+                    <div className="flex flex-col gap-3">
+                      {perguntasSugeridas.itens.map((item) => (
+                        <div key={item.competencyId}>
+                          <p className="font-ui text-sm font-medium text-text">{item.nome}</p>
+                          <ul className="list-disc pl-5">
+                            {item.perguntas.map((pergunta, i) => (
+                              <li key={i} className="font-ui text-sm text-text-secondary">
+                                {pergunta}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           )}
