@@ -79,7 +79,12 @@ describe('Gate consolidado — Fase 1a (Talent + Hiring)', () => {
       `SELECT conrelid::regclass::text AS child, confrelid::regclass::text AS parent, array_length(conkey, 1) AS conkey_count
        FROM pg_constraint
        WHERE contype = 'f' AND conrelid::regclass::text IN ('requisition', 'job', 'application', 'job_custom_field', 'pipeline_stage_transition', 'decision', 'application_custom_field_response', 'lia_document')
-       AND confrelid::regclass::text NOT IN ('tenant', 'person')`,
+       -- instrument_version, como person, é uma tabela GLOBAL (sem
+       -- tenant_id, ver hiring_0020__job_instrument_version.sql) -- job
+       -- referencia job.instrument_version_id -> instrument_version(id)
+       -- com FK simples de propósito, não há coluna composta possível
+       -- porque o pai não tem tenant_id.
+       AND confrelid::regclass::text NOT IN ('tenant', 'person', 'instrument_version')`,
     );
     for (const row of result.rows) {
       expect(row.conkey_count).toBeGreaterThanOrEqual(2);

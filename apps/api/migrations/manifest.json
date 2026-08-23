@@ -97,6 +97,7 @@
     "identity_0012__staff_refresh_token_nullif_fail_closed.sql",
     "identity_0013__resolve_staff_refresh_token_by_hash.sql",
     "identity_0014__user_account_email_globally_unique.sql",
-    "hiring_0019__job_recrutador.sql"
+    "hiring_0019__job_recrutador.sql",
+    "hiring_0020__job_instrument_version.sql"
   ]
 }

@@ -58,6 +58,10 @@ class EditarJobDto {
   @IsArray()
   @IsString({ each: true })
   habilidadesExigidas?: string[];
+
+  @IsOptional()
+  @IsUUID()
+  instrumentVersionId?: string;
 }
 
 class PublishJobDto {

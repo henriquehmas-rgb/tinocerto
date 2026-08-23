@@ -37,6 +37,7 @@ export interface JobDetail {
   habilidadesExigidas: string[];
   publicadoEm: Date | null;
   criadoEm: Date;
+  instrumentVersionId: string | null;
 }
 
 export interface EditarJobInput {
@@ -45,6 +46,7 @@ export interface EditarJobInput {
   titulo?: string;
   descricao?: string;
   habilidadesExigidas?: string[];
+  instrumentVersionId?: string;
 }
 
 export interface CandidaturaResumo {
@@ -151,8 +153,9 @@ export class JobService {
       habilidades_exigidas: string[];
       publicado_em: Date | null;
       criado_em: Date;
+      instrument_version_id: string | null;
     }>(
-      `SELECT id, titulo, descricao, habilidades_exigidas, publicado_em, criado_em
+      `SELECT id, titulo, descricao, habilidades_exigidas, publicado_em, criado_em, instrument_version_id
        FROM job WHERE id = $1 AND tenant_id = $2`,
       [input.jobId, input.tenantId],
     );
@@ -165,6 +168,7 @@ export class JobService {
       habilidadesExigidas: row.habilidades_exigidas,
       publicadoEm: row.publicado_em,
       criadoEm: row.criado_em,
+      instrumentVersionId: row.instrument_version_id,
     };
   }
 
@@ -246,9 +250,17 @@ export class JobService {
       `UPDATE job SET
          titulo = COALESCE($3, titulo),
          descricao = COALESCE($4, descricao),
-         habilidades_exigidas = COALESCE($5, habilidades_exigidas)
+         habilidades_exigidas = COALESCE($5, habilidades_exigidas),
+         instrument_version_id = COALESCE($6, instrument_version_id)
        WHERE id = $1 AND tenant_id = $2`,
-      [input.jobId, input.tenantId, input.titulo ?? null, input.descricao ?? null, input.habilidadesExigidas ?? null],
+      [
+        input.jobId,
+        input.tenantId,
+        input.titulo ?? null,
+        input.descricao ?? null,
+        input.habilidadesExigidas ?? null,
+        input.instrumentVersionId ?? null,
+      ],
     );
   }
 

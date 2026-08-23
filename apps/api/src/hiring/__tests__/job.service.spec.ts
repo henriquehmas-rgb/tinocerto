@@ -34,6 +34,16 @@ describe('JobService', () => {
   afterAll(async () => {
     await adminPool.query('DELETE FROM outbox_event WHERE tenant_id = $1', [tenantId]);
     await adminPool.query('DELETE FROM job WHERE tenant_id = $1', [tenantId]);
+    // instrument/instrument_version são tabelas GLOBAIS (sem tenant_id) --
+    // precisam de limpeza explícita por id, senão os UUIDs fixos usados
+    // nos testes de instrumentVersionId acima colidem (chave duplicada)
+    // numa segunda execução da suíte.
+    await adminPool.query(
+      "DELETE FROM instrument_version WHERE id IN ('a55e55e0-0000-4000-8000-000000000098', 'a55e55e0-0000-4000-8000-0000000000a2')",
+    );
+    await adminPool.query(
+      "DELETE FROM instrument WHERE id IN ('a55e55e0-0000-4000-8000-000000000099', 'a55e55e0-0000-4000-8000-0000000000a1')",
+    );
     await adminPool.query('DELETE FROM requisition WHERE tenant_id = $1', [tenantId]);
     await adminPool.query('DELETE FROM org_unit WHERE tenant_id = $1', [tenantId]);
     await adminPool.query('DELETE FROM tenant WHERE id = $1', [tenantId]);
@@ -477,6 +487,57 @@ describe('JobService', () => {
         descricao: 'Nova descrição',
         habilidades_exigidas: ['SQL', 'Python'],
       });
+    });
+
+    it('findById retorna instrumentVersionId quando a vaga tem instrumento configurado', async () => {
+      const ctx = new TenantContext(appPool);
+      const service = new JobService(new RequisitionService(), new JobRecrutadorService());
+
+      const { id } = await ctx.run(tenantId, (client) =>
+        service.create(client, { tenantId, requisitionId, titulo: 'Vaga com Instrumento' }),
+      );
+
+      await adminPool.query(
+        `INSERT INTO instrument (id, nome) VALUES ('a55e55e0-0000-4000-8000-000000000099', 'Instrumento Teste')`,
+      );
+      await adminPool.query(
+        `INSERT INTO instrument_version (id, instrument_id, versao, ativo)
+         VALUES ('a55e55e0-0000-4000-8000-000000000098', 'a55e55e0-0000-4000-8000-000000000099', 1, true)`,
+      );
+      await adminPool.query(`UPDATE job SET instrument_version_id = 'a55e55e0-0000-4000-8000-000000000098' WHERE id = $1`, [
+        id,
+      ]);
+
+      const job = await ctx.run(tenantId, (client) => service.findById(client, { tenantId, jobId: id }));
+      expect(job?.instrumentVersionId).toBe('a55e55e0-0000-4000-8000-000000000098');
+    });
+
+    it('editar atualiza instrumentVersionId da vaga', async () => {
+      const ctx = new TenantContext(appPool);
+      const service = new JobService(new RequisitionService(), new JobRecrutadorService());
+
+      const { id } = await ctx.run(tenantId, (client) =>
+        service.create(client, { tenantId, requisitionId, titulo: 'Vaga a Vincular Instrumento' }),
+      );
+
+      await adminPool.query(
+        `INSERT INTO instrument (id, nome) VALUES ('a55e55e0-0000-4000-8000-0000000000a1', 'Instrumento Teste 2')`,
+      );
+      await adminPool.query(
+        `INSERT INTO instrument_version (id, instrument_id, versao, ativo)
+         VALUES ('a55e55e0-0000-4000-8000-0000000000a2', 'a55e55e0-0000-4000-8000-0000000000a1', 1, true)`,
+      );
+
+      await ctx.run(tenantId, (client) =>
+        service.editar(client, {
+          tenantId,
+          jobId: id,
+          instrumentVersionId: 'a55e55e0-0000-4000-8000-0000000000a2',
+        }),
+      );
+
+      const job = await ctx.run(tenantId, (client) => service.findById(client, { tenantId, jobId: id }));
+      expect(job?.instrumentVersionId).toBe('a55e55e0-0000-4000-8000-0000000000a2');
     });
   });
 });
