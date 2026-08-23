@@ -3,8 +3,10 @@ import { Pool } from 'pg';
 import { DatabaseModule } from '../database/database.module';
 import { DatabaseService } from '../database/database.service';
 import { HiringModule } from '../hiring/hiring.module';
+import { AssessmentModule } from '../assessment/assessment.module';
 import { CandidateAuthController } from './candidate-auth.controller';
 import { CandidateApplicationController } from './candidate-application.controller';
+import { CandidateAssessmentController } from './candidate-assessment.controller';
 import { CandidateAccountService } from './candidate-account.service';
 import { CandidateTokenService } from './candidate-token.service';
 import { CandidateJwtService } from './candidate-jwt.service';
@@ -18,8 +20,8 @@ import { PersonService } from '../talent/person.service';
 import { EnvelopeEncryptionService } from '../talent/envelope-encryption.service';
 
 @Module({
-  imports: [DatabaseModule, HiringModule],
-  controllers: [CandidateAuthController, CandidateApplicationController],
+  imports: [DatabaseModule, HiringModule, AssessmentModule],
+  controllers: [CandidateAuthController, CandidateApplicationController, CandidateAssessmentController],
   providers: [
     CandidateAccountService,
     CandidateTokenService,
