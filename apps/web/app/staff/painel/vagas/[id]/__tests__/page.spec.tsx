@@ -298,4 +298,27 @@ describe('FunilPage', () => {
     );
   });
 
+  it('mostra mensagem de indisponibilidade quando gerar perguntas falha com 503', async () => {
+    vi.mocked(staffPanelClient.obterFunil).mockResolvedValue({});
+    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue(PERFIL_MOCK);
+    vi.mocked(staffPanelClient.obterVaga).mockResolvedValue(VAGA_MOCK);
+    vi.mocked(staffPanelClient.obterRoteiroEntrevista).mockResolvedValue({
+      id: 'guide-1', status: 'publicado', publishedVersionId: 'version-1',
+      competencias: [{ competencyId: 'comp-1', nome: 'Comunicação', ancoras: [] }],
+    });
+    vi.mocked(staffPanelClient.obterImpactoAdverso).mockResolvedValue([]);
+    vi.mocked(staffPanelClient.gerarPerguntasEntrevista).mockRejectedValue(
+      new Error('Geração por IA indisponível no momento, tente novamente.'),
+    );
+
+    render(<FunilPage />);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Sugerir perguntas' })).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sugerir perguntas' }));
+
+    await waitFor(() =>
+      expect(screen.getByText('Geração por IA indisponível no momento, tente novamente.')).toBeInTheDocument(),
+    );
+  });
+
 });

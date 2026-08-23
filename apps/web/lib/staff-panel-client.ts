@@ -377,7 +377,12 @@ export const staffPanelClient = {
   async obterResumoCandidatoAtual(applicationId: string): Promise<CandidateSummaryDraft | null> {
     const response = await staffAuthClient.authenticatedFetch(`/v1/applications/${applicationId}/candidate-summary-drafts/current`);
     if (response.status === 503) throw new Error('Geração por IA indisponível no momento, tente novamente.');
-    return tratarResposta<CandidateSummaryDraft | null>(response, 'Não foi possível carregar o resumo do candidato');
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.message ?? 'Não foi possível carregar o resumo do candidato');
+    }
+    const texto = await response.text();
+    return texto ? (JSON.parse(texto) as CandidateSummaryDraft) : null;
   },
 
   async aplicarResumoCandidato(applicationId: string, draftId: string): Promise<{ id: string; aplicadoEm: string }> {

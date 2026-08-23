@@ -266,7 +266,7 @@ export default function CandidaturaPage() {
               {!resumoAplicado && <Button onClick={handleAplicarResumo}>Aplicar resumo</Button>}
             </div>
           )}
-          <Button variant="secondary" onClick={handleGerarResumo}>
+          <Button variant="secondary" onClick={handleGerarResumo} disabled={gerandoResumo}>
             {gerandoResumo ? 'Gerando...' : 'Gerar resumo'}
           </Button>
         </Card>

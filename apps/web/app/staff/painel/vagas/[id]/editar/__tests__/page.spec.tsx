@@ -400,4 +400,56 @@ describe('EditarVagaPage', () => {
     expect(staffPanelClient.editarVaga).not.toHaveBeenCalled();
   });
 
+  it('mostra mensagem de erro quando aplicar a sugestao falha com 409 (descricao mudou desde a geracao)', async () => {
+    vi.mocked(staffPanelClient.obterVaga).mockResolvedValue({
+      id: 'job-1', titulo: 'Vaga X', descricao: 'procuramos um rapaz esforçado',
+      habilidadesExigidas: [], publicadoEm: null, criadoEm: '2026-08-01T00:00:00Z',
+      recrutadorIds: [], instrumentVersionId: null,
+    });
+    vi.mocked(staffPanelClient.obterInstrumentosAtivos).mockResolvedValue([]);
+    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue(PERFIL_MOCK);
+    vi.mocked(staffPanelClient.gerarSugestaoDescricao).mockResolvedValue({
+      id: 'sug-1', jobId: 'job-1',
+      textoOriginal: 'procuramos um rapaz esforçado',
+      textoSugerido: 'procuramos uma pessoa esforçada',
+      criadoEm: '2026-08-10T00:00:00Z',
+    });
+    vi.mocked(staffPanelClient.aplicarSugestaoDescricao).mockRejectedValue(
+      new Error('A descrição da vaga mudou desde que esta sugestão foi gerada.'),
+    );
+
+    render(<EditarVagaPage />);
+    await screen.findByLabelText('Instrumento de assessment');
+    fireEvent.click(screen.getByRole('button', { name: 'Sugerir reescrita' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Aplicar' })).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Aplicar' }));
+
+    await waitFor(() =>
+      expect(screen.getByText('A descrição da vaga mudou desde que esta sugestão foi gerada.')).toBeInTheDocument(),
+    );
+  });
+
+  it('mostra mensagem de indisponibilidade quando gerar sugestao falha com 503', async () => {
+    vi.mocked(staffPanelClient.obterVaga).mockResolvedValue({
+      id: 'job-1', titulo: 'Vaga X', descricao: 'procuramos um rapaz esforçado',
+      habilidadesExigidas: [], publicadoEm: null, criadoEm: '2026-08-01T00:00:00Z',
+      recrutadorIds: [], instrumentVersionId: null,
+    });
+    vi.mocked(staffPanelClient.obterInstrumentosAtivos).mockResolvedValue([]);
+    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue(PERFIL_MOCK);
+    vi.mocked(staffPanelClient.gerarSugestaoDescricao).mockRejectedValue(
+      new Error('Geração por IA indisponível no momento, tente novamente.'),
+    );
+
+    render(<EditarVagaPage />);
+    await screen.findByLabelText('Instrumento de assessment');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sugerir reescrita' }));
+
+    await waitFor(() =>
+      expect(screen.getByText('Geração por IA indisponível no momento, tente novamente.')).toBeInTheDocument(),
+    );
+  });
+
 });

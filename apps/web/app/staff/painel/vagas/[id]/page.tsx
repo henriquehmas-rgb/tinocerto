@@ -177,7 +177,7 @@ export default function FunilPage() {
               )}
               {roteiro.publishedVersionId && (
                 <div className="mt-2 flex flex-col gap-2">
-                  <Button variant="secondary" onClick={handleGerarPerguntas}>
+                  <Button variant="secondary" onClick={handleGerarPerguntas} disabled={gerandoPerguntas}>
                     {gerandoPerguntas ? 'Gerando...' : 'Sugerir perguntas'}
                   </Button>
                   {erroPerguntas && <p className="text-danger-text">{erroPerguntas}</p>}

@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useRef, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Button, PanelLayout } from '@tinocerto/design-system';
 import { staffPanelClient, PerfilStaff, InstrumentoAtivo, JobDescriptionSuggestion } from '../../../../../../lib/staff-panel-client';
@@ -56,6 +56,11 @@ export default function EditarVagaPage() {
   // tinha. Este ref é o que distingue "usuário quer Nenhum" de "nunca
   // soubemos o valor real".
   const instrumentVersionIdInicialRef = useRef<string | null | undefined>(undefined);
+
+  const diffPartes = useMemo(
+    () => (sugestaoDescricao ? wordDiff(sugestaoDescricao.textoOriginal, sugestaoDescricao.textoSugerido) : []),
+    [sugestaoDescricao],
+  );
 
   useEffect(() => {
     staffPanelClient.obterPerfil().then(setPerfil).catch(() => {});
@@ -176,14 +181,14 @@ export default function EditarVagaPage() {
           <textarea className="rounded-control px-3 py-2 border border-border" value={descricao} onChange={(e) => setDescricao(e.target.value)} />
         </label>
         <div className="flex flex-col gap-2">
-          <Button variant="secondary" onClick={handleSugerirReescrita}>
+          <Button variant="secondary" onClick={handleSugerirReescrita} disabled={gerandoSugestao}>
             {gerandoSugestao ? 'Gerando...' : 'Sugerir reescrita'}
           </Button>
           {erroSugestao && <p className="text-danger-text">{erroSugestao}</p>}
           {sugestaoDescricao && (
             <div className="border border-border rounded-card p-3 bg-surface flex flex-col gap-2">
               <p className="font-ui text-sm">
-                {wordDiff(sugestaoDescricao.textoOriginal, sugestaoDescricao.textoSugerido).map((parte, i) => {
+                {diffPartes.map((parte, i) => {
                   if (parte.tipo === 'removido') {
                     return (
                       <span key={i} className="line-through text-danger-text">
