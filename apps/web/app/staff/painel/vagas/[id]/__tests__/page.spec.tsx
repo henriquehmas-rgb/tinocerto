@@ -6,7 +6,17 @@ import { staffPanelClient } from '../../../../../../lib/staff-panel-client';
 const pushMock = vi.fn();
 const routerMock = { push: pushMock };
 vi.mock('next/navigation', () => ({ useParams: () => ({ id: 'job-1' }), useRouter: () => routerMock }));
-const PERFIL_MOCK = {  userId: 'u1',  tenantId: 't1',  roles: ['admin_tenant'],  email: 'ana@empresa.example',  razaoSocial: 'Empresa Exemplo Ltda',};vi.mock('../../../../../../lib/staff-panel-client', () => ({
+const PERFIL_MOCK = {  userId: 'u1',  tenantId: 't1',  roles: ['admin_tenant'],  email: 'ana@empresa.example',  razaoSocial: 'Empresa Exemplo Ltda',};
+const VAGA_MOCK = {
+  id: 'job-1',
+  titulo: 'Vaga X',
+  descricao: '',
+  habilidadesExigidas: [],
+  publicadoEm: null,
+  criadoEm: '2026-08-01T00:00:00Z',
+  recrutadorIds: [],
+  instrumentVersionId: null,
+};vi.mock('../../../../../../lib/staff-panel-client', () => ({
   staffPanelClient: {
     obterFunil: vi.fn(),
     moverEtapa: vi.fn(),
@@ -15,6 +25,7 @@ const PERFIL_MOCK = {  userId: 'u1',  tenantId: 't1',  roles: ['admin_tenant'], 
     obterRoteiroEntrevista: vi.fn(),
     gerarRoteiroEntrevista: vi.fn(),
     publicarRoteiroEntrevista: vi.fn(),
+    obterImpactoAdverso: vi.fn(),
   },
 }));
 
@@ -36,6 +47,7 @@ describe('FunilPage', () => {
     vi.mocked(staffPanelClient.obterRoteiroEntrevista).mockResolvedValue(null);
     vi.mocked(staffPanelClient.gerarRoteiroEntrevista).mockResolvedValue({ id: 'guide-1' });
     vi.mocked(staffPanelClient.publicarRoteiroEntrevista).mockResolvedValue({ id: 'guide-1', versao: 1 });
+    vi.mocked(staffPanelClient.obterImpactoAdverso).mockResolvedValue([]);
   });
 
   it('renderiza as colunas do funil com as candidaturas carregadas', async () => {
@@ -212,6 +224,39 @@ describe('FunilPage', () => {
     render(<FunilPage />);
 
     await waitFor(() => expect(screen.getByText('Publicado')).toBeInTheDocument());
+  });
+
+  it('mostra mensagem de dado insuficiente quando nao ha impacto adverso calculado', async () => {
+    vi.mocked(staffPanelClient.obterFunil).mockResolvedValue({});
+    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue(PERFIL_MOCK);
+    vi.mocked(staffPanelClient.obterVaga).mockResolvedValue(VAGA_MOCK);
+    vi.mocked(staffPanelClient.obterRoteiroEntrevista).mockResolvedValue(null);
+    vi.mocked(staffPanelClient.obterImpactoAdverso).mockResolvedValue([]);
+
+    render(<FunilPage />);
+
+    await waitFor(() =>
+      expect(
+        screen.getByText('Ainda não há dados suficientes para calcular impacto adverso nesta vaga (mínimo de 5 candidaturas por grupo).'),
+      ).toBeInTheDocument(),
+    );
+  });
+
+  it('agrupa por etapa e dimensao, e mostra badge de alerta para razao abaixo de 0.8', async () => {
+    vi.mocked(staffPanelClient.obterFunil).mockResolvedValue({});
+    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue(PERFIL_MOCK);
+    vi.mocked(staffPanelClient.obterVaga).mockResolvedValue(VAGA_MOCK);
+    vi.mocked(staffPanelClient.obterRoteiroEntrevista).mockResolvedValue(null);
+    vi.mocked(staffPanelClient.obterImpactoAdverso).mockResolvedValue([
+      { etapa: 'triagem', grupoDemografico: 'genero:feminino', taxaSelecao: 0.4, razao4Quintos: 0.65, calculadoEm: '2026-08-10T00:00:00Z' },
+      { etapa: 'triagem', grupoDemografico: 'genero:masculino', taxaSelecao: 0.6, razao4Quintos: 1.0, calculadoEm: '2026-08-10T00:00:00Z' },
+    ]);
+
+    render(<FunilPage />);
+
+    await waitFor(() => expect(screen.getByText('feminino')).toBeInTheDocument());
+    expect(screen.getByText('masculino')).toBeInTheDocument();
+    expect(screen.getByText('Abaixo de 0,8')).toBeInTheDocument();
   });
 
 });

@@ -3,8 +3,8 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { KanbanBoard, PanelLayout, Card, Badge, Button } from '@tinocerto/design-system';
-import { staffPanelClient, CandidaturaResumo, PerfilStaff, RoteiroEntrevista, VagaCompleta } from '../../../../../lib/staff-panel-client';
+import { KanbanBoard, PanelLayout, Card, Badge, Button, Table } from '@tinocerto/design-system';
+import { staffPanelClient, CandidaturaResumo, PerfilStaff, RoteiroEntrevista, VagaCompleta, ImpactoAdversoRow } from '../../../../../lib/staff-panel-client';
 import { staffAuthClient, isErroDeAutenticacao } from '../../../../../lib/staff-auth-client';
 
 // Etapas conhecidas hoje, sempre mostradas como coluna (e como destino no
@@ -34,6 +34,17 @@ function capitalizar(texto: string): string {
   return texto.charAt(0).toUpperCase() + texto.slice(1);
 }
 
+function agruparImpactoAdverso(rows: ImpactoAdversoRow[]): Record<string, Record<string, ImpactoAdversoRow[]>> {
+  const porEtapa: Record<string, Record<string, ImpactoAdversoRow[]>> = {};
+  for (const row of rows) {
+    const [dimensao] = row.grupoDemografico.split(':');
+    porEtapa[row.etapa] ??= {};
+    porEtapa[row.etapa][dimensao] ??= [];
+    porEtapa[row.etapa][dimensao].push(row);
+  }
+  return porEtapa;
+}
+
 export default function FunilPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
@@ -43,6 +54,8 @@ export default function FunilPage() {
   const [vaga, setVaga] = useState<VagaCompleta | null>(null);
   const [roteiro, setRoteiro] = useState<RoteiroEntrevista | null>(null);
   const [carregandoRoteiro, setCarregandoRoteiro] = useState(true);
+  const [impactoAdverso, setImpactoAdverso] = useState<ImpactoAdversoRow[]>([]);
+  const [carregandoImpacto, setCarregandoImpacto] = useState(true);
 
   const carregar = useCallback(() => {
     staffPanelClient
@@ -68,6 +81,11 @@ export default function FunilPage() {
       .then(setRoteiro)
       .catch(() => {})
       .finally(() => setCarregandoRoteiro(false));
+    staffPanelClient
+      .obterImpactoAdverso(params.id)
+      .then(setImpactoAdverso)
+      .catch(() => {})
+      .finally(() => setCarregandoImpacto(false));
   }, [carregar, params.id]);
 
   async function handleGerarRoteiro() {
@@ -143,7 +161,47 @@ export default function FunilPage() {
             </div>
           )}
         </Card>
-                <KanbanBoard
+        <Card>
+          <p className="font-ui text-sm font-medium text-text mb-2">Impacto adverso</p>
+          {!carregandoImpacto && impactoAdverso.length === 0 && (
+            <p className="font-ui text-sm text-text-secondary">
+              Ainda não há dados suficientes para calcular impacto adverso nesta vaga (mínimo de 5 candidaturas por grupo).
+            </p>
+          )}
+          {!carregandoImpacto && impactoAdverso.length > 0 && (
+            <div className="flex flex-col gap-4">
+              {Object.entries(agruparImpactoAdverso(impactoAdverso)).map(([etapa, dimensoes]) => (
+                <div key={etapa}>
+                  <p className="font-ui text-sm font-medium text-text mb-2">{capitalizar(etapa)}</p>
+                  <div className="flex flex-col gap-3">
+                    {Object.entries(dimensoes).map(([dimensao, linhas]) => (
+                      <div key={dimensao}>
+                        <p className="font-ui text-xs text-text-secondary mb-1">{capitalizar(dimensao)}</p>
+                        <Table
+                          columns={[
+                            { header: 'Grupo', render: (r: ImpactoAdversoRow) => r.grupoDemografico.split(':')[1] },
+                            { header: 'Taxa de seleção', render: (r: ImpactoAdversoRow) => `${(r.taxaSelecao * 100).toFixed(1)}%` },
+                            {
+                              header: 'Razão 4/5',
+                              render: (r: ImpactoAdversoRow) => (
+                                <span className="flex items-center gap-2">
+                                  {r.razao4Quintos.toFixed(2)}
+                                  {r.razao4Quintos < 0.8 && <Badge tone="alerta">Abaixo de 0,8</Badge>}
+                                </span>
+                              ),
+                            },
+                          ]}
+                          rows={linhas}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+        <KanbanBoard
           colunas={colunas}
           itens={funil}
           renderItem={(item: CandidaturaResumo) => (

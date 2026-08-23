@@ -127,6 +127,14 @@ export interface DashboardMetricas {
   porEstagio: Record<string, number>;
 }
 
+export interface ImpactoAdversoRow {
+  etapa: string;
+  grupoDemografico: string;
+  taxaSelecao: number;
+  razao4Quintos: number;
+  calculadoEm: string;
+}
+
 export const staffPanelClient = {
   async listarVagas(): Promise<VagaResumo[]> {
     const response = await staffAuthClient.authenticatedFetch('/v1/jobs');
@@ -173,6 +181,11 @@ export const staffPanelClient = {
   async obterFunil(jobId: string): Promise<Record<string, CandidaturaResumo[]>> {
     const response = await staffAuthClient.authenticatedFetch(`/v1/jobs/${jobId}/funil`);
     return tratarResposta(response, 'Não foi possível carregar o funil');
+  },
+
+  async obterImpactoAdverso(jobId: string): Promise<ImpactoAdversoRow[]> {
+    const response = await staffAuthClient.authenticatedFetch(`/v1/jobs/${jobId}/adverse-impact`);
+    return tratarResposta(response, 'Não foi possível carregar o impacto adverso');
   },
 
   async moverEtapa(applicationId: string, toState: string): Promise<void> {
