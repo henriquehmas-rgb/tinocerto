@@ -42,4 +42,9 @@ describe('Button', () => {
     const button = screen.getByRole('button', { name: 'Salvar' });
     expect(button).toHaveAttribute('type', 'submit');
   });
+
+  it('aplica classe visual de opacidade reduzida quando disabled', () => {
+    render(<Button disabled>Enviar</Button>);
+    expect(screen.getByRole('button', { name: 'Enviar' })).toHaveClass('disabled:opacity-50');
+  });
 });
