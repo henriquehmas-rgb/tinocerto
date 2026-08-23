@@ -7,6 +7,27 @@ import { ApplicationService } from '../../hiring/application.service';
 import { JobRecrutadorService } from '../../hiring/job-recrutador.service';
 import { DatabaseService } from '../../database/database.service';
 import { CerbosGuard } from '../../authz/cerbos.guard';
+import { validate } from 'class-validator';
+import { plainToInstance } from 'class-transformer';
+import { CriarAgendaDto } from '../interview-schedule.controller';
+
+describe('CriarAgendaDto validation', () => {
+  it('rejeita avaliadorIds vazio', async () => {
+    const dto = plainToInstance(CriarAgendaDto, {
+      applicationId: 'app-1', interviewGuideVersionId: 'v-1', dataHora: '2026-09-01T14:00:00.000Z', avaliadorIds: [],
+    });
+    const erros = await validate(dto);
+    expect(erros.some((e) => e.property === 'avaliadorIds')).toBe(true);
+  });
+
+  it('rejeita avaliadorIds com elemento nao-string', async () => {
+    const dto = plainToInstance(CriarAgendaDto, {
+      applicationId: 'app-1', interviewGuideVersionId: 'v-1', dataHora: '2026-09-01T14:00:00.000Z', avaliadorIds: [123],
+    });
+    const erros = await validate(dto);
+    expect(erros.some((e) => e.property === 'avaliadorIds')).toBe(true);
+  });
+});
 
 describe('InterviewScheduleController', () => {
   const dto = { applicationId: 'application-1', interviewGuideVersionId: 'version-1', dataHora: '2026-09-01T10:00:00Z', avaliadorIds: [] };

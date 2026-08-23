@@ -1,5 +1,5 @@
 import { Body, Controller, Get, NotFoundException, Param, Post, Req, UseGuards } from '@nestjs/common';
-import { IsArray, IsDateString, IsNotEmpty, IsString } from 'class-validator';
+import { ArrayNotEmpty, IsArray, IsDateString, IsNotEmpty, IsString } from 'class-validator';
 import { Request } from 'express';
 import { TenantContext } from '../database/tenant-context';
 import { DatabaseService } from '../database/database.service';
@@ -10,11 +10,14 @@ import { JobRecrutadorService } from '../hiring/job-recrutador.service';
 import { InterviewSchedulingService } from './scheduling/interview-scheduling.service';
 import { InterviewScheduleService } from './interview-schedule.service';
 
-class CriarAgendaDto {
+export class CriarAgendaDto {
   @IsString() @IsNotEmpty() applicationId!: string;
   @IsString() @IsNotEmpty() interviewGuideVersionId!: string;
   @IsDateString() dataHora!: string;
-  @IsArray() avaliadorIds!: string[];
+  @IsArray()
+  @ArrayNotEmpty()
+  @IsString({ each: true })
+  avaliadorIds!: string[];
 }
 
 interface RequestWithAuthContext extends Request {
