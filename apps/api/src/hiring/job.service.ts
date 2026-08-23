@@ -46,7 +46,9 @@ export interface EditarJobInput {
   titulo?: string;
   descricao?: string;
   habilidadesExigidas?: string[];
-  instrumentVersionId?: string;
+  // undefined = campo nao enviado, nao mexe; null = enviado vazio,
+  // desvincula o instrumento; string = define o instrumento.
+  instrumentVersionId?: string | null;
 }
 
 export interface CandidaturaResumo {
@@ -246,12 +248,21 @@ export class JobService {
   }
 
   async editar(client: PoolClient, input: EditarJobInput): Promise<void> {
+    // instrument_version_id não pode usar COALESCE como os demais campos:
+    // o frontend precisa poder ENVIAR null para desvincular o instrumento
+    // (usuário seleciona "Nenhum" no seletor), mas COALESCE(null, coluna)
+    // manteria o valor antigo -- indistinguível de "campo não enviado".
+    // O CASE abaixo usa $6 (booleano "instrumentVersionId foi enviado no
+    // input?") para decidir: só mexe na coluna quando o campo foi de fato
+    // enviado, e nesse caso usa exatamente o que veio em $7 (inclusive
+    // null, que desvincula).
+    const instrumentVersionIdEnviado = input.instrumentVersionId !== undefined;
     await client.query(
       `UPDATE job SET
          titulo = COALESCE($3, titulo),
          descricao = COALESCE($4, descricao),
          habilidades_exigidas = COALESCE($5, habilidades_exigidas),
-         instrument_version_id = COALESCE($6, instrument_version_id)
+         instrument_version_id = CASE WHEN $6::boolean THEN $7::uuid ELSE instrument_version_id END
        WHERE id = $1 AND tenant_id = $2`,
       [
         input.jobId,
@@ -259,6 +270,7 @@ export class JobService {
         input.titulo ?? null,
         input.descricao ?? null,
         input.habilidadesExigidas ?? null,
+        instrumentVersionIdEnviado,
         input.instrumentVersionId ?? null,
       ],
     );

@@ -143,7 +143,7 @@ export const staffPanelClient = {
     await tratarResposta(response, 'Não foi possível atribuir recrutadores');
   },
 
-  async editarVaga(jobId: string, input: { titulo?: string; descricao?: string; habilidadesExigidas?: string[]; instrumentVersionId?: string }): Promise<void> {
+  async editarVaga(jobId: string, input: { titulo?: string; descricao?: string; habilidadesExigidas?: string[]; instrumentVersionId?: string | null }): Promise<void> {
     const response = await staffAuthClient.authenticatedFetch(`/v1/jobs/${jobId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },

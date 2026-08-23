@@ -31,7 +31,17 @@ async function preencherESubmeterFormulario() {
   const curriculoInput = screen.getByLabelText('Currículo (PDF)') as HTMLInputElement;
   const arquivo = new File(['%PDF-1.4'], 'curriculo.pdf', { type: 'application/pdf' });
   fireEvent.change(curriculoInput, { target: { files: [arquivo] } });
-  fireEvent.click(screen.getByRole('button', { name: 'Enviar candidatura' }));
+  // O input de currículo tem `required` (restaurado -- ver achado de
+  // revisão final sobre a validação nativa do navegador). jsdom nunca
+  // limpa `validity.valueMissing` de um input type=file mesmo depois de
+  // `fireEvent.change` setar `.files` -- então clicar no botão de submit
+  // (que passa pelo algoritmo nativo de submissão do form, incluindo
+  // validação interativa) bloquearia o submit aqui mesmo com o arquivo já
+  // preenchido. Disparar o evento 'submit' diretamente no form pula esse
+  // algoritmo nativo e vai direto pro onSubmit do React, que é o que este
+  // teste quer exercitar -- a validação real do navegador continua valendo
+  // fora do ambiente de teste.
+  fireEvent.submit(screen.getByRole('button', { name: 'Enviar candidatura' }).closest('form')!);
 }
 
 describe('ApplyPage', () => {

@@ -39,10 +39,10 @@ describe('JobService', () => {
     // nos testes de instrumentVersionId acima colidem (chave duplicada)
     // numa segunda execução da suíte.
     await adminPool.query(
-      "DELETE FROM instrument_version WHERE id IN ('a55e55e0-0000-4000-8000-000000000098', 'a55e55e0-0000-4000-8000-0000000000a2')",
+      "DELETE FROM instrument_version WHERE id IN ('a55e55e0-0000-4000-8000-000000000098', 'a55e55e0-0000-4000-8000-0000000000a2', 'a55e55e0-0000-4000-8000-0000000000c2')",
     );
     await adminPool.query(
-      "DELETE FROM instrument WHERE id IN ('a55e55e0-0000-4000-8000-000000000099', 'a55e55e0-0000-4000-8000-0000000000a1')",
+      "DELETE FROM instrument WHERE id IN ('a55e55e0-0000-4000-8000-000000000099', 'a55e55e0-0000-4000-8000-0000000000a1', 'a55e55e0-0000-4000-8000-0000000000c1')",
     );
     await adminPool.query('DELETE FROM requisition WHERE tenant_id = $1', [tenantId]);
     await adminPool.query('DELETE FROM org_unit WHERE tenant_id = $1', [tenantId]);
@@ -538,6 +538,46 @@ describe('JobService', () => {
 
       const job = await ctx.run(tenantId, (client) => service.findById(client, { tenantId, jobId: id }));
       expect(job?.instrumentVersionId).toBe('a55e55e0-0000-4000-8000-0000000000a2');
+    });
+
+    it('editar com instrumentVersionId: null desvincula o instrumento (achado da revisao final)', async () => {
+      const ctx = new TenantContext(appPool);
+      const service = new JobService(new RequisitionService(), new JobRecrutadorService());
+
+      const { id } = await ctx.run(tenantId, (client) =>
+        service.create(client, { tenantId, requisitionId, titulo: 'Vaga a Desvincular Instrumento' }),
+      );
+
+      await adminPool.query(
+        `INSERT INTO instrument (id, nome) VALUES ('a55e55e0-0000-4000-8000-0000000000c1', 'Instrumento Teste 3')`,
+      );
+      await adminPool.query(
+        `INSERT INTO instrument_version (id, instrument_id, versao, ativo)
+         VALUES ('a55e55e0-0000-4000-8000-0000000000c2', 'a55e55e0-0000-4000-8000-0000000000c1', 1, true)`,
+      );
+
+      // Primeiro vincula um instrumento existente...
+      await ctx.run(tenantId, (client) =>
+        service.editar(client, {
+          tenantId,
+          jobId: id,
+          instrumentVersionId: 'a55e55e0-0000-4000-8000-0000000000c2',
+        }),
+      );
+      const antes = await ctx.run(tenantId, (client) => service.findById(client, { tenantId, jobId: id }));
+      expect(antes?.instrumentVersionId).toBe('a55e55e0-0000-4000-8000-0000000000c2');
+
+      // ...depois desvincula enviando null explicitamente (equivalente a
+      // selecionar "Nenhum" no seletor do painel).
+      await ctx.run(tenantId, (client) =>
+        service.editar(client, {
+          tenantId,
+          jobId: id,
+          instrumentVersionId: null,
+        }),
+      );
+      const depois = await ctx.run(tenantId, (client) => service.findById(client, { tenantId, jobId: id }));
+      expect(depois?.instrumentVersionId).toBeNull();
     });
   });
 });

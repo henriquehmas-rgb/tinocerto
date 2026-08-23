@@ -140,4 +140,49 @@ describe('AssessmentPage', () => {
 
     await waitFor(() => expect(screen.getByText('Obrigado, sua resposta foi registrada.')).toBeInTheDocument());
   });
+
+  it('mostra todos os itens de um bloco de 3, nao so os 2 primeiros (achado do LIMIT 2 fixo)', async () => {
+    vi.mocked(candidateAuthClient.authenticatedFetch).mockResolvedValue(
+      mockResponse(200, {
+        blockId: 'b-1',
+        itens: [
+          { itemId: 'i-1', texto: 'Item 1' },
+          { itemId: 'i-2', texto: 'Item 2' },
+          { itemId: 'i-3', texto: 'Item 3' },
+        ],
+        progresso: { atual: 0, total: 20 },
+      }),
+    );
+
+    render(<AssessmentPage />);
+
+    await waitFor(() => expect(screen.getByText('Item 1')).toBeInTheDocument());
+    expect(screen.getByText('Item 2')).toBeInTheDocument();
+    expect(screen.getByText('Item 3')).toBeInTheDocument();
+  });
+
+  it('mostra botao "Tentar novamente" quando o carregamento falha, e ele recarrega o bloco atual', async () => {
+    vi.mocked(candidateAuthClient.authenticatedFetch)
+      .mockResolvedValueOnce(mockResponse(500, { message: 'erro interno' }))
+      .mockResolvedValueOnce(
+        mockResponse(200, {
+          blockId: 'b-1',
+          itens: [
+            { itemId: 'i-1', texto: 'Item 1' },
+            { itemId: 'i-2', texto: 'Item 2' },
+          ],
+          progresso: { atual: 0, total: 20 },
+        }),
+      );
+
+    render(<AssessmentPage />);
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Tentar novamente' })).toBeInTheDocument());
+    expect(candidateAuthClient.authenticatedFetch).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Tentar novamente' }));
+
+    await waitFor(() => expect(screen.getByText('Item 1')).toBeInTheDocument());
+    expect(candidateAuthClient.authenticatedFetch).toHaveBeenCalledTimes(2);
+  });
 });

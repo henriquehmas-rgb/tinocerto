@@ -1,5 +1,5 @@
 import { BadRequestException, Body, Controller, Get, Param, Patch, Post, Req, UseGuards, NotFoundException } from '@nestjs/common';
-import { ArrayNotEmpty, IsArray, IsNotEmpty, IsOptional, IsString, IsUUID } from 'class-validator';
+import { ArrayNotEmpty, IsArray, IsNotEmpty, IsOptional, IsString, IsUUID, ValidateIf } from 'class-validator';
 import { Request } from 'express';
 import { TenantContext } from '../database/tenant-context';
 import { DatabaseService } from '../database/database.service';
@@ -59,9 +59,15 @@ class EditarJobDto {
   @IsString({ each: true })
   habilidadesExigidas?: string[];
 
+  // undefined = campo omitido (não mexe no vínculo); null = enviado
+  // explicitamente vazio (desvincula o instrumento -- ver JobService.editar
+  // e o achado de revisão final sobre "Nenhum" no seletor não desvinculando
+  // a vaga). @ValidateIf pula a validação de UUID quando o valor é null,
+  // já que null é um valor válido e distinto aqui, não "campo ausente".
   @IsOptional()
+  @ValidateIf((_, value) => value !== null)
   @IsUUID()
-  instrumentVersionId?: string;
+  instrumentVersionId?: string | null;
 }
 
 class PublishJobDto {

@@ -88,7 +88,12 @@ export default function EditarVagaPage() {
         titulo: titulo || undefined,
         descricao: descricao || undefined,
         habilidadesExigidas: habilidadesExigidas.length > 0 ? habilidadesExigidas : undefined,
-        instrumentVersionId: instrumentVersionId || undefined,
+        // Sempre envia (nunca omite): "" no seletor precisa chegar como
+        // null explícito no body para o backend distinguir "desvincular"
+        // de "campo não enviado" -- ver JobService.editar. Omitir aqui
+        // (|| undefined) fazia o seletor em "Nenhum" nunca desvincular a
+        // vaga de verdade.
+        instrumentVersionId: instrumentVersionId || null,
       });
       const recrutadorIdsIniciais = recrutadorIdsIniciaisRef.current;
       const campoFoiAlterado = recrutadorIdsIniciais !== null && !arraysIguais(recrutadorIdsIniciais, recrutadorIds);

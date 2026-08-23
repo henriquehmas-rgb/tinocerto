@@ -22,6 +22,19 @@ interface Concluido {
 
 type EstadoAssessment = BlocoAtual | Concluido;
 
+// Extrai a mensagem de erro do corpo da resposta (ex.: 409 de
+// "assessment não está disponível para resposta: status convidado"),
+// caindo pro texto genérico quando o corpo não é JSON ou não tem message.
+async function mensagemDeErro(response: Response, generico: string): Promise<string> {
+  try {
+    const body = await response.json();
+    if (body && typeof body.message === 'string') return body.message;
+  } catch {
+    // corpo não é JSON -- usa o genérico
+  }
+  return generico;
+}
+
 export default function AssessmentPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
@@ -44,7 +57,7 @@ export default function AssessmentPage() {
       const response = await candidateAuthClient.authenticatedFetch(
         `/v1/candidate/applications/${params.id}/assessment`,
       );
-      if (!response.ok) throw new Error('Não foi possível carregar o assessment');
+      if (!response.ok) throw new Error(await mensagemDeErro(response, 'Não foi possível carregar o assessment'));
       const body: EstadoAssessment = await response.json();
       setEstado(body);
       setMaisId(null);
@@ -72,7 +85,7 @@ export default function AssessmentPage() {
           }),
         },
       );
-      if (!response.ok) throw new Error('Não foi possível enviar a resposta');
+      if (!response.ok) throw new Error(await mensagemDeErro(response, 'Não foi possível enviar a resposta'));
       const resultado: { concluido: boolean } = await response.json();
       if (resultado.concluido) {
         setEstado({ concluido: true });
@@ -88,15 +101,25 @@ export default function AssessmentPage() {
 
   if (erro) {
     return (
-      <main className="pr-assessment min-h-screen flex items-center justify-center p-8">
+      <main className="pr-assessment bg-bg text-text min-h-screen flex flex-col items-center justify-center gap-4 p-8">
         <p className="text-danger-text">{erro}</p>
+        <button
+          type="button"
+          onClick={() => {
+            setErro(null);
+            carregarBlocoAtual();
+          }}
+          className="rounded-control px-4 py-2 bg-accent text-on-accent font-ui text-sm font-medium"
+        >
+          Tentar novamente
+        </button>
       </main>
     );
   }
 
   if (!estado) {
     return (
-      <main className="pr-assessment min-h-screen flex items-center justify-center p-8">
+      <main className="pr-assessment bg-bg text-text min-h-screen flex items-center justify-center p-8">
         <p className="font-ui text-sm text-text-secondary">Carregando...</p>
       </main>
     );
@@ -104,7 +127,7 @@ export default function AssessmentPage() {
 
   if (estado.concluido) {
     return (
-      <main className="pr-assessment min-h-screen flex flex-col items-center justify-center gap-4 p-8">
+      <main className="pr-assessment bg-bg text-text min-h-screen flex flex-col items-center justify-center gap-4 p-8">
         <p className="font-display text-xl text-text">Obrigado, sua resposta foi registrada.</p>
         <a href="/candidato/candidaturas" className="font-ui text-sm text-accent">
           Voltar para minhas candidaturas
@@ -113,16 +136,15 @@ export default function AssessmentPage() {
     );
   }
 
-  const [item1, item2] = estado.itens;
   const completo = maisId !== null && menosId !== null;
 
   return (
-    <main className="pr-assessment min-h-screen flex flex-col items-center justify-center gap-6 p-8">
+    <main className="pr-assessment bg-bg text-text min-h-screen flex flex-col items-center justify-center gap-6 p-8">
       <p className="font-ui text-sm text-text-secondary">
         Bloco {estado.progresso.atual + 1} de {estado.progresso.total}
       </p>
       <div className="max-w-md w-full flex flex-col gap-4">
-        {[item1, item2].map((item) => (
+        {estado.itens.map((item) => (
           <fieldset key={item.itemId} className="flex flex-col gap-2 border border-border rounded-card p-4 bg-surface">
             <legend className="font-ui text-sm text-text px-1">{item.texto}</legend>
             <label className="flex items-center gap-2 font-ui text-sm text-text-secondary">

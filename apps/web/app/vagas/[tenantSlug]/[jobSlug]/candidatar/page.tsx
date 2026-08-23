@@ -90,7 +90,7 @@ export default function ApplyPage() {
       <form onSubmit={handleSubmit} className="space-y-4">
         <label className="block">
           <span className="text-sm text-text-secondary">Currículo (PDF)</span>
-          <input name="curriculo" type="file" accept="application/pdf" className="block w-full mt-1" />
+          <input name="curriculo" type="file" accept="application/pdf" required className="block w-full mt-1" />
         </label>
         {job.camposCustomizados
           .filter((campo) => campo.faseColeta === 'inscricao')

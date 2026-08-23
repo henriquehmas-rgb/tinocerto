@@ -85,8 +85,18 @@ export class CandidateAssessmentController {
     const tenantId = await this.resolveOwnedApplicationTenant(req.personId, applicationId);
     return this.tenantContext.run(tenantId, async (client) => {
       const assessment = await this.resolveAssessmentApplicationId(client, tenantId, applicationId);
-      if (assessment.status !== 'iniciado') {
+      // Achado de revisão final: 'convidado' (assessment criado mas nunca
+      // iniciado -- hoje alcançável via AssessmentController de staff, que
+      // pode convidar sem iniciar) não é o mesmo caso que 'concluido'. O
+      // código antigo (`status !== 'iniciado'`) tratava os dois igual e
+      // mostrava "já concluído" para um candidato que na verdade nunca
+      // começou -- silenciosamente escondendo que ele precisa iniciar o
+      // assessment primeiro (fluxo fora do escopo desta rota).
+      if (assessment.status === 'concluido') {
         return { concluido: true };
+      }
+      if (assessment.status !== 'iniciado') {
+        throw new ConflictException(`Assessment não está disponível para resposta (status: ${assessment.status})`);
       }
 
       const total = await client.query<{ n: number }>(
@@ -100,32 +110,45 @@ export class CandidateAssessmentController {
         [assessment.id],
       );
 
-      const blocoAtual = await client.query<{
-        block_id: string;
-        item_id: string;
-        enunciado: string;
-      }>(
-        `SELECT b.id AS block_id, i.id AS item_id, i.enunciado
+      // Resolve primeiro qual é o PRÓXIMO bloco pendente (mesma lógica de
+      // exclusão de antes), depois busca TODOS os itens desse bloco sem
+      // limite algum. Um `LIMIT 2` fixo na query única de antes só
+      // funcionava porque o único instrumento existente usa blocos de 2
+      // itens -- o schema permite 3-4 (ver assessment_0003 structural
+      // gates), e um LIMIT 2 ali travava blocos maiores pela metade.
+      const proximoBloco = await client.query<{ block_id: string }>(
+        `SELECT b.id AS block_id
            FROM block b
            JOIN assessment_application aa ON aa.instrument_version_id = b.instrument_version_id
-           JOIN block_item bi ON bi.block_id = b.id
-           JOIN item i ON i.id = bi.item_id
           WHERE aa.id = $1
             AND b.id NOT IN (
               SELECT DISTINCT block_id FROM item_response WHERE assessment_application_id = $1
             )
-          ORDER BY b.ordem ASC, bi.posicao ASC
-          LIMIT 2`,
+          ORDER BY b.ordem ASC
+          LIMIT 1`,
         [assessment.id],
       );
 
-      if (blocoAtual.rows.length === 0) {
+      if (proximoBloco.rows.length === 0) {
         return { concluido: true };
       }
 
+      const blockId = proximoBloco.rows[0].block_id;
+      const itensBloco = await client.query<{
+        item_id: string;
+        enunciado: string;
+      }>(
+        `SELECT i.id AS item_id, i.enunciado
+           FROM block_item bi
+           JOIN item i ON i.id = bi.item_id
+          WHERE bi.block_id = $1
+          ORDER BY bi.posicao ASC`,
+        [blockId],
+      );
+
       return {
-        blockId: blocoAtual.rows[0].block_id,
-        itens: blocoAtual.rows.map((row) => ({ itemId: row.item_id, texto: row.enunciado })),
+        blockId,
+        itens: itensBloco.rows.map((row) => ({ itemId: row.item_id, texto: row.enunciado })),
         progresso: { atual: respondidos.rows[0].n, total: total.rows[0].n },
       };
     });
@@ -142,14 +165,25 @@ export class CandidateAssessmentController {
     return this.tenantContext.run(tenantId, async (client) => {
       const assessment = await this.resolveAssessmentApplicationId(client, tenantId, applicationId);
 
-      await this.assessmentService.responderBloco(client, this.encryption, {
-        assessmentApplicationId: assessment.id,
-        blockId,
-        itemIds: dto.itemIds,
-        maisId: dto.maisId,
-        menosId: dto.menosId,
-        duracaoMs: dto.duracaoMs,
-      });
+      try {
+        await this.assessmentService.responderBloco(client, this.encryption, {
+          assessmentApplicationId: assessment.id,
+          blockId,
+          itemIds: dto.itemIds,
+          maisId: dto.maisId,
+          menosId: dto.menosId,
+          duracaoMs: dto.duracaoMs,
+        });
+      } catch (err) {
+        // item_response tem UNIQUE (assessment_application_id, block_id) --
+        // reenviar o mesmo bloco (duplo clique, retry após perda de
+        // conexão) estourava a constraint como um 500 não tratado. Código
+        // 23505 do Postgres é violação de unique constraint: trata como
+        // "já respondido" (idempotente) e segue pro concluir normalmente,
+        // em vez de propagar o erro cru.
+        const isUniqueViolation = (err as { code?: string })?.code === '23505';
+        if (!isUniqueViolation) throw err;
+      }
 
       try {
         await this.assessmentService.concluir(client, this.encryption, assessment.id);
