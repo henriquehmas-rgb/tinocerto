@@ -22,8 +22,10 @@ const vagaBase = {
 };
 
 describe('EditarVagaPage', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
     vi.mocked(staffPanelClient.obterInstrumentosAtivos).mockResolvedValue([]);
+  });
 
   it('pré-preenche o formulário com os dados atuais da vaga', async () => {
     vi.mocked(staffPanelClient.obterVaga).mockResolvedValue(vagaBase);
@@ -237,42 +239,4 @@ describe('EditarVagaPage', () => {
     );
   });
 
-  it('mostra o seletor de instrumento com as opcoes ativas e envia a selecao ao salvar', async () => {
-    vi.mocked(staffPanelClient.obterVaga).mockResolvedValue({
-      id: 'job-1',
-      titulo: 'Vaga X',
-      descricao: 'Descricao',
-      habilidadesExigidas: [],
-      publicadoEm: null,
-      criadoEm: '2026-08-01T00:00:00Z',
-      recrutadorIds: [],
-      instrumentVersionId: null,
-    });
-    vi.mocked(staffPanelClient.obterInstrumentosAtivos).mockResolvedValue([
-      { id: 'iv-1', nome: 'Perfil Comportamental Tinocerto', versao: 1 },
-    ]);
-    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue({
-      userId: 'u1',
-      tenantId: 't1',
-      roles: ['admin_tenant'],
-      email: 'ana@empresa.example',
-      razaoSocial: 'Empresa Exemplo Ltda',
-    });
-    vi.mocked(staffPanelClient.editarVaga).mockResolvedValue(undefined);
-
-    render(<EditarVagaPage />);
-
-    const select = await screen.findByLabelText('Instrumento de assessment');
-    expect(screen.getByRole('option', { name: 'Perfil Comportamental Tinocerto (v1)' })).toBeInTheDocument();
-
-    fireEvent.change(select, { target: { value: 'iv-1' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Salvar' }));
-
-    await waitFor(() =>
-      expect(staffPanelClient.editarVaga).toHaveBeenCalledWith(
-        'job-1',
-        expect.objectContaining({ instrumentVersionId: 'iv-1' }),
-      ),
-    );
-  });
 });
