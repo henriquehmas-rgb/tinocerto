@@ -115,6 +115,42 @@ export interface OfferRow {
   motivoRecusaCodigo: string | null;
 }
 
+export interface JobDescriptionSuggestion {
+  id: string;
+  jobId: string;
+  textoOriginal: string;
+  textoSugerido: string;
+  criadoEm: string;
+}
+
+export interface FraseResumo {
+  texto: string;
+  fonteId: string;
+  secao: string;
+  itemIndex: number;
+  citacaoVerbatim: string;
+}
+
+export interface CandidateSummaryDraft {
+  id: string;
+  applicationId: string;
+  frases: FraseResumo[];
+  criadoEm: string;
+}
+
+export interface ItemPerguntaSugerida {
+  competencyId: string;
+  nome: string;
+  perguntas: string[];
+}
+
+export interface InterviewQuestionSuggestion {
+  id: string;
+  interviewGuideVersionId: string;
+  itens: ItemPerguntaSugerida[];
+  criadoEm: string;
+}
+
 export interface ConexaoGoogleCalendar {
   connected: boolean;
   googleEmail?: string;
@@ -317,5 +353,40 @@ export const staffPanelClient = {
   async desconectarGoogleCalendar(): Promise<void> {
     const response = await staffAuthClient.authenticatedFetch('/v1/calendar-connections/google', { method: 'DELETE' });
     await tratarResposta(response, 'Não foi possível desconectar o Google Calendar');
+  },
+
+  async gerarSugestaoDescricao(jobId: string): Promise<JobDescriptionSuggestion> {
+    const response = await staffAuthClient.authenticatedFetch(`/v1/jobs/${jobId}/description-suggestions`, { method: 'POST' });
+    if (response.status === 503) throw new Error('Geração por IA indisponível no momento, tente novamente.');
+    return tratarResposta(response, 'Não foi possível gerar a sugestão de descrição');
+  },
+
+  async aplicarSugestaoDescricao(jobId: string, suggestionId: string): Promise<{ descricao: string }> {
+    const response = await staffAuthClient.authenticatedFetch(`/v1/jobs/${jobId}/description-suggestions/${suggestionId}/apply`, { method: 'POST' });
+    if (response.status === 409) throw new Error('A descrição da vaga mudou desde que esta sugestão foi gerada.');
+    return tratarResposta(response, 'Não foi possível aplicar a sugestão');
+  },
+
+  async gerarResumoCandidato(applicationId: string): Promise<CandidateSummaryDraft> {
+    const response = await staffAuthClient.authenticatedFetch(`/v1/applications/${applicationId}/candidate-summary-drafts`, { method: 'POST' });
+    if (response.status === 503) throw new Error('Geração por IA indisponível no momento, tente novamente.');
+    if (response.status === 422) throw new Error('Não foi possível gerar um resumo citável para este candidato agora.');
+    return tratarResposta(response, 'Não foi possível gerar o resumo do candidato');
+  },
+
+  async obterResumoCandidatoAtual(applicationId: string): Promise<CandidateSummaryDraft | null> {
+    const response = await staffAuthClient.authenticatedFetch(`/v1/applications/${applicationId}/candidate-summary-drafts/current`);
+    return tratarResposta<CandidateSummaryDraft | null>(response, 'Não foi possível carregar o resumo do candidato');
+  },
+
+  async aplicarResumoCandidato(applicationId: string, draftId: string): Promise<{ id: string; aplicadoEm: string }> {
+    const response = await staffAuthClient.authenticatedFetch(`/v1/applications/${applicationId}/candidate-summary-drafts/${draftId}/apply`, { method: 'POST' });
+    return tratarResposta(response, 'Não foi possível aplicar o resumo');
+  },
+
+  async gerarPerguntasEntrevista(versionId: string): Promise<InterviewQuestionSuggestion> {
+    const response = await staffAuthClient.authenticatedFetch(`/v1/interview-guide-versions/${versionId}/question-suggestions`, { method: 'POST' });
+    if (response.status === 503) throw new Error('Geração por IA indisponível no momento, tente novamente.');
+    return tratarResposta(response, 'Não foi possível gerar as perguntas sugeridas');
   },
 };
