@@ -30,4 +30,16 @@ describe('Button', () => {
     fireEvent.click(button);
     expect(onClick).not.toHaveBeenCalled();
   });
+
+  it('renderiza type="button" por padrao, para nao disparar submit acidental de formulario ao redor', () => {
+    render(<Button>Sugerir reescrita</Button>);
+    const button = screen.getByRole('button', { name: 'Sugerir reescrita' });
+    expect(button).toHaveAttribute('type', 'button');
+  });
+
+  it('renderiza type="submit" quando explicitamente passado, para uso como botao final de um formulario', () => {
+    render(<Button type="submit">Salvar</Button>);
+    const button = screen.getByRole('button', { name: 'Salvar' });
+    expect(button).toHaveAttribute('type', 'submit');
+  });
 });

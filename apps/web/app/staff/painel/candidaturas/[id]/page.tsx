@@ -222,7 +222,7 @@ export default function CandidaturaPage() {
                     required
                   />
                 </label>
-                <Button>Agendar entrevista</Button>
+                <Button type="submit">Agendar entrevista</Button>
               </form>
             )}
             {agenda && (
@@ -269,6 +269,7 @@ export default function CandidaturaPage() {
                 </label>
                 {erroScorecard && <p className="text-danger-text">{erroScorecard}</p>}
                 <Button
+                  type="submit"
                   disabled={!roteiro || !roteiro.competencias.every((c) => notas[c.competencyId] != null)}
                 >
                   Enviar avaliação
@@ -316,7 +317,7 @@ export default function CandidaturaPage() {
                 />
               </label>
               {erroOferta && <p className="text-danger-text">{erroOferta}</p>}
-              <Button>Estender oferta</Button>
+              <Button type="submit">Estender oferta</Button>
             </form>
           )}
           {!carregandoOfertas && ofertaPendente && (

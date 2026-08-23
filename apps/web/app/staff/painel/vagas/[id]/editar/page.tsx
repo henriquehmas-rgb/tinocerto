@@ -242,7 +242,7 @@ export default function EditarVagaPage() {
             ))}
           </select>
         </label>
-        <Button>Salvar</Button>
+        <Button type="submit">Salvar</Button>
       </form>
     </PanelLayout>
   );

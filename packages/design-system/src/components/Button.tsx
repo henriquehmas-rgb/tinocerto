@@ -5,9 +5,10 @@ export interface ButtonProps {
   children: React.ReactNode;
   onClick?: () => void;
   disabled?: boolean;
+  type?: 'button' | 'submit';
 }
 
-export function Button({ variant = 'primary', children, onClick, disabled }: ButtonProps) {
+export function Button({ variant = 'primary', children, onClick, disabled, type = 'button' }: ButtonProps) {
   const base = 'rounded-control px-4 py-2 font-ui text-sm font-medium pr-focusable';
   const variantClass =
     variant === 'primary'
@@ -15,7 +16,7 @@ export function Button({ variant = 'primary', children, onClick, disabled }: But
       : 'bg-surface text-text border border-border';
 
   return (
-    <button className={`${base} ${variantClass}`} onClick={onClick} disabled={disabled}>
+    <button type={type} className={`${base} ${variantClass}`} onClick={onClick} disabled={disabled}>
       {children}
     </button>
   );

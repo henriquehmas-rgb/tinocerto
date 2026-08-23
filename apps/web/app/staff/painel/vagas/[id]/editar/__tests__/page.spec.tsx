@@ -376,4 +376,28 @@ describe('EditarVagaPage', () => {
     );
   });
 
+  it('clicar em Sugerir reescrita nao dispara o submit do formulario de editar vaga (regressao: Button sem type explicito herdava type=submit do navegador)', async () => {
+    vi.mocked(staffPanelClient.obterVaga).mockResolvedValue({
+      id: 'job-1', titulo: 'Vaga X', descricao: 'procuramos um rapaz esforcado',
+      habilidadesExigidas: [], publicadoEm: null, criadoEm: '2026-08-01T00:00:00Z',
+      recrutadorIds: [], instrumentVersionId: null,
+    });
+    vi.mocked(staffPanelClient.obterInstrumentosAtivos).mockResolvedValue([]);
+    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue(PERFIL_MOCK);
+    vi.mocked(staffPanelClient.gerarSugestaoDescricao).mockResolvedValue({
+      id: 'sug-1', jobId: 'job-1',
+      textoOriginal: 'procuramos um rapaz esforcado',
+      textoSugerido: 'procuramos uma pessoa esforcada',
+      criadoEm: '2026-08-10T00:00:00Z',
+    });
+
+    render(<EditarVagaPage />);
+    await screen.findByLabelText('Instrumento de assessment');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sugerir reescrita' }));
+
+    await waitFor(() => expect(staffPanelClient.gerarSugestaoDescricao).toHaveBeenCalled());
+    expect(staffPanelClient.editarVaga).not.toHaveBeenCalled();
+  });
+
 });

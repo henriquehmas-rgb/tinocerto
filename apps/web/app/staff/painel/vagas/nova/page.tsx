@@ -80,7 +80,7 @@ export default function NovaVagaPage() {
             required
           />
         </label>
-        <Button>{enviando ? 'Criando...' : 'Criar vaga'}</Button>
+        <Button type="submit">{enviando ? 'Criando...' : 'Criar vaga'}</Button>
       </form>
     </PanelLayout>
   );
