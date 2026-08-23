@@ -8,6 +8,7 @@ import { EnvelopeEncryptionService } from '../talent/envelope-encryption.service
 import { StorageService } from '../storage/storage.service';
 import { OutboxService } from '../outbox/outbox.service';
 import { nextOutboxSequence } from '../outbox/next-outbox-sequence';
+import { AssessmentService } from '../assessment/assessment.service';
 
 const RESUME_BUCKET = process.env.MINIO_RESUME_BUCKET ?? 'curriculos';
 const PDF_MAGIC_BYTES = Buffer.from('%PDF-', 'ascii');
@@ -35,9 +36,10 @@ export class PublicApplicationService {
     private readonly outbox: OutboxService,
     private readonly customFieldResponseService: ApplicationCustomFieldResponseService,
     private readonly encryption: EnvelopeEncryptionService,
+    private readonly assessmentService: AssessmentService,
   ) {}
 
-  async apply(client: PoolClient, input: ApplyInput): Promise<{ applicationId: string }> {
+  async apply(client: PoolClient, input: ApplyInput): Promise<{ applicationId: string; assessmentId: string | null }> {
     if (input.curriculo.mimetype !== 'application/pdf') {
       throw new Error('Currículo precisa ser um arquivo PDF');
     }
@@ -120,6 +122,30 @@ export class PublicApplicationService {
       occurredAt: new Date(),
     });
 
-    return { applicationId: application.id };
+    // Disparo automático do assessment comportamental: se a vaga tem um
+    // instrumento configurado (job.instrument_version_id), o candidato já
+    // sai da candidatura direto com o assessment criado E iniciado -- sem
+    // isso o funil trava antes da triagem (achado da auditoria de
+    // 2026-08-10: não existia nenhuma tela nem fluxo para o candidato
+    // responder o instrumento). nivelIntegridade fixo em 0 nesta fase --
+    // ver Global Constraints do plano.
+    const vaga = await client.query<{ instrument_version_id: string | null }>(
+      `SELECT instrument_version_id FROM job WHERE id = $1 AND tenant_id = $2`,
+      [input.jobId, input.tenantId],
+    );
+    let assessmentId: string | null = null;
+    if (vaga.rows[0]?.instrument_version_id) {
+      const assessment = await this.assessmentService.convidar(client, {
+        tenantId: input.tenantId,
+        applicationId: application.id,
+        personId: input.personId,
+        instrumentVersionId: vaga.rows[0].instrument_version_id,
+        nivelIntegridade: 0,
+      });
+      await this.assessmentService.iniciar(client, assessment.id);
+      assessmentId = assessment.id;
+    }
+
+    return { applicationId: application.id, assessmentId };
   }
 }

@@ -6,6 +6,7 @@ import { ApplicationService } from '../../hiring/application.service';
 import { ApplicationCustomFieldResponseService } from '../../hiring/application-custom-field-response.service';
 import { EnvelopeEncryptionService } from '../../talent/envelope-encryption.service';
 import { OutboxService } from '../../outbox/outbox.service';
+import { AssessmentService } from '../../assessment/assessment.service';
 import { PublicApplicationService } from '../public-application.service';
 
 function buildService() {
@@ -16,8 +17,11 @@ function buildService() {
     new OutboxService(),
     new ApplicationCustomFieldResponseService(),
     new EnvelopeEncryptionService(),
+    new AssessmentService(new OutboxService()),
   );
 }
+
+const PDF_BUFFER_DE_TESTE = Buffer.from('%PDF-1.4' + String.fromCharCode(10) + 'conteúdo fake de pdf');
 
 describe('PublicApplicationService', () => {
   const url = new URL(process.env.DATABASE_URL!);
@@ -26,9 +30,11 @@ describe('PublicApplicationService', () => {
   const appPool = new Pool({ connectionString: url.toString() });
   const adminPool = new Pool({ connectionString: process.env.DATABASE_URL });
   let tenantId: string;
+  let requisitionId: string;
   let jobId: string;
   let inscricaoFieldId: string;
   let personId: string;
+  let jobComInstrumentoId: string;
 
   beforeAll(async () => {
     process.env.MINIO_ENDPOINT ??= 'localhost';
@@ -49,6 +55,7 @@ describe('PublicApplicationService', () => {
       `INSERT INTO requisition (tenant_id, org_unit_id, titulo, status, approved_at) VALUES ($1, $2, 'Req Public App', 'aprovada', now()) RETURNING id`,
       [tenantId, org.rows[0].id],
     );
+    requisitionId = req.rows[0].id;
     const job = await adminPool.query<{ id: string }>(
       `INSERT INTO job (tenant_id, requisition_id, titulo, seo_slug, publicado_em, canais)
        VALUES ($1, $2, 'Vaga Public App', 'vaga-public-app-test', now(), '{}') RETURNING id`,
@@ -78,10 +85,19 @@ describe('PublicApplicationService', () => {
     // (reproduzido ao vivo rodando a suíte completa após a Task 14).
     await adminPool.query('DELETE FROM candidate_application_summary WHERE person_id = $1', [personId]);
     await adminPool.query('DELETE FROM resume_upload WHERE person_id = $1', [personId]);
+    // [Task 3, Fase 2a] O teste de disparo automático cria assessment_application
+    // (via publicApplicationService.apply -> AssessmentService.convidar/.iniciar)
+    // referenciando application(tenant_id, id) -- sem apagar essa linha antes do
+    // DELETE FROM application abaixo, a FK fk_aa_tenant_application quebra.
+    await adminPool.query('DELETE FROM assessment_application WHERE tenant_id = $1', [tenantId]);
     await adminPool.query('DELETE FROM application WHERE tenant_id = $1', [tenantId]);
     await adminPool.query('DELETE FROM candidate_touchpoint WHERE tenant_id = $1', [tenantId]);
     await adminPool.query('DELETE FROM job_custom_field WHERE tenant_id = $1', [tenantId]);
     await adminPool.query('DELETE FROM job WHERE tenant_id = $1', [tenantId]);
+    // Instrumento sintético do teste de disparo automático (após apagar o job
+    // que aponta pra ele via instrument_version_id).
+    await adminPool.query(`DELETE FROM instrument_version WHERE id = 'a55e55e0-0000-4000-8000-0000000000b2'`);
+    await adminPool.query(`DELETE FROM instrument WHERE id = 'a55e55e0-0000-4000-8000-0000000000b1'`);
     await adminPool.query('DELETE FROM requisition WHERE tenant_id = $1', [tenantId]);
     await adminPool.query('DELETE FROM org_unit WHERE tenant_id = $1', [tenantId]);
     await adminPool.query('DELETE FROM person WHERE id = $1', [personId]);
@@ -166,5 +182,63 @@ describe('PublicApplicationService', () => {
         }),
       ),
     ).rejects.toThrow(/PDF/);
+  });
+
+  it('dispara e inicia um assessment automaticamente quando a vaga tem instrumento configurado', async () => {
+    const org = await adminPool.query<{ id: string }>(
+      `INSERT INTO org_unit (tenant_id, tipo, nome, materialized_path) VALUES ($1, 'empresa', 'Matriz Assessment', 'matriz-assessment') RETURNING id`,
+      [tenantId],
+    );
+    const job = await adminPool.query<{ id: string }>(
+      `INSERT INTO job (tenant_id, requisition_id, titulo, seo_slug, publicado_em, canais)
+       VALUES ($1, $2, 'Vaga Public App Com Instrumento', 'vaga-public-app-com-instrumento-test', now(), '{}') RETURNING id`,
+      [tenantId, requisitionId],
+    );
+    jobComInstrumentoId = job.rows[0].id;
+    await adminPool.query(`INSERT INTO instrument (id, nome) VALUES ('a55e55e0-0000-4000-8000-0000000000b1', 'Instrumento Auto')`);
+    await adminPool.query(
+      `INSERT INTO instrument_version (id, instrument_id, versao, ativo)
+       VALUES ('a55e55e0-0000-4000-8000-0000000000b2', 'a55e55e0-0000-4000-8000-0000000000b1', 1, true)`,
+    );
+    await adminPool.query(`UPDATE job SET instrument_version_id = 'a55e55e0-0000-4000-8000-0000000000b2' WHERE id = $1`, [
+      jobComInstrumentoId,
+    ]);
+
+    const ctx = new TenantContext(appPool);
+    const service = buildService();
+
+    const result = await ctx.run(tenantId, (client) =>
+      service.apply(client, {
+        tenantId,
+        jobId: jobComInstrumentoId,
+        personId,
+        curriculo: { buffer: PDF_BUFFER_DE_TESTE, originalname: 'curriculo.pdf', mimetype: 'application/pdf' },
+        respostasInscricao: [],
+      }),
+    );
+
+    expect(result.assessmentId).not.toBeNull();
+
+    const assessment = await adminPool.query('SELECT status FROM assessment_application WHERE id = $1', [
+      result.assessmentId,
+    ]);
+    expect(assessment.rows[0].status).toBe('iniciado');
+  });
+
+  it('nao dispara assessment quando a vaga nao tem instrumento configurado', async () => {
+    const ctx = new TenantContext(appPool);
+    const service = buildService();
+
+    const result = await ctx.run(tenantId, (client) =>
+      service.apply(client, {
+        tenantId,
+        jobId,
+        personId,
+        curriculo: { buffer: PDF_BUFFER_DE_TESTE, originalname: 'curriculo.pdf', mimetype: 'application/pdf' },
+        respostasInscricao: [],
+      }),
+    );
+
+    expect(result.assessmentId).toBeNull();
   });
 });

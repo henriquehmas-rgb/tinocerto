@@ -7,6 +7,7 @@ import { PublicJobService } from './public-job.service';
 import { PublicApplicationController } from './public-application.controller';
 import { PublicApplicationService } from './public-application.service';
 import { PublicTenantResolutionMiddleware } from './public-tenant-resolution.middleware';
+import { AssessmentModule } from '../assessment/assessment.module';
 import { StorageService } from '../storage/storage.service';
 import { CandidateTouchpointService } from '../hiring/candidate-touchpoint.service';
 import { ApplicationService } from '../hiring/application.service';
@@ -19,7 +20,7 @@ import { IpRateLimitService } from '../security/ip-rate-limit.service';
 import { IpRateLimitGuard } from '../security/ip-rate-limit.guard';
 
 @Module({
-  imports: [DatabaseModule],
+  imports: [DatabaseModule, AssessmentModule],
   controllers: [PublicController, PublicApplicationController],
   providers: [
     PublicJobService,
