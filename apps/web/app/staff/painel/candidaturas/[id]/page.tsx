@@ -353,7 +353,11 @@ export default function CandidaturaPage() {
                     <div key={competencia.competencyId}>
                       <p className="font-ui text-sm font-medium text-text">{competencia.nome}</p>
                       <p className="font-ui text-sm text-text-secondary">
-                        {ancora?.descricaoComportamental ?? `Nível ${nivel}`}
+                        {ancora
+                          ? `Nível ${nivel} — ${ancora.descricaoComportamental}`
+                          : nivel != null
+                            ? `Nível ${nivel}`
+                            : 'Não avaliado'}
                       </p>
                     </div>
                   );

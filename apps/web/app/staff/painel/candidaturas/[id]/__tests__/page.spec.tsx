@@ -294,7 +294,7 @@ describe('CandidaturaPage', () => {
       }),
     );
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Enviar avaliação' })).not.toBeInTheDocument());
-    expect(screen.getByText('Comunica-se com excelência')).toBeInTheDocument();
+    expect(screen.getByText('Nível 5 — Comunica-se com excelência')).toBeInTheDocument();
   });
 
   it('mostra minha avaliacao ja enviada em modo leitura sem formulario', async () => {
@@ -321,7 +321,7 @@ describe('CandidaturaPage', () => {
 
     render(<CandidaturaPage />);
 
-    await waitFor(() => expect(screen.getByText('Comunica-se com clareza')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('Nível 4 — Comunica-se com clareza')).toBeInTheDocument());
     expect(screen.queryByRole('button', { name: 'Enviar avaliação' })).not.toBeInTheDocument();
   });
 
@@ -569,6 +569,31 @@ describe('CandidaturaPage', () => {
     await waitFor(() =>
       expect(screen.getByText('Geração por IA indisponível no momento, tente novamente.')).toBeInTheDocument(),
     );
+  });
+
+  it('mostra o numero do nivel junto da descricao no modo leitura do scorecard', async () => {
+    vi.mocked(staffPanelClient.obterRelatorioAssessment).mockResolvedValue({ relatorio: null, aderencia: null });
+    vi.mocked(staffPanelClient.obterCandidatura).mockResolvedValue({
+      id: 'app-1', jobId: 'job-1', etapaFunil: 'entrevista', criadoEm: '2026-08-01T00:00:00Z',
+      person: { id: 'p1', nome: 'Fulano', emailPrincipal: 'fulano@example.com' },
+    });
+    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue(PERFIL_MOCK);
+    vi.mocked(staffPanelClient.obterRoteiroEntrevista).mockResolvedValue({
+      id: 'guide-1', status: 'publicado', publishedVersionId: 'version-1',
+      competencias: [{ competencyId: 'comp-1', nome: 'Comunicação', ancoras: [
+        { nivel: 4, descricaoComportamental: 'Comunica-se com clareza' },
+      ] }],
+    });
+    vi.mocked(staffPanelClient.obterAgendaEntrevista).mockResolvedValue({
+      id: 'schedule-1', dataHora: '2026-09-01T14:00:00Z', status: 'agendada',
+    });
+    vi.mocked(staffPanelClient.obterScorecards).mockResolvedValue([
+      { id: 'scorecard-1', interviewScheduleId: 'schedule-1', avaliadorId: 'u1', notasPorCompetencia: { 'comp-1': 4 }, comentario: null, submetidoEm: '2026-09-01T15:00:00Z' },
+    ]);
+
+    render(<CandidaturaPage />);
+
+    await waitFor(() => expect(screen.getByText('Nível 4 — Comunica-se com clareza')).toBeInTheDocument());
   });
 });
 
