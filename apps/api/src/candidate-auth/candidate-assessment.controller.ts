@@ -165,25 +165,23 @@ export class CandidateAssessmentController {
     return this.tenantContext.run(tenantId, async (client) => {
       const assessment = await this.resolveAssessmentApplicationId(client, tenantId, applicationId);
 
-      try {
-        await this.assessmentService.responderBloco(client, this.encryption, {
-          assessmentApplicationId: assessment.id,
-          blockId,
-          itemIds: dto.itemIds,
-          maisId: dto.maisId,
-          menosId: dto.menosId,
-          duracaoMs: dto.duracaoMs,
-        });
-      } catch (err) {
-        // item_response tem UNIQUE (assessment_application_id, block_id) --
-        // reenviar o mesmo bloco (duplo clique, retry após perda de
-        // conexão) estourava a constraint como um 500 não tratado. Código
-        // 23505 do Postgres é violação de unique constraint: trata como
-        // "já respondido" (idempotente) e segue pro concluir normalmente,
-        // em vez de propagar o erro cru.
-        const isUniqueViolation = (err as { code?: string })?.code === '23505';
-        if (!isUniqueViolation) throw err;
-      }
+      // Idempotência de reenvio do mesmo bloco (duplo clique, retry após
+      // perda de conexão) vive DENTRO de AssessmentService.responderBloco
+      // (ON CONFLICT ... DO NOTHING na INSERT de item_response) -- não aqui.
+      // Um try/catch em volta desta chamada capturando 23505 não funciona:
+      // TenantContext.run abre uma única transação (BEGIN...COMMIT) em volta
+      // do handler inteiro, e um erro de constraint deixa essa transação
+      // ABORTADA no Postgres até o fim do bloco -- a chamada seguinte a
+      // `concluir` falharia com 25P02 "current transaction is aborted", não
+      // com o ConflictException esperado abaixo.
+      await this.assessmentService.responderBloco(client, this.encryption, {
+        assessmentApplicationId: assessment.id,
+        blockId,
+        itemIds: dto.itemIds,
+        maisId: dto.maisId,
+        menosId: dto.menosId,
+        duracaoMs: dto.duracaoMs,
+      });
 
       try {
         await this.assessmentService.concluir(client, this.encryption, assessment.id);

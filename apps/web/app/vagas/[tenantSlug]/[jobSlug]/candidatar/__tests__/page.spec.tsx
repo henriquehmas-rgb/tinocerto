@@ -29,6 +29,12 @@ function mockJsonResponse(status: number, body: unknown) {
 async function preencherESubmeterFormulario() {
   await waitFor(() => expect(screen.getByText('Candidatar-se: Vaga Teste')).toBeInTheDocument());
   const curriculoInput = screen.getByLabelText('Currículo (PDF)') as HTMLInputElement;
+  // Regressão: `required` foi removido e depois restaurado no input de
+  // currículo (ver achado de revisão final sobre validação nativa do
+  // navegador) -- sem esta asserção, remover `required` de novo passaria
+  // verde aqui, já que o resto do teste dispara 'submit' diretamente no
+  // form e pula a validação nativa mesmo assim.
+  expect(curriculoInput).toBeRequired();
   const arquivo = new File(['%PDF-1.4'], 'curriculo.pdf', { type: 'application/pdf' });
   fireEvent.change(curriculoInput, { target: { files: [arquivo] } });
   // O input de currículo tem `required` (restaurado -- ver achado de

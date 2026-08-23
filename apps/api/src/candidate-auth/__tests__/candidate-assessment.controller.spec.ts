@@ -141,25 +141,15 @@ describe('CandidateAssessmentController', () => {
     expect(result).toEqual({ concluido: true });
   });
 
-  it('responder trata violacao de unique constraint (23505) como idempotente e segue pro concluir', async () => {
-    pool.query
-      .mockResolvedValueOnce({ rows: [{ tenant_id: 't1' }] })
-      .mockResolvedValueOnce({ rows: [{ id: 'aa-1' }] });
-    assessmentService.responderBloco.mockRejectedValue(
-      Object.assign(new Error('duplicate key value violates unique constraint'), { code: '23505' }),
-    );
-    assessmentService.concluir.mockRejectedValue(new ConflictException('Assessment aa-1 incompleto: 5 de 20 blocos respondidos'));
-
-    const result = await controller.responder(
-      { personId: 'p1' } as never,
-      'app-1',
-      'b-5',
-      { itemIds: ['i-1', 'i-2'], maisId: 'i-1', menosId: 'i-2' } as never,
-    );
-
-    expect(result).toEqual({ concluido: false });
-    expect(assessmentService.concluir).toHaveBeenCalled();
-  });
+  // A idempotência de reenvio do mesmo bloco NÃO é mais responsabilidade
+  // do controller -- ela vive dentro de AssessmentService.responderBloco
+  // (ON CONFLICT ... DO NOTHING), coberta com Postgres real em
+  // assessment.service.spec.ts (mock nunca reproduz uma transação
+  // abortada por 23505, então um teste de controller com mock não prova
+  // nada sobre isso). Aqui só resta confirmar que o controller NÃO tem
+  // mais um catch especial: um erro de responderBloco, seja qual for,
+  // propaga direto -- já coberto por 'responder propaga erro que nao e
+  // violacao de unique constraint' logo abaixo.
 
   it('responder propaga erro que nao e violacao de unique constraint', async () => {
     pool.query

@@ -266,11 +266,32 @@ export class AssessmentService {
     });
     const cifrado = encryption.encrypt(payload);
 
+    // ON CONFLICT DO NOTHING + RETURNING: reenviar o mesmo bloco (duplo
+    // clique, retry apos perda de conexao) nao pode estourar a UNIQUE
+    // (assessment_application_id, block_id) como erro -- isso abortaria a
+    // transacao inteira aberta por TenantContext.run (BEGIN...COMMIT em
+    // volta do handler completo), e qualquer query seguinte na mesma
+    // transacao (o `concluir` do controller) falharia com 25P02 "current
+    // transaction is aborted", nao com o ConflictException esperado. Deixar
+    // o Postgres simplesmente nao inserir de novo e o que torna o segundo
+    // envio idempotente de verdade, sem depender de try/catch em volta da
+    // constraint.
     const result = await client.query<{ id: string }>(
       `INSERT INTO item_response (assessment_application_id, block_id, resposta_criptografada, duracao_ms)
-       VALUES ($1,$2,$3,$4) RETURNING id`,
+       VALUES ($1,$2,$3,$4)
+       ON CONFLICT ON CONSTRAINT uq_item_response_bloco DO NOTHING
+       RETURNING id`,
       [input.assessmentApplicationId, input.blockId, JSON.stringify(cifrado), input.duracaoMs ?? null],
     );
+    if (result.rows.length === 0) {
+      // Nenhuma linha inserida: a resposta deste bloco ja existia. Busca o
+      // id ja gravado -- reenvio identico e sucesso idempotente, nao erro.
+      const existente = await client.query<{ id: string }>(
+        `SELECT id FROM item_response WHERE assessment_application_id = $1 AND block_id = $2`,
+        [input.assessmentApplicationId, input.blockId],
+      );
+      return { id: existente.rows[0].id };
+    }
     return { id: result.rows[0].id };
   }
 

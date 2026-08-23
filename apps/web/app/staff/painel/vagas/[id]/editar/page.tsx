@@ -42,6 +42,16 @@ export default function EditarVagaPage() {
   // null enquanto a vaga não foi carregada com sucesso -- usado no submit
   // para decidir se é seguro chamar atribuirRecrutadores (ver handleSubmit).
   const recrutadorIdsIniciaisRef = useRef<string[] | null>(null);
+  // Mesmo padrão acima, para o instrumento. `undefined` = carregamento
+  // inicial ainda não confirmado (nunca chegamos no .then de obterVaga);
+  // string | null = valor real vindo do banco. O envio SEMPRE explícito de
+  // instrumentVersionId (null para "Nenhum") é correto quando a vaga
+  // carregou -- mas se `obterVaga` falhar, o campo do formulário fica em
+  // '' sem nunca ter sido preenchido com o valor real, e enviar `null`
+  // nesse caso desvincularia silenciosamente um instrumento que a vaga já
+  // tinha. Este ref é o que distingue "usuário quer Nenhum" de "nunca
+  // soubemos o valor real".
+  const instrumentVersionIdInicialRef = useRef<string | null | undefined>(undefined);
 
   useEffect(() => {
     staffPanelClient.obterPerfil().then(setPerfil).catch(() => {});
@@ -55,6 +65,7 @@ export default function EditarVagaPage() {
         const recrutadorIds = vaga.recrutadorIds ?? [];
         setRecrutadorIdsTexto(recrutadorIds.join(', '));
         setInstrumentVersionId(vaga.instrumentVersionId ?? '');
+        instrumentVersionIdInicialRef.current = vaga.instrumentVersionId;
         recrutadorIdsIniciaisRef.current = recrutadorIds;
       })
       .catch((e) => {
@@ -88,12 +99,19 @@ export default function EditarVagaPage() {
         titulo: titulo || undefined,
         descricao: descricao || undefined,
         habilidadesExigidas: habilidadesExigidas.length > 0 ? habilidadesExigidas : undefined,
-        // Sempre envia (nunca omite): "" no seletor precisa chegar como
-        // null explícito no body para o backend distinguir "desvincular"
-        // de "campo não enviado" -- ver JobService.editar. Omitir aqui
-        // (|| undefined) fazia o seletor em "Nenhum" nunca desvincular a
-        // vaga de verdade.
-        instrumentVersionId: instrumentVersionId || null,
+        // Sempre envia (nunca omite) QUANDO o carregamento inicial teve
+        // sucesso: "" no seletor precisa chegar como null explícito no body
+        // para o backend distinguir "desvincular" de "campo não enviado" --
+        // ver JobService.editar. Omitir sempre (|| undefined) fazia o
+        // seletor em "Nenhum" nunca desvincular a vaga de verdade. Mas se
+        // `obterVaga` falhou (instrumentVersionIdInicialRef.current ainda
+        // undefined), o formulário nunca viu o valor real -- enviar `null`
+        // nesse caso desvincularia um instrumento que a vaga já tinha, sem
+        // o usuário ter tocado nesse campo. Mesmo padrão de
+        // recrutadorIdsIniciaisRef logo abaixo: omite o campo por completo
+        // quando não sabemos o valor real, preservando o que já está gravado.
+        instrumentVersionId:
+          instrumentVersionIdInicialRef.current !== undefined ? instrumentVersionId || null : undefined,
       });
       const recrutadorIdsIniciais = recrutadorIdsIniciaisRef.current;
       const campoFoiAlterado = recrutadorIdsIniciais !== null && !arraysIguais(recrutadorIdsIniciais, recrutadorIds);

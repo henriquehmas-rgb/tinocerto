@@ -239,4 +239,69 @@ describe('EditarVagaPage', () => {
     );
   });
 
+  it('selecionar Nenhum numa vaga que ja tinha instrumento envia instrumentVersionId: null', async () => {
+    // Cenario fim-a-fim que o usuario realmente reportaria: a vaga JA
+    // tinha um instrumento configurado, o usuario seleciona "Nenhum" no
+    // <select>, e o payload enviado precisa ser null explicito -- nao ''
+    // (o backend distingue "desvincular" de "campo nao enviado", e uma
+    // string vazia nao e nenhum dos dois).
+    vi.mocked(staffPanelClient.obterVaga).mockResolvedValue({ ...vagaBase, instrumentVersionId: 'iv-1' });
+    vi.mocked(staffPanelClient.obterInstrumentosAtivos).mockResolvedValue([
+      { id: 'iv-1', nome: 'Perfil Comportamental Tinocerto', versao: 1 },
+    ]);
+    vi.mocked(staffPanelClient.editarVaga).mockResolvedValue(undefined);
+    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue({
+      userId: 'u1',
+      tenantId: 't1',
+      roles: ['admin_tenant'],
+      email: 'ana@empresa.example',
+      razaoSocial: 'Empresa Exemplo Ltda',
+    });
+
+    render(<EditarVagaPage />);
+
+    const select = await screen.findByLabelText('Instrumento de assessment');
+    await waitFor(() => expect(select).toHaveValue('iv-1'));
+
+    fireEvent.change(select, { target: { value: '' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar' }));
+
+    await waitFor(() =>
+      expect(staffPanelClient.editarVaga).toHaveBeenCalledWith(
+        'job-1',
+        expect.objectContaining({ instrumentVersionId: null }),
+      ),
+    );
+  });
+
+  it('nao envia instrumentVersionId (nem null, nem vazio) quando o carregamento inicial da vaga falha', async () => {
+    // Regressao: apos o fix anterior, instrumentVersionId passou a ser
+    // SEMPRE enviado -- correto quando a vaga carregou, mas perigoso se
+    // `obterVaga` falhar (rede, 500, vaga nao encontrada). Nesse caso o
+    // campo do formulario nunca foi preenchido com o valor real (fica em
+    // '' por padrao do useState), e enviar null desvincularia em silencio
+    // um instrumento que a vaga ja tinha, sem o usuario ter tocado nesse
+    // campo. Mesmo padrao do teste de recrutadorIds para esse cenario.
+    vi.mocked(staffPanelClient.obterVaga).mockRejectedValue(new Error('Erro de rede'));
+    vi.mocked(staffPanelClient.editarVaga).mockResolvedValue(undefined);
+    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue({
+      userId: 'u1',
+      tenantId: 't1',
+      roles: ['admin_tenant'],
+      email: 'ana@empresa.example',
+      razaoSocial: 'Empresa Exemplo Ltda',
+    });
+
+    render(<EditarVagaPage />);
+
+    await waitFor(() => expect(screen.getByText('Erro de rede')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar' }));
+
+    await waitFor(() => expect(staffPanelClient.editarVaga).toHaveBeenCalled());
+    const payload = vi.mocked(staffPanelClient.editarVaga).mock.calls[0][1] as Record<string, unknown>;
+    expect(payload.instrumentVersionId).toBeUndefined();
+    expect(payload.instrumentVersionId).not.toBe(null);
+    expect(payload.instrumentVersionId).not.toBe('');
+  });
+
 });

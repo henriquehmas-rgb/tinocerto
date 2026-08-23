@@ -470,7 +470,22 @@ describe('AssessmentService', () => {
     expect(bruto).toContain('ciphertext');
   });
 
-  it('rejeita responder o mesmo bloco duas vezes', async () => {
+  // Regressão real: TenantContext.run abre uma ÚNICA transação
+  // (BEGIN...COMMIT) em volta de CADA chamada de ctx.run, mas dentro de
+  // uma mesma chamada http (mesmo handler) `responderBloco` e `concluir`
+  // corriam antes na MESMA transação -- e um 23505 cru de UNIQUE
+  // constraint deixa essa transação ABORTADA no Postgres até o fim do
+  // bloco (`current transaction is aborted, commands ignored until end of
+  // transaction block`, 25P02), abortando também qualquer query seguinte
+  // seja ela qual for. Um mock nunca reproduz isso -- só Postgres de
+  // verdade tem esse comportamento de transação. Este teste chama
+  // `responderBloco` duas vezes com os MESMOS parâmetros DENTRO da MESMA
+  // transação (mesmo client, sem passar por ctx.run de novo no meio) --
+  // exatamente a situação que o controller cria -- e confirma que a
+  // segunda chamada não lança e não deixa a transação abortada: a query
+  // seguinte (`concluir`, na mesma transação) continua funcionando
+  // normalmente.
+  it('responder o mesmo bloco duas vezes na mesma transação é idempotente, e concluir segue funcionando', async () => {
     const ctx = new TenantContext(appPool);
     const svc = service();
 
@@ -478,22 +493,63 @@ describe('AssessmentService', () => {
       svc.convidar(client, { tenantId, applicationId, personId, instrumentVersionId: VERSION_ID }),
     );
     await ctx.run(tenantId, (client) => svc.iniciar(client, id));
-    const [bloco] = await blocosDoInstrumento();
-    const { maisId, menosId } = endossar(bloco, 'positivo');
 
-    const responder = () =>
-      ctx.run(tenantId, (client) =>
+    const blocos = await blocosDoInstrumento();
+    const [primeiro, ...resto] = blocos;
+    const { maisId, menosId } = endossar(primeiro, 'positivo');
+
+    // Duas chamadas ao MESMO bloco, com os MESMOS parâmetros, dentro da
+    // MESMA transação -- reproduz o que o controller faz ao reenviar um
+    // POST duplicado antes de chamar `concluir` em seguida.
+    await ctx.run(tenantId, async (client) => {
+      const primeira = await svc.responderBloco(client, encryption, {
+        assessmentApplicationId: id,
+        blockId: primeiro.blockId,
+        itemIds: primeiro.itemIds,
+        maisId,
+        menosId,
+      });
+      const segunda = await svc.responderBloco(client, encryption, {
+        assessmentApplicationId: id,
+        blockId: primeiro.blockId,
+        itemIds: primeiro.itemIds,
+        maisId,
+        menosId,
+      });
+      expect(segunda.id).toBe(primeira.id);
+
+      // A mesma transação ainda está viva -- se tivesse abortado (25P02),
+      // esta query também lançaria.
+      const contagem = await client.query<{ n: number }>(
+        'SELECT count(*)::int AS n FROM item_response WHERE assessment_application_id = $1 AND block_id = $2',
+        [id, primeiro.blockId],
+      );
+      expect(contagem.rows[0].n).toBe(1);
+    });
+
+    // Responde o resto do instrumento e confirma que `concluir` segue
+    // funcionando normalmente depois do reenvio duplicado.
+    for (const bloco of resto) {
+      const par = endossar(bloco, 'positivo');
+      await ctx.run(tenantId, (client) =>
         svc.responderBloco(client, encryption, {
           assessmentApplicationId: id,
           blockId: bloco.blockId,
           itemIds: bloco.itemIds,
-          maisId,
-          menosId,
+          maisId: par.maisId,
+          menosId: par.menosId,
         }),
       );
+    }
 
-    await responder();
-    await expect(responder()).rejects.toMatchObject({ code: '23505' });
+    const resultado = await ctx.run(tenantId, (client) => svc.concluir(client, encryption, id));
+    expect(Object.keys(resultado.theta).sort()).toEqual(DIMENSOES);
+
+    const status = await adminPool.query<{ status: string }>(
+      'SELECT status FROM assessment_application WHERE id = $1',
+      [id],
+    );
+    expect(status.rows[0].status).toBe('concluido');
   });
 
   it('rejeita bloco em que mais e menos são o mesmo item', async () => {
