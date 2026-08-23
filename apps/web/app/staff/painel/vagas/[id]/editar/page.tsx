@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Button, PanelLayout } from '@tinocerto/design-system';
-import { staffPanelClient, PerfilStaff } from '../../../../../../lib/staff-panel-client';
+import { staffPanelClient, PerfilStaff, InstrumentoAtivo } from '../../../../../../lib/staff-panel-client';
 import { staffAuthClient, isErroDeAutenticacao } from '../../../../../../lib/staff-auth-client';
 
 function parseIds(texto: string): string[] {
@@ -30,6 +30,8 @@ export default function EditarVagaPage() {
   const [descricao, setDescricao] = useState('');
   const [habilidadesTexto, setHabilidadesTexto] = useState('');
   const [recrutadorIdsTexto, setRecrutadorIdsTexto] = useState('');
+  const [instrumentVersionId, setInstrumentVersionId] = useState('');
+  const [instrumentos, setInstrumentos] = useState<InstrumentoAtivo[]>([]);
   const [erro, setErro] = useState<string | null>(null);
   // true quando o carregamento inicial falhou por um motivo que não seja
   // sessão ausente/expirada (ex.: rede, 500, vaga não encontrada). Usado
@@ -43,6 +45,7 @@ export default function EditarVagaPage() {
 
   useEffect(() => {
     staffPanelClient.obterPerfil().then(setPerfil).catch(() => {});
+    staffPanelClient.obterInstrumentosAtivos().then(setInstrumentos).catch(() => {});
     staffPanelClient
       .obterVaga(params.id)
       .then((vaga) => {
@@ -51,6 +54,7 @@ export default function EditarVagaPage() {
         setHabilidadesTexto((vaga.habilidadesExigidas ?? []).join(', '));
         const recrutadorIds = vaga.recrutadorIds ?? [];
         setRecrutadorIdsTexto(recrutadorIds.join(', '));
+        setInstrumentVersionId(vaga.instrumentVersionId ?? '');
         recrutadorIdsIniciaisRef.current = recrutadorIds;
       })
       .catch((e) => {
@@ -84,6 +88,7 @@ export default function EditarVagaPage() {
         titulo: titulo || undefined,
         descricao: descricao || undefined,
         habilidadesExigidas: habilidadesExigidas.length > 0 ? habilidadesExigidas : undefined,
+        instrumentVersionId: instrumentVersionId || undefined,
       });
       const recrutadorIdsIniciais = recrutadorIdsIniciaisRef.current;
       const campoFoiAlterado = recrutadorIdsIniciais !== null && !arraysIguais(recrutadorIdsIniciais, recrutadorIds);
@@ -134,6 +139,21 @@ export default function EditarVagaPage() {
             onChange={(e) => setRecrutadorIdsTexto(e.target.value)}
             disabled={carregamentoFalhou}
           />
+        </label>
+        <label className="flex flex-col gap-1 font-ui text-sm">
+          Instrumento de assessment
+          <select
+            className="rounded-control px-3 py-2 border border-border bg-surface text-text"
+            value={instrumentVersionId}
+            onChange={(e) => setInstrumentVersionId(e.target.value)}
+          >
+            <option value="">Nenhum (candidatura nao dispara assessment)</option>
+            {instrumentos.map((i) => (
+              <option key={i.id} value={i.id}>
+                {i.nome} (v{i.versao})
+              </option>
+            ))}
+          </select>
         </label>
         <Button>Salvar</Button>
       </form>

@@ -18,7 +18,9 @@ export interface VagaCompleta {
   publicadoEm: string | null;
   criadoEm: string;
   recrutadorIds: string[];
+  instrumentVersionId: string | null;
 }
+export interface InstrumentoAtivo {  id: string;  nome: string;  versao: number;}
 
 export interface PerfilStaff {
   userId: string;
@@ -141,7 +143,7 @@ export const staffPanelClient = {
     await tratarResposta(response, 'Não foi possível atribuir recrutadores');
   },
 
-  async editarVaga(jobId: string, input: { titulo?: string; descricao?: string; habilidadesExigidas?: string[] }): Promise<void> {
+  async editarVaga(jobId: string, input: { titulo?: string; descricao?: string; habilidadesExigidas?: string[]; instrumentVersionId?: string }): Promise<void> {
     const response = await staffAuthClient.authenticatedFetch(`/v1/jobs/${jobId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -150,6 +152,11 @@ export const staffPanelClient = {
     await tratarResposta(response, 'Não foi possível editar a vaga');
   },
 
+
+  async obterInstrumentosAtivos(): Promise<InstrumentoAtivo[]> {
+    const response = await staffAuthClient.authenticatedFetch('/v1/instrument-versions');
+    return tratarResposta(response, 'Não foi possível carregar os instrumentos de assessment');
+  },
   async obterFunil(jobId: string): Promise<Record<string, CandidaturaResumo[]>> {
     const response = await staffAuthClient.authenticatedFetch(`/v1/jobs/${jobId}/funil`);
     return tratarResposta(response, 'Não foi possível carregar o funil');

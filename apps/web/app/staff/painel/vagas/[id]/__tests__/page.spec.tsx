@@ -31,6 +31,7 @@ describe('FunilPage', () => {
       publicadoEm: null,
       criadoEm: '2026-08-01T00:00:00Z',
       recrutadorIds: ['u1'],
+      instrumentVersionId: null,
     });
     vi.mocked(staffPanelClient.obterRoteiroEntrevista).mockResolvedValue(null);
     vi.mocked(staffPanelClient.gerarRoteiroEntrevista).mockResolvedValue({ id: 'guide-1' });
@@ -167,6 +168,7 @@ describe('FunilPage', () => {
     vi.mocked(staffPanelClient.obterVaga).mockResolvedValue({
       id: 'job-1', titulo: 'Vaga X', descricao: 'Descrição da vaga X',
       habilidadesExigidas: [], publicadoEm: null, criadoEm: '2026-08-01T00:00:00Z', recrutadorIds: [],
+      instrumentVersionId: null,
     });
     vi.mocked(staffPanelClient.obterRoteiroEntrevista).mockResolvedValue(null);
 
@@ -181,6 +183,7 @@ describe('FunilPage', () => {
     vi.mocked(staffPanelClient.obterVaga).mockResolvedValue({
       id: 'job-1', titulo: 'Vaga X', descricao: 'Descrição da vaga X',
       habilidadesExigidas: [], publicadoEm: null, criadoEm: '2026-08-01T00:00:00Z', recrutadorIds: [],
+      instrumentVersionId: null,
     });
     vi.mocked(staffPanelClient.obterRoteiroEntrevista).mockResolvedValue({
       id: 'guide-1', status: 'rascunho', publishedVersionId: null,
@@ -199,6 +202,7 @@ describe('FunilPage', () => {
     vi.mocked(staffPanelClient.obterVaga).mockResolvedValue({
       id: 'job-1', titulo: 'Vaga X', descricao: 'Descrição da vaga X',
       habilidadesExigidas: [], publicadoEm: null, criadoEm: '2026-08-01T00:00:00Z', recrutadorIds: [],
+      instrumentVersionId: null,
     });
     vi.mocked(staffPanelClient.obterRoteiroEntrevista).mockResolvedValue({
       id: 'guide-1', status: 'publicado', publishedVersionId: 'version-1',
