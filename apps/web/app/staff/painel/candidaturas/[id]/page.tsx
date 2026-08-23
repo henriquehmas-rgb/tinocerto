@@ -128,7 +128,12 @@ export default function CandidaturaPage() {
         notasPorCompetencia: notas,
         comentario: comentarioScorecard || undefined,
       });
-      staffPanelClient.obterScorecards(agenda.id).then(setScorecards).catch(() => {});
+      staffPanelClient
+        .obterScorecards(agenda.id)
+        .then(setScorecards)
+        .catch(() => {});
+      setNotas({});
+      setComentarioScorecard('');
     } catch (e) {
       const mensagem = (e as Error).message;
       if (mensagem === 'Você já enviou sua avaliação para esta entrevista.') {

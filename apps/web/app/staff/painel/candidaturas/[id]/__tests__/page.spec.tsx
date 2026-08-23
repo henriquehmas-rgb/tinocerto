@@ -595,5 +595,42 @@ describe('CandidaturaPage', () => {
 
     await waitFor(() => expect(screen.getByText('Nível 4 — Comunica-se com clareza')).toBeInTheDocument());
   });
+
+  it('reseta notas e comentario apos envio bem sucedido do scorecard', async () => {
+    vi.mocked(staffPanelClient.obterRelatorioAssessment).mockResolvedValue({ relatorio: null, aderencia: null });
+    vi.mocked(staffPanelClient.obterCandidatura).mockResolvedValue({
+      id: 'app-1', jobId: 'job-1', etapaFunil: 'entrevista', criadoEm: '2026-08-01T00:00:00Z',
+      person: { id: 'p1', nome: 'Fulano', emailPrincipal: 'fulano@example.com' },
+    });
+    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue(PERFIL_MOCK);
+    vi.mocked(staffPanelClient.obterRoteiroEntrevista).mockResolvedValue({
+      id: 'guide-1', status: 'publicado', publishedVersionId: 'version-1',
+      competencias: [{ competencyId: 'comp-1', nome: 'Comunicação', ancoras: [
+        { nivel: 1, descricaoComportamental: 'a' }, { nivel: 2, descricaoComportamental: 'b' },
+        { nivel: 3, descricaoComportamental: 'c' }, { nivel: 4, descricaoComportamental: 'd' },
+        { nivel: 5, descricaoComportamental: 'e' },
+      ] }],
+    });
+    vi.mocked(staffPanelClient.obterAgendaEntrevista).mockResolvedValue({
+      id: 'schedule-1', dataHora: '2026-09-01T14:00:00Z', status: 'agendada',
+    });
+    vi.mocked(staffPanelClient.obterScorecards)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]); // permanece sem minhaAvaliacao para o formulario continuar visivel apos o envio
+    vi.mocked(staffPanelClient.submeterScorecard).mockResolvedValue(undefined);
+
+    render(<CandidaturaPage />);
+    await waitFor(() => expect(screen.getByText('d')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByLabelText('d'));
+    fireEvent.click(screen.getByRole('button', { name: 'Enviar avaliação' }));
+
+    await waitFor(() => expect(staffPanelClient.submeterScorecard).toHaveBeenCalled());
+    await waitFor(() => {
+      const radio = screen.getByLabelText('d') as HTMLInputElement;
+      expect(radio.checked).toBe(false);
+    });
+    expect((screen.getByLabelText('Comentário (opcional)') as HTMLTextAreaElement).value).toBe('');
+  });
 });
 
