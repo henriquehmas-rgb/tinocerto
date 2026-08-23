@@ -3,8 +3,9 @@
 import { FormEvent, useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Button, PanelLayout } from '@tinocerto/design-system';
-import { staffPanelClient, PerfilStaff, InstrumentoAtivo } from '../../../../../../lib/staff-panel-client';
+import { staffPanelClient, PerfilStaff, InstrumentoAtivo, JobDescriptionSuggestion } from '../../../../../../lib/staff-panel-client';
 import { staffAuthClient, isErroDeAutenticacao } from '../../../../../../lib/staff-auth-client';
+import { wordDiff } from '../../../../../../lib/word-diff';
 
 function parseIds(texto: string): string[] {
   return texto
@@ -33,6 +34,9 @@ export default function EditarVagaPage() {
   const [instrumentVersionId, setInstrumentVersionId] = useState('');
   const [instrumentos, setInstrumentos] = useState<InstrumentoAtivo[]>([]);
   const [erro, setErro] = useState<string | null>(null);
+  const [sugestaoDescricao, setSugestaoDescricao] = useState<JobDescriptionSuggestion | null>(null);
+  const [erroSugestao, setErroSugestao] = useState<string | null>(null);
+  const [gerandoSugestao, setGerandoSugestao] = useState(false);
   // true quando o carregamento inicial falhou por um motivo que não seja
   // sessão ausente/expirada (ex.: rede, 500, vaga não encontrada). Usado
   // para desabilitar o campo de recrutadores -- ver handleSubmit e o JSX
@@ -128,6 +132,31 @@ export default function EditarVagaPage() {
     }
   }
 
+  async function handleSugerirReescrita() {
+    setErroSugestao(null);
+    setGerandoSugestao(true);
+    try {
+      const sugestao = await staffPanelClient.gerarSugestaoDescricao(params.id);
+      setSugestaoDescricao(sugestao);
+    } catch (e) {
+      setErroSugestao((e as Error).message);
+    } finally {
+      setGerandoSugestao(false);
+    }
+  }
+
+  async function handleAplicarSugestao() {
+    if (!sugestaoDescricao) return;
+    setErroSugestao(null);
+    try {
+      const resultado = await staffPanelClient.aplicarSugestaoDescricao(params.id, sugestaoDescricao.id);
+      setDescricao(resultado.descricao);
+      setSugestaoDescricao(null);
+    } catch (e) {
+      setErroSugestao((e as Error).message);
+    }
+  }
+
   function handleSair() {
     staffAuthClient.logout();
     router.push('/staff/entrar');
@@ -146,6 +175,41 @@ export default function EditarVagaPage() {
           Descrição
           <textarea className="rounded-control px-3 py-2 border border-border" value={descricao} onChange={(e) => setDescricao(e.target.value)} />
         </label>
+        <div className="flex flex-col gap-2">
+          <Button variant="secondary" onClick={handleSugerirReescrita}>
+            {gerandoSugestao ? 'Gerando...' : 'Sugerir reescrita'}
+          </Button>
+          {erroSugestao && <p className="text-danger-text">{erroSugestao}</p>}
+          {sugestaoDescricao && (
+            <div className="border border-border rounded-card p-3 bg-surface flex flex-col gap-2">
+              <p className="font-ui text-sm">
+                {wordDiff(sugestaoDescricao.textoOriginal, sugestaoDescricao.textoSugerido).map((parte, i) => {
+                  if (parte.tipo === 'removido') {
+                    return (
+                      <span key={i} className="line-through text-danger-text">
+                        {parte.texto}
+                      </span>
+                    );
+                  }
+                  if (parte.tipo === 'adicionado') {
+                    return (
+                      <span key={i} className="text-accent font-medium">
+                        {parte.texto}
+                      </span>
+                    );
+                  }
+                  return <span key={i}>{parte.texto}</span>;
+                })}
+              </p>
+              <div className="flex gap-2">
+                <Button onClick={handleAplicarSugestao}>Aplicar</Button>
+                <Button variant="secondary" onClick={() => setSugestaoDescricao(null)}>
+                  Descartar
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
         <label className="flex flex-col gap-1 font-ui text-sm">
           Habilidades exigidas (separadas por vírgula)
           <input

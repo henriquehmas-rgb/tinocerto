@@ -7,7 +7,15 @@ const pushMock = vi.fn();
 const routerMock = { push: pushMock };
 vi.mock('next/navigation', () => ({ useRouter: () => routerMock, useParams: () => ({ id: 'job-1' }) }));
 vi.mock('../../../../../../../lib/staff-panel-client', () => ({
-  staffPanelClient: { editarVaga: vi.fn(), atribuirRecrutadores: vi.fn(), obterVaga: vi.fn(), obterPerfil: vi.fn(), obterInstrumentosAtivos: vi.fn() },
+  staffPanelClient: {
+    editarVaga: vi.fn(),
+    atribuirRecrutadores: vi.fn(),
+    obterVaga: vi.fn(),
+    obterPerfil: vi.fn(),
+    obterInstrumentosAtivos: vi.fn(),
+    gerarSugestaoDescricao: vi.fn(),
+    aplicarSugestaoDescricao: vi.fn(),
+  },
 }));
 
 const vagaBase = {
@@ -19,6 +27,14 @@ const vagaBase = {
   criadoEm: '2026-08-01T00:00:00Z',
   recrutadorIds: ['r1', 'r2'],
   instrumentVersionId: null,
+};
+
+const PERFIL_MOCK = {
+  userId: 'u1',
+  tenantId: 't1',
+  roles: ['admin_tenant'],
+  email: 'ana@empresa.example',
+  razaoSocial: 'Empresa Exemplo Ltda',
 };
 
 describe('EditarVagaPage', () => {
@@ -302,6 +318,62 @@ describe('EditarVagaPage', () => {
     expect(payload.instrumentVersionId).toBeUndefined();
     expect(payload.instrumentVersionId).not.toBe(null);
     expect(payload.instrumentVersionId).not.toBe('');
+  });
+
+  it('mostra botao de sugerir reescrita e o diff apos gerar', async () => {
+    vi.mocked(staffPanelClient.obterVaga).mockResolvedValue({
+      id: 'job-1', titulo: 'Vaga X', descricao: 'procuramos um rapaz esforçado',
+      habilidadesExigidas: [], publicadoEm: null, criadoEm: '2026-08-01T00:00:00Z',
+      recrutadorIds: [], instrumentVersionId: null,
+    });
+    vi.mocked(staffPanelClient.obterInstrumentosAtivos).mockResolvedValue([]);
+    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue(PERFIL_MOCK);
+    vi.mocked(staffPanelClient.gerarSugestaoDescricao).mockResolvedValue({
+      id: 'sug-1', jobId: 'job-1',
+      textoOriginal: 'procuramos um rapaz esforçado',
+      textoSugerido: 'procuramos uma pessoa esforçada',
+      criadoEm: '2026-08-10T00:00:00Z',
+    });
+
+    render(<EditarVagaPage />);
+    await screen.findByLabelText('Instrumento de assessment');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sugerir reescrita' }));
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Aplicar' })).toBeInTheDocument());
+    expect(screen.getByText('rapaz')).toBeInTheDocument();
+    expect(screen.getByText('pessoa')).toBeInTheDocument();
+  });
+
+  it('aplicar a sugestao atualiza o campo de descricao local', async () => {
+    vi.mocked(staffPanelClient.obterVaga).mockResolvedValue({
+      id: 'job-1', titulo: 'Vaga X', descricao: 'procuramos um rapaz esforçado',
+      habilidadesExigidas: [], publicadoEm: null, criadoEm: '2026-08-01T00:00:00Z',
+      recrutadorIds: [], instrumentVersionId: null,
+    });
+    vi.mocked(staffPanelClient.obterInstrumentosAtivos).mockResolvedValue([]);
+    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue(PERFIL_MOCK);
+    vi.mocked(staffPanelClient.gerarSugestaoDescricao).mockResolvedValue({
+      id: 'sug-1', jobId: 'job-1',
+      textoOriginal: 'procuramos um rapaz esforçado',
+      textoSugerido: 'procuramos uma pessoa esforçada',
+      criadoEm: '2026-08-10T00:00:00Z',
+    });
+    vi.mocked(staffPanelClient.aplicarSugestaoDescricao).mockResolvedValue({ descricao: 'procuramos uma pessoa esforçada' });
+
+    render(<EditarVagaPage />);
+    await screen.findByLabelText('Instrumento de assessment');
+    fireEvent.click(screen.getByRole('button', { name: 'Sugerir reescrita' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Aplicar' })).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Aplicar' }));
+
+    await waitFor(() =>
+      expect(staffPanelClient.aplicarSugestaoDescricao).toHaveBeenCalledWith('job-1', 'sug-1'),
+    );
+    await waitFor(() =>
+      expect((screen.getByLabelText('Descrição') as HTMLTextAreaElement).value).toBe('procuramos uma pessoa esforçada'),
+    );
   });
 
 });
