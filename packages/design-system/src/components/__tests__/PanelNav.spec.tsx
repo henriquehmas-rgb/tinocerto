@@ -81,6 +81,18 @@ describe("PanelNav", () => {
     expect(screen.queryByText("4")).toBeNull();
   });
 
+  it("mostra o contador quando vale zero", () => {
+    renderNav({
+      grupos: [
+        {
+          rotulo: "Operação",
+          itens: [{ href: "/staff/painel/vagas", label: "Vagas", icone: Briefcase, contador: 0 }],
+        },
+      ],
+    });
+    expect(screen.getByText("0")).toBeInTheDocument();
+  });
+
   it("mostra as iniciais do staff no avatar", () => {
     renderNav();
     expect(screen.getByText("AS")).toBeInTheDocument();
