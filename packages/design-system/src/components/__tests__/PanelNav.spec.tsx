@@ -1,7 +1,7 @@
 import React from "react";
 import { describe, expect, it, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
-import { Briefcase, LayoutDashboard } from "lucide-react";
+import { render, screen, fireEvent, within } from "@testing-library/react";
+import { Briefcase, LayoutDashboard, Settings } from "lucide-react";
 import { PanelNav, iniciaisDe } from "../PanelNav";
 
 // `React` é importado por causa de `React.ComponentProps` abaixo: usar o
@@ -123,5 +123,56 @@ describe("PanelNav", () => {
     }
     renderNav({ linkAs: LinkFalso });
     expect(screen.getByRole("link", { name: "Dashboard" })).toHaveAttribute("data-link-injetado", "sim");
+  });
+
+  it("mostra a marca (logo) da Tinocerto na sidebar", () => {
+    renderNav();
+    expect(screen.getByRole("img", { name: "Tinocerto" })).toBeInTheDocument();
+  });
+
+  it("dá ao item ativo o fundo selecionado e a barra de acento embutida", () => {
+    renderNav();
+    const ativo = screen.getByRole("link", { name: "Dashboard" });
+    expect(ativo).toHaveStyle({ background: "var(--pr-selected)" });
+    expect(ativo.style.boxShadow).toContain("inset 2px 0 0 var(--pr-accent)");
+  });
+
+  it("mantém a sidebar com 216px de largura", () => {
+    renderNav();
+    // `nav` é a raiz do componente -- ver `aria-label` abaixo.
+    const nav = screen.getByRole("navigation", { name: "Navegação principal" });
+    expect(nav.className).toContain("w-[216px]");
+  });
+
+  it("fixa a sidebar no topo com a altura da viewport, para o rodapé (tema, Sair) nunca sair de vista em página longa", () => {
+    renderNav();
+    const nav = screen.getByRole("navigation", { name: "Navegação principal" });
+    expect(nav.className).toContain("sticky");
+    expect(nav.className).toContain("top-0");
+    expect(nav.className).toContain("h-screen");
+  });
+
+  it("expõe cada grupo como region agrupada e rotulada para leitor de tela", () => {
+    renderNav({
+      grupos: [
+        ...GRUPOS,
+        {
+          rotulo: "Plataforma",
+          itens: [{ href: "/staff/painel/configuracoes", label: "Configurações", icone: Settings }],
+        },
+      ],
+    });
+
+    const grupoOperacao = screen.getByRole("group", { name: "Operação" });
+    const grupoPlataforma = screen.getByRole("group", { name: "Plataforma" });
+
+    expect(within(grupoOperacao).getByRole("link", { name: "Dashboard" })).toBeInTheDocument();
+    expect(within(grupoPlataforma).getByRole("link", { name: "Configurações" })).toBeInTheDocument();
+
+    // Ids únicos: aria-labelledby de um grupo não pode apontar para o <p>
+    // do outro.
+    expect(grupoOperacao.getAttribute("aria-labelledby")).not.toBe(
+      grupoPlataforma.getAttribute("aria-labelledby"),
+    );
   });
 });
