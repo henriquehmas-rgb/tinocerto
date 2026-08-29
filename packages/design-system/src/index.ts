@@ -18,3 +18,5 @@ export { PanelLayout } from './components/PanelLayout';
 export type { PanelLayoutProps } from './components/PanelLayout';
 export { ScoreChart } from './components/ScoreChart';
 export type { ScoreChartProps, DimensaoScore } from './components/ScoreChart';
+export { Logo } from './components/Logo';
+export type { LogoProps } from './components/Logo';
