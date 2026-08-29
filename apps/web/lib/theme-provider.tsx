@@ -59,6 +59,18 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     return () => mq.removeEventListener('change', aoMudar);
   }, [tema]);
 
+  // Reset ao desmontar. O ThemeProvider só existe dentro de /staff/painel;
+  // SCRIPT_TEMA (em app/layout.tsx) só estampa um tema resolvido nessa
+  // mesma raiz e força 'light' em toda rota fora dela -- mas isso só roda
+  // num carregamento de página cheio. Numa navegação client-side pra fora
+  // do painel, nada mais reavalia data-theme, e sem este reset o atributo
+  // 'dark' ficaria vazando pro <html> em rotas nunca revisadas nesse tema.
+  useEffect(() => {
+    return () => {
+      document.documentElement.dataset.theme = 'light';
+    };
+  }, []);
+
   const definirTema = useCallback((novo: Tema) => {
     setTema(novo);
     try {
