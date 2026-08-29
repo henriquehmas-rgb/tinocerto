@@ -12,25 +12,26 @@
   },
   "dependencies": {
     "@tinocerto/design-system": "workspace:*",
+    "lucide-react": "^1.37.0",
     "next": "^15.0.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@testing-library/jest-dom": "^6.4.8",
+    "@testing-library/react": "^16.0.0",
     "@types/node": "^20.14.0",
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
     "@typescript-eslint/eslint-plugin": "^8.0.0",
     "@typescript-eslint/parser": "^8.0.0",
+    "@vitejs/plugin-react": "^4.3.1",
     "autoprefixer": "^10.4.19",
     "eslint": "^8.57.0",
+    "jsdom": "^24.1.1",
     "postcss": "^8.4.40",
     "tailwindcss": "^3.4.9",
     "typescript": "^5.5.4",
-    "@testing-library/jest-dom": "^6.4.8",
-    "@testing-library/react": "^16.0.0",
-    "@vitejs/plugin-react": "^4.3.1",
-    "jsdom": "^24.1.1",
     "vitest": "^2.0.5"
   }
 }
