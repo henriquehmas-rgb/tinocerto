@@ -5,9 +5,9 @@ export interface LogoProps {
   className?: string;
 }
 
-// Cores vêm por \`style\` e não por atributo de apresentação: var() em
+// Cores vêm por `style` e não por atributo de apresentação: var() em
 // atributo de apresentação de SVG tem suporte inconsistente entre
-// navegadores, enquanto em \`style\` é CSS comum e sempre funciona.
+// navegadores, enquanto em `style` é CSS comum e sempre funciona.
 function Simbolo() {
   return (
     <g transform="translate(0,2)">
