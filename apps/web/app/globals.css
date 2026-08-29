@@ -3,3 +3,14 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Ponte entre os tokens de tipografia e as famílias auto-hospedadas pelo
+   next/font. Precisa vir DEPOIS do @import: mesma especificidade que o
+   :root de tokens.css, então vence por ordem de declaração. Sem isto os
+   tokens apontam para Archivo/IBM Plex Sans por nome, que não resolvem
+   -- o next/font gera um nome de família próprio (ex.: __Archivo_abc123). */
+:root {
+  --pr-font-display: var(--font-archivo), 'Helvetica Neue', Arial, sans-serif;
+  --pr-font-ui: var(--font-plex-sans), system-ui, sans-serif;
+  --pr-font-num: var(--font-plex-mono), ui-monospace, monospace;
+}
