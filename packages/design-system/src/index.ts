@@ -15,7 +15,7 @@ export type { KanbanBoardProps } from './components/KanbanBoard';
 export { PanelNav, iniciaisDe } from './components/PanelNav';
 export type { PanelNavProps, PanelNavItem, PanelNavGrupo } from './components/PanelNav';
 export { PanelLayout } from './components/PanelLayout';
-export type { PanelLayoutProps } from './components/PanelLayout';
+export type { PanelLayoutProps, BreadcrumbItem } from './components/PanelLayout';
 export { ScoreChart } from './components/ScoreChart';
 export type { ScoreChartProps, DimensaoScore } from './components/ScoreChart';
 export { Logo } from './components/Logo';
