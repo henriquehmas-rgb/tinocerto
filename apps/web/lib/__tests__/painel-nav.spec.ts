@@ -26,6 +26,7 @@ describe('montarGrupos', () => {
     expect(acharItem(montarGrupos('/staff/painel/vagas/abc-123'), 'Vagas').ativo).toBe(true);
     expect(acharItem(montarGrupos('/staff/painel/vagas/abc-123/editar'), 'Vagas').ativo).toBe(true);
     expect(acharItem(montarGrupos('/staff/painel'), 'Vagas').ativo).toBe(false);
+    expect(acharItem(montarGrupos('/staff/painel/vagas-arquivadas'), 'Vagas').ativo).toBe(false);
   });
 
   it('acende Vagas também em candidaturas, que são alcançadas a partir de uma vaga', () => {
