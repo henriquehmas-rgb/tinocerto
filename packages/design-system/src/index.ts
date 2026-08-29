@@ -22,3 +22,5 @@ export { Logo } from './components/Logo';
 export type { LogoProps } from './components/Logo';
 export { EmptyState } from "./components/EmptyState";
 export type { EmptyStateProps } from "./components/EmptyState";
+export { ThemeToggle } from "./components/ThemeToggle";
+export type { ThemeToggleProps, Tema } from "./components/ThemeToggle";
