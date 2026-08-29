@@ -1,3 +1,4 @@
+import React from 'react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, within, fireEvent } from '@testing-library/react';
 import { PainelShell } from '../painel-shell';
@@ -8,6 +9,18 @@ const pushMock = vi.fn();
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: pushMock }),
   usePathname: () => '/staff/painel/vagas',
+}));
+// Marca o link renderizado com um atributo que só o Link do Next produziria
+// aqui, para provar que `linkAs={Link}` de fato chega até a sidebar. Sem
+// isso, remover essa prop em painel-shell.tsx ainda passaria nos 114 testes
+// existentes -- PanelLayout aceita `linkAs` opcional e cai para `<a>` puro,
+// o que troca toda navegação da sidebar por recarregamento de página cheio.
+vi.mock('next/link', () => ({
+  default: ({ href, children, ...resto }: React.ComponentProps<'a'>) => (
+    <a href={href} data-next-link="sim" {...resto}>
+      {children}
+    </a>
+  ),
 }));
 vi.mock('../../lib/staff-panel-client', () => ({
   staffPanelClient: { obterPerfil: vi.fn() },
@@ -71,6 +84,24 @@ describe('PainelShell', () => {
     );
 
     await waitFor(() => expect(pushMock).toHaveBeenCalledWith('/staff/entrar'));
+  });
+
+  it('usa o Link do Next na sidebar, não um <a> puro (regressão de linkAs)', async () => {
+    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue(PERFIL);
+
+    render(
+      <PainelShell breadcrumb={[{ label: 'Dashboard' }]}>
+        <p>Conteúdo</p>
+      </PainelShell>,
+    );
+
+    await waitFor(() => expect(screen.getByText('Empresa Exemplo Ltda')).toBeInTheDocument());
+
+    const sidebar = screen.getByRole('navigation', { name: 'Navegação principal' });
+    expect(within(sidebar).getByRole('link', { name: 'Vagas' })).toHaveAttribute(
+      'data-next-link',
+      'sim',
+    );
   });
 
   it('encerra a sessão e redireciona ao clicar em Sair', async () => {
