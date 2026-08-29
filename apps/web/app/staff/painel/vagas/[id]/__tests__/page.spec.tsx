@@ -5,7 +5,7 @@ import { staffPanelClient } from '../../../../../../lib/staff-panel-client';
 
 const pushMock = vi.fn();
 const routerMock = { push: pushMock };
-vi.mock('next/navigation', () => ({ useParams: () => ({ id: 'job-1' }), useRouter: () => routerMock }));
+vi.mock('next/navigation', () => ({ useParams: () => ({ id: 'job-1' }), useRouter: () => routerMock, usePathname: () => '/staff/painel/vagas/abc-123' }));
 const PERFIL_MOCK = {  userId: 'u1',  tenantId: 't1',  roles: ['admin_tenant'],  email: 'ana@empresa.example',  razaoSocial: 'Empresa Exemplo Ltda',};
 const VAGA_MOCK = {
   id: 'job-1',

@@ -2,15 +2,10 @@
 
 import { FormEvent, useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { Button, Card, ScoreChart, PanelLayout } from '@tinocerto/design-system';
+import { Button, Card, ScoreChart } from '@tinocerto/design-system';
+import { PainelShell } from '../../../../../components/painel-shell';
 import { staffPanelClient, RelatorioAssessment, CandidaturaDetalhe, PerfilStaff, RoteiroEntrevista, AgendaEntrevista, ScorecardRow, OfferRow, CandidateSummaryDraft } from '../../../../../lib/staff-panel-client';
-import { staffAuthClient, isErroDeAutenticacao } from '../../../../../lib/staff-auth-client';
-
-const NAV_LINKS = [
-  { href: '/staff/painel', label: 'Dashboard' },
-  { href: '/staff/painel/vagas', label: 'Vagas' },
-  { href: '/staff/painel/configuracoes', label: 'Configurações' },
-];
+import { isErroDeAutenticacao } from '../../../../../lib/staff-auth-client';
 
 const SECAO_LABEL: Record<string, string> = {
   experiencia: 'Experiência',
@@ -93,11 +88,6 @@ export default function CandidaturaPage() {
       })
       .catch((e) => setErroResumo((e as Error).message));
   }, [params.id, router]);
-
-  function handleSair() {
-    staffAuthClient.logout();
-    router.push('/staff/entrar');
-  }
 
   async function handleAgendar(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -215,9 +205,8 @@ export default function CandidaturaPage() {
   const aderencia = dados?.aderencia ?? null;
 
   return (
-    <PanelLayout nomeStaff={perfil?.email ?? ''} nomeTenant={perfil?.razaoSocial ?? ''} links={NAV_LINKS} onSair={handleSair}>
+    <PainelShell breadcrumb={[{ label: 'Vagas', href: '/staff/painel/vagas' }, { label: 'Candidatura' }]}>
       <div className="max-w-2xl">
-        <h1 className="font-display text-xl mb-4">Candidatura</h1>
         {erro && <p className="text-danger-text">{erro}</p>}
         <Card>
           {candidatura && (
@@ -432,6 +421,6 @@ export default function CandidaturaPage() {
           )}
         </Card>
       </div>
-    </PanelLayout>
+    </PainelShell>
   );
 }

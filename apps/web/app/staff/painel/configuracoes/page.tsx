@@ -2,20 +2,14 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Card, Button, PanelLayout } from '@tinocerto/design-system';
-import { staffPanelClient, ConexaoGoogleCalendar, PerfilStaff } from '../../../../lib/staff-panel-client';
-import { staffAuthClient, isErroDeAutenticacao } from '../../../../lib/staff-auth-client';
-
-const NAV_LINKS = [
-  { href: '/staff/painel', label: 'Dashboard' },
-  { href: '/staff/painel/vagas', label: 'Vagas' },
-  { href: '/staff/painel/configuracoes', label: 'Configurações' },
-];
+import { Card, Button } from '@tinocerto/design-system';
+import { PainelShell } from '../../../../components/painel-shell';
+import { staffPanelClient, ConexaoGoogleCalendar } from '../../../../lib/staff-panel-client';
+import { isErroDeAutenticacao } from '../../../../lib/staff-auth-client';
 
 export default function ConfiguracoesPage() {
   const router = useRouter();
   const [conexao, setConexao] = useState<ConexaoGoogleCalendar | null>(null);
-  const [perfil, setPerfil] = useState<PerfilStaff | null>(null);
   const [erro, setErro] = useState<string | null>(null);
 
   function carregar() {
@@ -33,7 +27,6 @@ export default function ConfiguracoesPage() {
 
   useEffect(() => {
     carregar();
-    staffPanelClient.obterPerfil().then(setPerfil).catch(() => {});
   }, [router]);
 
   async function handleConectar() {
@@ -46,14 +39,8 @@ export default function ConfiguracoesPage() {
     carregar();
   }
 
-  function handleSair() {
-    staffAuthClient.logout();
-    router.push('/staff/entrar');
-  }
-
   return (
-    <PanelLayout nomeStaff={perfil?.email ?? ''} nomeTenant={perfil?.razaoSocial ?? ''} links={NAV_LINKS} onSair={handleSair}>
-      <h1 className="font-display text-xl mb-4">Configurações</h1>
+    <PainelShell breadcrumb={[{ label: 'Configurações' }]}>
       {erro && <p className="text-danger-text">{erro}</p>}
       <Card>
         <p className="font-ui text-sm font-medium text-text mb-2">Google Calendar</p>
@@ -73,6 +60,6 @@ export default function ConfiguracoesPage() {
           </div>
         )}
       </Card>
-    </PanelLayout>
+    </PainelShell>
   );
 }

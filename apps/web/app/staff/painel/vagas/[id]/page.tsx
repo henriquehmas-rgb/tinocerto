@@ -3,9 +3,10 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { KanbanBoard, PanelLayout, Card, Badge, Button, Table } from '@tinocerto/design-system';
-import { staffPanelClient, CandidaturaResumo, PerfilStaff, RoteiroEntrevista, VagaCompleta, ImpactoAdversoRow, InterviewQuestionSuggestion } from '../../../../../lib/staff-panel-client';
-import { staffAuthClient, isErroDeAutenticacao } from '../../../../../lib/staff-auth-client';
+import { KanbanBoard, Card, Badge, Button, Table } from '@tinocerto/design-system';
+import { PainelShell } from '../../../../../components/painel-shell';
+import { staffPanelClient, CandidaturaResumo, RoteiroEntrevista, VagaCompleta, ImpactoAdversoRow, InterviewQuestionSuggestion } from '../../../../../lib/staff-panel-client';
+import { isErroDeAutenticacao } from '../../../../../lib/staff-auth-client';
 
 // Etapas conhecidas hoje, sempre mostradas como coluna (e como destino no
 // menu Mover) mesmo quando ainda nao tem nenhuma candidatura -- e o caso
@@ -21,13 +22,6 @@ const COLUNAS_PADRAO = [
   { chave: 'triagem', titulo: 'Triagem' },
   { chave: 'entrevista', titulo: 'Entrevista' },
 ];
-
-const NAV_LINKS = [
-  { href: '/staff/painel', label: 'Dashboard' },
-  { href: '/staff/painel/vagas', label: 'Vagas' },
-  { href: '/staff/painel/configuracoes', label: 'Configurações' },
-];
-
 
 function capitalizar(texto: string): string {
   if (!texto) return texto;
@@ -50,7 +44,6 @@ export default function FunilPage() {
   const router = useRouter();
   const [funil, setFunil] = useState<Record<string, CandidaturaResumo[]>>({});
   const [erro, setErro] = useState<string | null>(null);
-  const [perfil, setPerfil] = useState<PerfilStaff | null>(null);
   const [vaga, setVaga] = useState<VagaCompleta | null>(null);
   const [roteiro, setRoteiro] = useState<RoteiroEntrevista | null>(null);
   const [carregandoRoteiro, setCarregandoRoteiro] = useState(true);
@@ -77,7 +70,6 @@ export default function FunilPage() {
 
   useEffect(() => {
     carregar();
-    staffPanelClient.obterPerfil().then(setPerfil).catch(() => {});
     staffPanelClient.obterVaga(params.id).then(setVaga).catch(() => {});
     staffPanelClient
       .obterRoteiroEntrevista(params.id)
@@ -134,11 +126,6 @@ export default function FunilPage() {
     carregar();
   }
 
-  function handleSair() {
-    staffAuthClient.logout();
-    router.push('/staff/entrar');
-  }
-
   const chavesExtras = Object.keys(funil).filter(
     (chave) => !COLUNAS_PADRAO.some((coluna) => coluna.chave === chave),
   );
@@ -148,14 +135,15 @@ export default function FunilPage() {
   ];
 
   return (
-    <PanelLayout nomeStaff={perfil?.email ?? ''} nomeTenant={perfil?.razaoSocial ?? ''} links={NAV_LINKS} onSair={handleSair}>
+    <PainelShell
+      breadcrumb={[{ label: 'Vagas', href: '/staff/painel/vagas' }, { label: 'Funil' }]}
+      acao={
+        <Link href={`/staff/painel/vagas/${params.id}/editar`} className="font-ui text-sm text-accent underline">
+          Editar vaga
+        </Link>
+      }
+    >
       <div className="p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h1 className="font-display text-xl">Funil</h1>
-          <Link href={`/staff/painel/vagas/${params.id}/editar`} className="font-ui text-sm text-accent underline">
-            Editar vaga
-          </Link>
-        </div>
         {erro && <p className="text-danger-text">{erro}</p>}
         <Card>
           <div className="flex items-center justify-between mb-2">
@@ -252,6 +240,6 @@ export default function FunilPage() {
           onMoverItem={handleMover}
         />
       </div>
-    </PanelLayout>
+    </PainelShell>
   );
 }

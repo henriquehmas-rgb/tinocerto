@@ -2,9 +2,10 @@
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { Button, PanelLayout } from '@tinocerto/design-system';
-import { staffPanelClient, PerfilStaff, InstrumentoAtivo, JobDescriptionSuggestion } from '../../../../../../lib/staff-panel-client';
-import { staffAuthClient, isErroDeAutenticacao } from '../../../../../../lib/staff-auth-client';
+import { Button } from '@tinocerto/design-system';
+import { PainelShell } from '../../../../../../components/painel-shell';
+import { staffPanelClient, InstrumentoAtivo, JobDescriptionSuggestion } from '../../../../../../lib/staff-panel-client';
+import { isErroDeAutenticacao } from '../../../../../../lib/staff-auth-client';
 import { wordDiff } from '../../../../../../lib/word-diff';
 
 function parseIds(texto: string): string[] {
@@ -13,12 +14,6 @@ function parseIds(texto: string): string[] {
     .map((id) => id.trim())
     .filter(Boolean);
 }
-
-const NAV_LINKS = [
-  { href: '/staff/painel', label: 'Dashboard' },
-  { href: '/staff/painel/vagas', label: 'Vagas' },
-  { href: '/staff/painel/configuracoes', label: 'Configurações' },
-];
 
 function arraysIguais(a: string[], b: string[]): boolean {
   return a.length === b.length && a.every((valor, indice) => valor === b[indice]);
@@ -42,7 +37,6 @@ export default function EditarVagaPage() {
   // para desabilitar o campo de recrutadores -- ver handleSubmit e o JSX
   // abaixo.
   const [carregamentoFalhou, setCarregamentoFalhou] = useState(false);
-  const [perfil, setPerfil] = useState<PerfilStaff | null>(null);
   // null enquanto a vaga não foi carregada com sucesso -- usado no submit
   // para decidir se é seguro chamar atribuirRecrutadores (ver handleSubmit).
   const recrutadorIdsIniciaisRef = useRef<string[] | null>(null);
@@ -63,7 +57,6 @@ export default function EditarVagaPage() {
   );
 
   useEffect(() => {
-    staffPanelClient.obterPerfil().then(setPerfil).catch(() => {});
     staffPanelClient.obterInstrumentosAtivos().then(setInstrumentos).catch(() => {});
     staffPanelClient
       .obterVaga(params.id)
@@ -162,15 +155,9 @@ export default function EditarVagaPage() {
     }
   }
 
-  function handleSair() {
-    staffAuthClient.logout();
-    router.push('/staff/entrar');
-  }
-
   return (
-    <PanelLayout nomeStaff={perfil?.email ?? ''} nomeTenant={perfil?.razaoSocial ?? ''} links={NAV_LINKS} onSair={handleSair}>
+    <PainelShell breadcrumb={[{ label: 'Vagas', href: '/staff/painel/vagas' }, { label: 'Editar vaga' }]}>
       <form onSubmit={handleSubmit} className="flex flex-col gap-4 max-w-md p-6">
-        <h1 className="font-display text-xl">Editar vaga</h1>
         {erro && <p className="text-danger-text">{erro}</p>}
         <label className="flex flex-col gap-1 font-ui text-sm">
           Título
@@ -249,6 +236,6 @@ export default function EditarVagaPage() {
         </label>
         <Button type="submit">Salvar</Button>
       </form>
-    </PanelLayout>
+    </PainelShell>
   );
 }
