@@ -29,7 +29,11 @@ export function PainelShell({ breadcrumb, acao, contadores, children }: PainelSh
       .catch((e: unknown) => {
         if (isErroDeAutenticacao(e)) router.push('/staff/entrar');
         // Falha não-autenticação: a casca segue renderizando com o cabeçalho
-        // vazio. O erro relevante da página é tratado pela própria página.
+        // vazio. O erro relevante da página é tratado pela própria página, e
+        // por isso não vira UI aqui -- mas é logado para deixar rastro, já
+        // que sem isso o degrade da casca (cabeçalho vazio) não teria causa
+        // visível em lugar nenhum.
+        else console.error('Falha ao obter perfil do staff para a casca do painel:', e);
       });
   }, [router]);
 
