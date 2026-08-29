@@ -3,20 +3,15 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Card, Button, Badge, PanelLayout } from '@tinocerto/design-system';
-import { staffPanelClient, VagaResumo, PerfilStaff } from '../../../../lib/staff-panel-client';
-import { staffAuthClient, isErroDeAutenticacao } from '../../../../lib/staff-auth-client';
-
-const NAV_LINKS = [
-  { href: '/staff/painel', label: 'Dashboard' },
-  { href: '/staff/painel/vagas', label: 'Vagas' },
-  { href: '/staff/painel/configuracoes', label: 'Configurações' },
-];
+import { Card, Button, Badge, EmptyState } from '@tinocerto/design-system';
+import { Briefcase } from 'lucide-react';
+import { PainelShell } from '../../../../components/painel-shell';
+import { staffPanelClient, VagaResumo } from '../../../../lib/staff-panel-client';
+import { isErroDeAutenticacao } from '../../../../lib/staff-auth-client';
 
 export default function VagasPage() {
   const router = useRouter();
   const [vagas, setVagas] = useState<VagaResumo[]>([]);
-  const [perfil, setPerfil] = useState<PerfilStaff | null>(null);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
 
@@ -33,30 +28,29 @@ export default function VagasPage() {
       .then(setVagas)
       .catch(tratarFalha)
       .finally(() => setCarregando(false));
-    staffPanelClient.obterPerfil().then(setPerfil).catch(tratarFalha);
   }, [router]);
 
-  function handleSair() {
-    staffAuthClient.logout();
-    router.push('/staff/entrar');
-  }
-
   return (
-    <PanelLayout nomeStaff={perfil?.email ?? ''} nomeTenant={perfil?.razaoSocial ?? ''} links={NAV_LINKS} onSair={handleSair}>
-      <div className="flex items-center justify-between mb-4">
-        <h1 className="font-display text-xl">Vagas</h1>
+    <PainelShell
+      breadcrumb={[{ label: 'Vagas' }]}
+      acao={
         <Link href="/staff/painel/vagas/nova">
           <Button>Nova vaga</Button>
         </Link>
-      </div>
+      }
+    >
       {erro && <p className="text-danger-text">{erro}</p>}
       {!carregando && vagas.length === 0 && (
-        <Card>
-          <p className="font-ui text-sm text-text mb-2">Você ainda não tem nenhuma vaga cadastrada.</p>
-          <Link href="/staff/painel/vagas/nova">
-            <Button>Criar sua primeira vaga</Button>
-          </Link>
-        </Card>
+        <EmptyState
+          icone={Briefcase}
+          titulo="Nenhuma vaga ainda"
+          descricao="Crie sua primeira vaga para começar a receber candidaturas."
+          acao={
+            <Link href="/staff/painel/vagas/nova">
+              <Button>Criar sua primeira vaga</Button>
+            </Link>
+          }
+        />
       )}
       <div className="flex flex-col gap-2">
         {vagas.map((vaga) => (
@@ -73,6 +67,6 @@ export default function VagasPage() {
           </Card>
         ))}
       </div>
-    </PanelLayout>
+    </PainelShell>
   );
 }

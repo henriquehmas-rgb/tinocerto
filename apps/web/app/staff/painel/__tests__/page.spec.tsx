@@ -1,11 +1,14 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import PainelPage from '../page';
 import { staffPanelClient } from '../../../../lib/staff-panel-client';
 
 const pushMock = vi.fn();
 const routerMock = { push: pushMock };
-vi.mock('next/navigation', () => ({ useRouter: () => routerMock }));
+vi.mock('next/navigation', () => ({
+  useRouter: () => routerMock,
+  usePathname: () => '/staff/painel',
+}));
 vi.mock('../../../../lib/staff-panel-client', () => ({
   staffPanelClient: { obterMetricas: vi.fn(), obterPerfil: vi.fn() },
 }));
@@ -30,9 +33,10 @@ describe('PainelPage (Dashboard)', () => {
 
     render(<PainelPage />);
 
-    await waitFor(() => expect(screen.getByText('3')).toBeInTheDocument());
-    expect(screen.getByText('1')).toBeInTheDocument();
-    expect(screen.getByText('7')).toBeInTheDocument();
+    const conteudo = await waitFor(() => screen.getByRole('main'));
+    await waitFor(() => expect(within(conteudo).getByText('3')).toBeInTheDocument());
+    expect(within(conteudo).getByText('1')).toBeInTheDocument();
+    expect(within(conteudo).getByText('7')).toBeInTheDocument();
     expect(screen.getByText('Empresa Exemplo Ltda')).toBeInTheDocument();
     expect(screen.getByText('ana@empresa.example')).toBeInTheDocument();
   });
