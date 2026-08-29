@@ -63,7 +63,9 @@ export function ThemeToggle({ valor, onChange }: ThemeToggleProps) {
             tabIndex={ativo ? 0 : -1}
             onClick={() => onChange(opcao)}
             onKeyDown={(evento) => aoPressionarTecla(evento, indice)}
-            className="pr-focusable flex h-7 w-7 items-center justify-center rounded-full"
+            className={`pr-focusable flex h-7 w-7 items-center justify-center rounded-full transition-colors duration-[var(--pr-dur-micro)]${
+              ativo ? "" : " hover:bg-[var(--pr-surface-sunken)]"
+            }`}
             style={
               ativo
                 ? { background: "var(--pr-selected)", color: "var(--pr-accent-text)" }

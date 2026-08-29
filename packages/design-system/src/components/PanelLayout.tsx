@@ -59,7 +59,10 @@ export function PanelLayout({
                     </span>
                   )}
                   {item.href ? (
-                    <Link href={item.href} className="pr-focusable text-text-secondary no-underline">
+                    <Link
+                      href={item.href}
+                      className="pr-focusable text-text-secondary no-underline transition-colors duration-[var(--pr-dur-micro)] hover:text-text"
+                    >
                       {item.label}
                     </Link>
                   ) : (
