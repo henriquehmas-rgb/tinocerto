@@ -143,7 +143,7 @@ export default function FunilPage() {
         </Link>
       }
     >
-      <div className="p-6">
+      <div>
         {erro && <p className="text-danger-text">{erro}</p>}
         <Card>
           <div className="flex items-center justify-between mb-2">
