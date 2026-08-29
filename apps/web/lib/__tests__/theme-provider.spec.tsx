@@ -129,4 +129,45 @@ describe('ThemeProvider', () => {
     // não lança ao chamar o setter de fallback
     fireEvent.click(screen.getByRole('button', { name: 'escurecer' }));
   });
+
+  it('remove o ouvinte de matchMedia ao desmontar, parando de reagir ao sistema', async () => {
+    const mm = instalarMatchMedia(false);
+    const { unmount } = render(
+      <ThemeProvider>
+        <Sonda />
+      </ThemeProvider>,
+    );
+    await waitFor(() => expect(document.documentElement.dataset.theme).toBe('light'));
+    unmount();
+    mm.simularMudanca(true);
+    expect(document.documentElement.dataset.theme).toBe('light');
+  });
+
+  it('ao fixar um tema explícito, ignora mudanças subsequentes do sistema', async () => {
+    const mm = instalarMatchMedia(false);
+    render(
+      <ThemeProvider>
+        <Sonda />
+      </ThemeProvider>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'escurecer' }));
+    await waitFor(() => expect(document.documentElement.dataset.theme).toBe('dark'));
+    mm.simularMudanca(false);
+    expect(document.documentElement.dataset.theme).toBe('dark');
+  });
+
+  it('não quebra quando localStorage.setItem lança ao persistir', async () => {
+    instalarMatchMedia(false);
+    const spy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('storage bloqueado');
+    });
+    render(
+      <ThemeProvider>
+        <Sonda />
+      </ThemeProvider>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'escurecer' }));
+    await waitFor(() => expect(document.documentElement.dataset.theme).toBe('dark'));
+    spy.mockRestore();
+  });
 });
