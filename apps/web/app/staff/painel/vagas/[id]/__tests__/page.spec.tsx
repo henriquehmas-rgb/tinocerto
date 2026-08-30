@@ -16,7 +16,25 @@ const VAGA_MOCK = {
   criadoEm: '2026-08-01T00:00:00Z',
   recrutadorIds: [],
   instrumentVersionId: null,
-};vi.mock('../../../../../../lib/staff-panel-client', () => ({
+};// jsdom não tem um DataTransfer nativo. CandidateCard grava o payload da
+// candidatura no dragstart (setData) e KanbanColumn lê de volta no drop
+// (getData) -- este fake reproduz esse contrato mínimo pra simular um
+// arrasto de ponta a ponta, o mesmo objeto passando pelos dois eventos
+// como aconteceria de verdade no navegador.
+function criarDataTransferFake() {
+  const dados: Record<string, string> = {};
+  return {
+    setData: (tipo: string, valor: string) => {
+      dados[tipo] = valor;
+    },
+    getData: (tipo: string) => dados[tipo] ?? '',
+    get types() {
+      return Object.keys(dados);
+    },
+  };
+}
+
+vi.mock('../../../../../../lib/staff-panel-client', () => ({
   staffPanelClient: {
     obterFunil: vi.fn(),
     moverEtapa: vi.fn(),
@@ -385,6 +403,31 @@ describe('FunilPage', () => {
     await waitFor(() => expect(screen.getByTestId('fit')).toHaveTextContent('72'));
   });
 
+  it('passa a conversão de uma etapa devolvida pela API para a coluna correspondente do Kanban (achado F4: única linha que liga esse campo à tela -- os outros 18 testes deste arquivo só usam conversao null/{})', async () => {
+    vi.mocked(staffPanelClient.obterFunil).mockResolvedValue({
+      funil: {
+        triagem: [
+          {
+            id: 'app-1',
+            personId: 'p-1',
+            nomeCandidato: 'Ana Souza',
+            criadoEm: new Date().toISOString(),
+            assessmentStatus: null,
+            origemCanal: null,
+            scoreAderencia: null,
+          },
+        ],
+      },
+      conversao: { triagem: 40 },
+    });
+
+    render(<FunilPage />);
+    await waitFor(() => expect(screen.getByText('Ana Souza')).toBeInTheDocument());
+
+    const triagem = screen.getByTestId('coluna-triagem');
+    expect(within(triagem).getByTestId('conversao')).toHaveTextContent('40%');
+  });
+
   it('volta o card para a coluna de origem quando mover falha', async () => {
     // Movimento otimista: o card muda de coluna antes da resposta. Se a API
     // recusar, ele precisa voltar -- senão a tela mente sobre o estado real.
@@ -410,12 +453,68 @@ describe('FunilPage', () => {
     render(<FunilPage />);
     await waitFor(() => expect(screen.getByText('Ana Souza')).toBeInTheDocument());
 
-    fireEvent.dragStart(screen.getByTestId('candidate-card'));
-    fireEvent.drop(screen.getByTestId('coluna-entrevista'));
+    const dataTransfer = criarDataTransferFake();
+    fireEvent.dragStart(screen.getByTestId('candidate-card'), { dataTransfer });
+    fireEvent.drop(screen.getByTestId('coluna-entrevista'), { dataTransfer });
 
     await waitFor(() => expect(screen.getByText('Transição não permitida')).toBeInTheDocument());
     const triagem = screen.getByTestId('coluna-triagem');
     expect(within(triagem).getByText('Ana Souza')).toBeInTheDocument();
+  });
+
+  it('limpa a mensagem de erro de um movimento anterior quando um movimento seguinte tem sucesso (achado F6: sem isto, "Transição não permitida" ficava na tela pra sempre)', async () => {
+    vi.mocked(staffPanelClient.obterFunil)
+      .mockResolvedValueOnce({
+        funil: {
+          triagem: [
+            {
+              id: 'app-1',
+              personId: 'p-1',
+              nomeCandidato: 'Ana Souza',
+              criadoEm: new Date().toISOString(),
+              assessmentStatus: null,
+              origemCanal: null,
+              scoreAderencia: null,
+            },
+          ],
+          entrevista: [],
+        },
+        conversao: { triagem: null, entrevista: null },
+      })
+      .mockResolvedValueOnce({
+        funil: {
+          triagem: [],
+          entrevista: [
+            {
+              id: 'app-1',
+              personId: 'p-1',
+              nomeCandidato: 'Ana Souza',
+              criadoEm: new Date().toISOString(),
+              assessmentStatus: null,
+              origemCanal: null,
+              scoreAderencia: null,
+            },
+          ],
+        },
+        conversao: { triagem: null, entrevista: null },
+      });
+    vi.mocked(staffPanelClient.moverEtapa)
+      .mockRejectedValueOnce(new Error('Transição não permitida'))
+      .mockResolvedValueOnce(undefined);
+
+    render(<FunilPage />);
+    await waitFor(() => expect(screen.getByText('Ana Souza')).toBeInTheDocument());
+
+    const primeiroArrasto = criarDataTransferFake();
+    fireEvent.dragStart(screen.getByTestId('candidate-card'), { dataTransfer: primeiroArrasto });
+    fireEvent.drop(screen.getByTestId('coluna-entrevista'), { dataTransfer: primeiroArrasto });
+    await waitFor(() => expect(screen.getByText('Transição não permitida')).toBeInTheDocument());
+
+    const segundoArrasto = criarDataTransferFake();
+    fireEvent.dragStart(screen.getByTestId('candidate-card'), { dataTransfer: segundoArrasto });
+    fireEvent.drop(screen.getByTestId('coluna-entrevista'), { dataTransfer: segundoArrasto });
+
+    await waitFor(() => expect(screen.queryByText('Transição não permitida')).toBeNull());
   });
 
   it('linka o nome do candidato no card para a página de detalhe da candidatura', async () => {

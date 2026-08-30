@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { KanbanBoard, CandidateCard, Card, Badge, Button, Table } from '@tinocerto/design-system';
@@ -45,7 +45,6 @@ export default function FunilPage() {
   const router = useRouter();
   const [funil, setFunil] = useState<Record<string, CandidaturaResumo[]>>({});
   const [conversao, setConversao] = useState<Record<string, number | null>>({});
-  const arrastandoRef = useRef<string | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [vaga, setVaga] = useState<VagaCompleta | null>(null);
   const [roteiro, setRoteiro] = useState<RoteiroEntrevista | null>(null);
@@ -144,6 +143,10 @@ export default function FunilPage() {
 
     try {
       await staffPanelClient.moverEtapa(applicationId, destino);
+      // Limpa um erro de um movimento anterior que tinha falhado -- senão
+      // "Transição não permitida" continuava na tela por todo movimento
+      // bem-sucedido seguinte, mentindo sobre o estado atual.
+      setErro(null);
       carregar();
     } catch (e) {
       setFunil(anterior);
@@ -155,13 +158,18 @@ export default function FunilPage() {
     void moverCandidatura(candidatura.id, novaColuna);
   }
 
-  function handleSoltar(chaveDestino: string) {
-    const applicationId = arrastandoRef.current;
-    if (!applicationId) return;
-    arrastandoRef.current = null;
-    const destino = resolverDestino(funil, applicationId, chaveDestino);
+  // `payload` vem do dataTransfer do próprio evento de drag (ver
+  // CandidateCard/KanbanColumn), não de um ref -- um ref setado no
+  // dragStart e só limpo no drop ficava com um id desatualizado sempre
+  // que o drag era abortado sem soltar em lugar nenhum (Esc, ou soltar
+  // fora do board). Como a coluna sempre chamava preventDefault, um drop
+  // de arquivo/texto alheio nesse estado usava o id antigo pra mover uma
+  // candidatura que o recrutador nunca tocou.
+  function handleSoltar(chaveDestino: string, payload: string) {
+    if (!payload) return;
+    const destino = resolverDestino(funil, payload, chaveDestino);
     if (destino === null) return;
-    void moverCandidatura(applicationId, destino);
+    void moverCandidatura(payload, destino);
   }
 
   const chavesExtras = Object.keys(funil).filter(
@@ -281,9 +289,7 @@ export default function FunilPage() {
               chips={montarChips(c, new Date())}
               acao={acao}
               arrastavel
-              onArrastarInicio={() => {
-                arrastandoRef.current = c.id;
-              }}
+              payloadArraste={c.id}
               href={`/staff/painel/candidaturas/${c.id}`}
               linkAs={Link}
             />
