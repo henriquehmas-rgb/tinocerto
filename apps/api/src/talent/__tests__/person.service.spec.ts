@@ -1,6 +1,6 @@
 import { Pool, PoolClient } from 'pg';
 import { EnvelopeEncryptionService } from '../envelope-encryption.service';
-import { PersonService, QUERY_HABILIDADES_POR_PESSOA, QUERY_PERFIL_CITAVEL_POR_PESSOA } from '../person.service';
+import { PersonService, QUERY_HABILIDADES_POR_PESSOA, QUERY_HABILIDADES_EM_LOTE, QUERY_PERFIL_CITAVEL_POR_PESSOA } from '../person.service';
 
 describe('PersonService', () => {
   const originalKek = process.env.ENVELOPE_ENCRYPTION_KEK;
@@ -301,6 +301,28 @@ describe('PersonService', () => {
       const mapa = await service.habilidadesEmLote(client, []);
       expect(mapa.size).toBe(0);
       expect(client.query).not.toHaveBeenCalled();
+    });
+
+    it('a query de habilidadesEmLote só seleciona person_id e habilidades -- allowlist estrutural', () => {
+      // Mesmo padrão das outras queries (QUERY_HABILIDADES_POR_PESSOA e
+      // QUERY_PERFIL_CITAVEL_POR_PESSOA): subconjunto bidirecional, não
+      // blocklist. person_id é necessário para montar o Map de volta --
+      // NUNCA selecionar resumo/experiencias/formacao.
+      const colunasPermitidas = ['person_id', 'habilidades'];
+      const selectClause = QUERY_HABILIDADES_EM_LOTE.match(/SELECT([\s\S]*?)FROM/i)?.[1] ?? '';
+      const colunasNaQuery = new Set(
+        selectClause
+          .split(/[\s,]+/)
+          .map((token) => token.replace(/^[a-z]+\./i, '').toLowerCase())
+          .filter(Boolean),
+      );
+
+      for (const permitida of colunasPermitidas) {
+        expect(colunasNaQuery.has(permitida)).toBe(true);
+      }
+      for (const coluna of colunasNaQuery) {
+        expect(colunasPermitidas).toContain(coluna);
+      }
     });
   });
 });

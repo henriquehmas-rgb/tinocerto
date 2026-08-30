@@ -146,8 +146,8 @@ export class PersonService {
   }
 
   /**
-   * [Fase 3c / Copiloto] Segundo (e último) ponto de leitura de
-   * person_profile fora de habilidades() acima -- devolve experiencias/
+   * [Fase 3c / Copiloto] Terceiro (e último) ponto de leitura de
+   * person_profile neste arquivo -- devolve experiencias/
    * formacao/habilidades com citacaoVerbatim/offsetInicio de cada item,
    * para o Copiloto construir o universo citável do resumo de candidato
    * (gate consolidado da Fase 2b exige que nenhum arquivo fora deste
