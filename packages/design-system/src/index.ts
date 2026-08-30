@@ -28,3 +28,5 @@ export { CandidateCard } from './components/CandidateCard';
 export type { CandidateCardProps, CandidateCardChip } from './components/CandidateCard';
 export { Toast } from './components/Toast';
 export type { ToastProps } from './components/Toast';
+export { BarraSelecao } from './components/BarraSelecao';
+export type { BarraSelecaoProps } from './components/BarraSelecao';
