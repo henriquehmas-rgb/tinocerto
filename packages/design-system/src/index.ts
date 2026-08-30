@@ -26,3 +26,5 @@ export { ThemeToggle } from "./components/ThemeToggle";
 export type { ThemeToggleProps, Tema } from "./components/ThemeToggle";
 export { CandidateCard } from './components/CandidateCard';
 export type { CandidateCardProps, CandidateCardChip } from './components/CandidateCard';
+export { Toast } from './components/Toast';
+export type { ToastProps } from './components/Toast';
