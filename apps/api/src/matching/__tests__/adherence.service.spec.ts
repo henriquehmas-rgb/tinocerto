@@ -275,15 +275,43 @@ describe('AdherenceService', () => {
       expect(mapa.get('app-1')).toBeNull();
     });
 
-    it('dá score 0 para candidato sem perfil quando a vaga exige habilidades', async () => {
+    it('dá score 0 para candidato sem perfil quando OUTRO candidato do mesmo lote tem perfil (zero genuíno, não ausência de dado)', async () => {
+      // Precisa de pelo menos um candidato COM perfil no mesmo lote --
+      // senão o mapa de habilidades em lote fica vazio e o caso vira o de
+      // "ninguém tem perfil" (null), testado à parte abaixo.
       const service = new AdherenceService(new PersonService(new EnvelopeEncryptionService()));
       const mapa = await ctx.run(tenantId, (client) =>
         service.porCandidaturasDaVaga(client, {
           jobId: vagaComHabilidadesId,
-          candidatos: [{ applicationId: 'app-2', personId: personSemPerfilId }],
+          candidatos: [
+            { applicationId: 'app-2', personId: personSemPerfilId },
+            { applicationId: 'app-2-com-perfil', personId: personComPerfilId },
+          ],
         }),
       );
       expect(mapa.get('app-2')).toBe(0);
+      expect(mapa.get('app-2-com-perfil')).not.toBeNull();
+    });
+
+    it('devolve null para todos quando NENHUM candidato do lote tem perfil, mesmo a vaga exigindo habilidades (achado F1 da revisão final: ausência de dado não é zero)', async () => {
+      // Cenário real de produção: person_profile está sempre vazia (parser
+      // de currículo estruturalmente morto), então o caso comum não é "um
+      // candidato sem perfil entre outros com perfil" -- é "ninguém tem
+      // perfil". Antes desta correção, calcularScoreAderencia(exigidas, [])
+      // devolvia 0 pra cada um, e todo card do funil mostrava "0" com barra
+      // vazia assim que a vaga ganhasse uma skill exigida.
+      const service = new AdherenceService(new PersonService(new EnvelopeEncryptionService()));
+      const mapa = await ctx.run(tenantId, (client) =>
+        service.porCandidaturasDaVaga(client, {
+          jobId: vagaComHabilidadesId,
+          candidatos: [
+            { applicationId: 'app-3', personId: personSemPerfilId },
+            { applicationId: 'app-4', personId: personSemPerfilId },
+          ],
+        }),
+      );
+      expect(mapa.get('app-3')).toBeNull();
+      expect(mapa.get('app-4')).toBeNull();
     });
 
     it('não faz uma consulta por candidato -- o custo não cresce com o número deles', async () => {
