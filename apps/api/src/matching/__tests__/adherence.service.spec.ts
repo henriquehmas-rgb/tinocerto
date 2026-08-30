@@ -212,6 +212,7 @@ describe('AdherenceService', () => {
     let vagaComHabilidadesId: string;
     let vagaSemHabilidadesId: string;
     let personSemPerfilId: string;
+    let personComPerfilSemMatchId: string;
 
     beforeAll(async () => {
       // `requisitionId` não está em escopo nesta suíte (a `requisition`
@@ -253,6 +254,20 @@ describe('AdherenceService', () => {
          RETURNING id`,
       );
       personSemPerfilId = pessoa.rows[0].id;
+
+      // Candidato COM perfil, mas cujas habilidades não batem nenhuma das
+      // exigidas pela vaga -- distingue o 0 genuíno (medição real) do null
+      // de ausência de dado (currículo nunca parseado).
+      const pessoaSemMatch = await adminPool.query<{ id: string }>(
+        `INSERT INTO person (cpf_hash, cpf_encriptado, nome, email_principal)
+         VALUES ('hash-com-perfil-sem-match-lote', '{"ciphertext":"x","iv":"y","authTag":"z","wrappedDek":"w"}', 'Com Perfil Sem Match Lote', 'comperfilsemmatch.lote@example.com')
+         RETURNING id`,
+      );
+      personComPerfilSemMatchId = pessoaSemMatch.rows[0].id;
+      await adminPool.query(
+        `INSERT INTO person_profile (person_id, habilidades) VALUES ($1, $2)`,
+        [personComPerfilSemMatchId, JSON.stringify([{ nome: 'Java', citacaoVerbatim: 'Java' }])],
+      );
     });
 
     afterAll(async () => {
@@ -261,7 +276,10 @@ describe('AdherenceService', () => {
       ]);
       await adminPool.query('DELETE FROM requisition WHERE id = $1', [requisitionLoteId]);
       await adminPool.query('DELETE FROM org_unit WHERE id = $1', [orgUnitLoteId]);
-      await adminPool.query('DELETE FROM person WHERE id = $1', [personSemPerfilId]);
+      await adminPool.query('DELETE FROM person_profile WHERE person_id = $1', [personComPerfilSemMatchId]);
+      await adminPool.query('DELETE FROM person WHERE id = ANY($1)', [
+        [personSemPerfilId, personComPerfilSemMatchId],
+      ]);
     });
 
     it('devolve null para todos quando a vaga não exige habilidades', async () => {
@@ -275,10 +293,14 @@ describe('AdherenceService', () => {
       expect(mapa.get('app-1')).toBeNull();
     });
 
-    it('dá score 0 para candidato sem perfil quando OUTRO candidato do mesmo lote tem perfil (zero genuíno, não ausência de dado)', async () => {
-      // Precisa de pelo menos um candidato COM perfil no mesmo lote --
-      // senão o mapa de habilidades em lote fica vazio e o caso vira o de
-      // "ninguém tem perfil" (null), testado à parte abaixo.
+    it('candidato sem person_profile devolve null mesmo quando OUTRO candidato do mesmo lote tem perfil (achado R2A: fit desconhecido não é fit zero, a regra é por candidato)', async () => {
+      // Este é o caso que estava errado em produção: a guarda antiga só
+      // olhava se o LOTE inteiro tinha algum candidato com perfil -- bastava
+      // um (ex. Ana) para que todo mundo SEM perfil no mesmo lote (Bruno,
+      // Carla) virasse 0, um julgamento fabricado sobre um currículo nunca
+      // lido. A regra correta é por candidato: ausência da chave no Map de
+      // habilidadesEmLote() sempre vira null, independente de quem mais
+      // está no lote.
       const service = new AdherenceService(new PersonService(new EnvelopeEncryptionService()));
       const mapa = await ctx.run(tenantId, (client) =>
         service.porCandidaturasDaVaga(client, {
@@ -289,17 +311,32 @@ describe('AdherenceService', () => {
           ],
         }),
       );
-      expect(mapa.get('app-2')).toBe(0);
+      expect(mapa.get('app-2')).toBeNull();
       expect(mapa.get('app-2-com-perfil')).not.toBeNull();
     });
 
-    it('devolve null para todos quando NENHUM candidato do lote tem perfil, mesmo a vaga exigindo habilidades (achado F1 da revisão final: ausência de dado não é zero)', async () => {
+    it('candidato COM perfil cujas habilidades não batem nenhuma exigida devolve 0 genuíno, não null (distingue de ausência de dado)', async () => {
+      // Contraponto do teste acima: ter perfil e não bater nenhuma
+      // habilidade exigida é uma medição real, não ausência de dado -- deve
+      // continuar 0. Sem este teste, um fix ingênuo que suprimisse tudo
+      // (sempre null) passaria no teste anterior mas quebraria este caso.
+      const service = new AdherenceService(new PersonService(new EnvelopeEncryptionService()));
+      const mapa = await ctx.run(tenantId, (client) =>
+        service.porCandidaturasDaVaga(client, {
+          jobId: vagaComHabilidadesId,
+          candidatos: [{ applicationId: 'app-sem-match', personId: personComPerfilSemMatchId }],
+        }),
+      );
+      expect(mapa.get('app-sem-match')).toBe(0);
+    });
+
+    it('devolve null para todos quando NENHUM candidato do lote tem perfil, mesmo a vaga exigindo habilidades (corolário da regra por candidato: sem perfil é sempre null)', async () => {
       // Cenário real de produção: person_profile está sempre vazia (parser
       // de currículo estruturalmente morto), então o caso comum não é "um
       // candidato sem perfil entre outros com perfil" -- é "ninguém tem
-      // perfil". Antes desta correção, calcularScoreAderencia(exigidas, [])
-      // devolvia 0 pra cada um, e todo card do funil mostrava "0" com barra
-      // vazia assim que a vaga ganhasse uma skill exigida.
+      // perfil". Como a regra agora é por candidato (ausência da chave no
+      // Map -> null), este caso é apenas todo candidato do lote caindo no
+      // mesmo ramo -- não precisa mais de uma guarda especial de lote.
       const service = new AdherenceService(new PersonService(new EnvelopeEncryptionService()));
       const mapa = await ctx.run(tenantId, (client) =>
         service.porCandidaturasDaVaga(client, {

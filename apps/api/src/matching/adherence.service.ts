@@ -66,25 +66,20 @@ export class AdherenceService {
     const personIds = [...new Set(input.candidatos.map((c) => c.personId))];
     const habilidadesPorPessoa = await this.personService.habilidadesEmLote(client, personIds);
 
-    // Mapa vazio aqui não significa "todo mundo tem zero habilidades" --
-    // significa que NENHUM candidato deste lote tem person_profile (a
-    // query em lote só devolve linha pra quem tem perfil). Hoje isso é o
-    // caso normal em produção: o parser de currículo é estruturalmente
-    // morto (depende de chave de LLM não configurada), então person_profile
-    // está sempre vazia. Sem esta guarda, calcularScoreAderencia trataria
-    // "sem perfil" como "perfil vazio" e devolveria 0 pra todo candidato --
-    // fit desconhecido não é fit zero. Ver adversarial finding F1 da
-    // revisão final: distinto do caso genuíno de zero (candidato sem
-    // perfil quando OUTRO candidato do mesmo lote tem perfil), que
-    // continua pontuando 0 normalmente.
-    const ninguemTemPerfilNesteLote = habilidadesPorPessoa.size === 0;
-
+    // A regra é por candidato, não por lote: person_profile ausente para
+    // ESTA pessoa significa fit desconhecido (null) para ELA, não importa
+    // se outro candidato do mesmo lote tem perfil. habilidadesEmLote só
+    // devolve entrada no Map pra quem tem person_profile -- ausência da
+    // chave é o sinal de "currículo nunca foi parseado", distinto de
+    // "perfil existe e não bate nenhuma habilidade" (isso é 0 genuíno).
+    // Tratar "sem perfil" como "perfil vazio" fabricaria um julgamento
+    // sobre um candidato real que nunca foi avaliado.
     for (const candidato of input.candidatos) {
-      if (ninguemTemPerfilNesteLote) {
+      if (!habilidadesPorPessoa.has(candidato.personId)) {
         scores.set(candidato.applicationId, null);
         continue;
       }
-      const doCandidato = habilidadesPorPessoa.get(candidato.personId) ?? [];
+      const doCandidato = habilidadesPorPessoa.get(candidato.personId)!;
       scores.set(candidato.applicationId, calcularScoreAderencia(exigidas, doCandidato).scoreAderencia);
     }
     return scores;
