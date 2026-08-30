@@ -93,16 +93,24 @@ export function TabelaDensa<T extends { id: string }>({
     ultimoClicadoRef.current = id;
   }
 
+  function aoTecladoOrdenar(evento: React.KeyboardEvent<HTMLTableCellElement>, chave: string) {
+    if (evento.key === "Enter" || evento.key === " ") {
+      if (evento.key === " ") evento.preventDefault();
+      onOrdenacaoChange(chave);
+    }
+  }
+
   const gridTemplate = `32px ${colunas.map((c) => c.largura).join(" ")}`;
 
   return (
-    <table className="w-full border-collapse font-ui text-sm">
-      <thead>
+    <table role="table" className="w-full border-collapse font-ui text-sm">
+      <thead role="rowgroup">
         <tr
+          role="row"
           className="grid items-center border-b border-border"
           style={{ gridTemplateColumns: gridTemplate, gap: "12px", height: "34px" }}
         >
-          <th className="px-3">
+          <th role="cell" className="px-3">
             <CheckboxCabecalho
               todosSelecionados={todosSelecionados}
               algunsSelecionados={algunsSelecionados}
@@ -111,13 +119,24 @@ export function TabelaDensa<T extends { id: string }>({
           </th>
           {colunas.map((coluna) => {
             const ativa = ordenacao?.coluna === coluna.chave;
+            const ariaSort = coluna.ordenavel
+              ? ativa
+                ? ordenacao?.direcao === "asc"
+                  ? "ascending"
+                  : "descending"
+                : "none"
+              : undefined;
             return (
               <th
                 key={coluna.chave}
+                role={coluna.ordenavel ? "button" : "columnheader"}
+                tabIndex={coluna.ordenavel ? 0 : undefined}
+                aria-sort={ariaSort}
                 className={`font-ui text-xs font-medium text-text-secondary ${
                   coluna.alinhamento === "direita" ? "text-right" : "text-left"
                 }`}
                 onClick={coluna.ordenavel ? () => onOrdenacaoChange(coluna.chave) : undefined}
+                onKeyDown={coluna.ordenavel ? (evento) => aoTecladoOrdenar(evento, coluna.chave) : undefined}
                 style={{ cursor: coluna.ordenavel ? "pointer" : undefined }}
               >
                 {coluna.titulo}
@@ -127,12 +146,13 @@ export function TabelaDensa<T extends { id: string }>({
           })}
         </tr>
       </thead>
-      <tbody>
+      <tbody role="rowgroup">
         {linhas.map((linha) => {
           const selecionada = selecionados.has(linha.id);
           return (
             <tr
               key={linha.id}
+              role="row"
               data-selecionada={selecionada || undefined}
               className="grid items-center border-b border-border"
               style={{
@@ -142,10 +162,10 @@ export function TabelaDensa<T extends { id: string }>({
                 background: selecionada ? "var(--pr-selected)" : undefined,
               }}
             >
-              <td className="px-3">
+              <td role="cell" className="px-3">
                 <input
                   type="checkbox"
-                  aria-label={`Selecionar linha`}
+                  aria-label={`Selecionar linha ${linha.id}`}
                   checked={selecionada}
                   onChange={(evento) => alternarLinha(linha.id, (evento.nativeEvent as MouseEvent).shiftKey)}
                   style={{ accentColor: "var(--pr-accent)" }}
@@ -154,6 +174,7 @@ export function TabelaDensa<T extends { id: string }>({
               {colunas.map((coluna) => (
                 <td
                   key={coluna.chave}
+                  role="cell"
                   className={`font-ui text-[13px] text-text ${coluna.alinhamento === "direita" ? "text-right font-num tabular-nums" : "text-left"}`}
                 >
                   {coluna.render(linha)}

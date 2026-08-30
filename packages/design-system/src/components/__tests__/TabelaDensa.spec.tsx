@@ -112,6 +112,67 @@ describe("TabelaDensa", () => {
     expect(onSelecaoChange).toHaveBeenLastCalledWith(new Set(["a", "b", "c"]));
   });
 
+  it("clicar individualmente depois de um shift+clique reancora o proximo shift+clique na nova linha", () => {
+    const onSelecaoChange = vi.fn();
+    const { rerender } = renderTabela({ selecionados: new Set(), onSelecaoChange });
+
+    // 1. clique individual em Ana -> ancora fica em "a"
+    const linhaAna = screen.getByText("Ana").closest("tr")!;
+    fireEvent.click(within(linhaAna).getByRole("checkbox"));
+    expect(onSelecaoChange).toHaveBeenLastCalledWith(new Set(["a"]));
+
+    rerender(
+      <TabelaDensa
+        colunas={COLUNAS}
+        linhas={ITENS}
+        selecionados={new Set(["a"])}
+        onSelecaoChange={onSelecaoChange}
+        ordenacao={null}
+        onOrdenacaoChange={vi.fn()}
+      />,
+    );
+
+    // 2. shift+clique em Carla seleciona o intervalo Ana..Carla
+    const linhaCarla = screen.getByText("Carla").closest("tr")!;
+    fireEvent.click(within(linhaCarla).getByRole("checkbox"), { shiftKey: true });
+    expect(onSelecaoChange).toHaveBeenLastCalledWith(new Set(["a", "b", "c"]));
+
+    rerender(
+      <TabelaDensa
+        colunas={COLUNAS}
+        linhas={ITENS}
+        selecionados={new Set(["a", "b", "c"])}
+        onSelecaoChange={onSelecaoChange}
+        ordenacao={null}
+        onOrdenacaoChange={vi.fn()}
+      />,
+    );
+
+    // 3. clique individual (sem shift) em Bruno alterna ele para fora da selecao
+    // e move a ancora do shift+clique para "b"
+    const linhaBruno = screen.getByText("Bruno").closest("tr")!;
+    fireEvent.click(within(linhaBruno).getByRole("checkbox"));
+    expect(onSelecaoChange).toHaveBeenLastCalledWith(new Set(["a", "c"]));
+
+    rerender(
+      <TabelaDensa
+        colunas={COLUNAS}
+        linhas={ITENS}
+        selecionados={new Set(["a", "c"])}
+        onSelecaoChange={onSelecaoChange}
+        ordenacao={null}
+        onOrdenacaoChange={vi.fn()}
+      />,
+    );
+
+    // 4. shift+clique em Carla de novo: se a ancora realmente moveu para "b" no
+    // passo 3, o intervalo agora e Bruno..Carla, trazendo "b" de volta para a
+    // selecao. Se a ancora tivesse ficado em "c" (regressao), o intervalo
+    // seria so [c, c] e "b" nao voltaria.
+    fireEvent.click(within(screen.getByText("Carla").closest("tr")!).getByRole("checkbox"), { shiftKey: true });
+    expect(onSelecaoChange).toHaveBeenLastCalledWith(new Set(["a", "b", "c"]));
+  });
+
   it("linha selecionada tem o estilo de selecao", () => {
     renderTabela({ selecionados: new Set(["b"]) });
     const linhaBruno = screen.getByText("Bruno").closest("tr")!;
