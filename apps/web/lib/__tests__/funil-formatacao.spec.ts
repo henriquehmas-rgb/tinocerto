@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { idadeRelativa, montarChips, resolverDestino } from '../funil-formatacao';
+import { idadeRelativa, montarChips, resolverDestino, rotuloAssessment, rotuloOrigem } from '../funil-formatacao';
 
 const AGORA = new Date('2026-08-29T12:00:00Z');
 
@@ -75,5 +75,31 @@ describe('resolverDestino', () => {
 
   it('devolve null para candidatura desconhecida', () => {
     expect(resolverDestino(funil, 'inexistente', 'entrevista')).toBeNull();
+  });
+});
+
+describe('rotuloAssessment', () => {
+  it('traduz cada status conhecido', () => {
+    expect(rotuloAssessment('concluido')).toBe('Assessment concluído');
+    expect(rotuloAssessment('iniciado')).toBe('Assessment iniciado');
+    expect(rotuloAssessment('convidado')).toBe('Assessment enviado');
+  });
+
+  it('devolve null para status null', () => {
+    expect(rotuloAssessment(null)).toBeNull();
+  });
+});
+
+describe('rotuloOrigem', () => {
+  it('traduz canal conhecido', () => {
+    expect(rotuloOrigem('site_carreiras')).toBe('Site de carreiras');
+  });
+
+  it('canal desconhecido aparece cru', () => {
+    expect(rotuloOrigem('feira_de_empregos')).toBe('feira_de_empregos');
+  });
+
+  it('devolve null para canal null', () => {
+    expect(rotuloOrigem(null)).toBeNull();
   });
 });

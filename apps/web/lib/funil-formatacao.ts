@@ -22,6 +22,14 @@ export function idadeRelativa(criadoEm: string, agora: Date): string {
   return `há ${dias} dias`;
 }
 
+export function rotuloAssessment(status: 'convidado' | 'iniciado' | 'concluido' | null): string | null {
+  return status ? ROTULO_ASSESSMENT[status] : null;
+}
+
+export function rotuloOrigem(canal: string | null): string | null {
+  return canal ? (ROTULO_ORIGEM[canal] ?? canal) : null;
+}
+
 export interface CandidaturaParaChips {
   assessmentStatus: 'convidado' | 'iniciado' | 'concluido' | null;
   origemCanal: string | null;
@@ -30,11 +38,13 @@ export interface CandidaturaParaChips {
 
 export function montarChips(candidatura: CandidaturaParaChips, agora: Date): { rotulo: string }[] {
   const chips: { rotulo: string }[] = [];
-  if (candidatura.assessmentStatus) {
-    chips.push({ rotulo: ROTULO_ASSESSMENT[candidatura.assessmentStatus] });
+  const assessment = rotuloAssessment(candidatura.assessmentStatus);
+  if (assessment) {
+    chips.push({ rotulo: assessment });
   }
-  if (candidatura.origemCanal) {
-    chips.push({ rotulo: ROTULO_ORIGEM[candidatura.origemCanal] ?? candidatura.origemCanal });
+  const origem = rotuloOrigem(candidatura.origemCanal);
+  if (origem) {
+    chips.push({ rotulo: origem });
   }
   chips.push({ rotulo: idadeRelativa(candidatura.criadoEm, agora) });
   return chips;
