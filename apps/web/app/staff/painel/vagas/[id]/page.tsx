@@ -3,11 +3,13 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { KanbanBoard, CandidateCard, Card, Badge, Button, Table } from '@tinocerto/design-system';
+import { KanbanBoard, CandidateCard, Card, Badge, Button, Table, TabelaDensa, Paginacao, BarraSelecao, Toast, type ColunaTabela } from '@tinocerto/design-system';
 import { PainelShell } from '../../../../../components/painel-shell';
 import { staffPanelClient, CandidaturaResumo, RoteiroEntrevista, VagaCompleta, ImpactoAdversoRow, InterviewQuestionSuggestion } from '../../../../../lib/staff-panel-client';
 import { isErroDeAutenticacao } from '../../../../../lib/staff-auth-client';
-import { montarChips, resolverDestino } from '../../../../../lib/funil-formatacao';
+import { montarChips, resolverDestino, idadeRelativa, rotuloAssessment, rotuloOrigem } from '../../../../../lib/funil-formatacao';
+import { achatarFunil, ordenarCandidaturas, paginar, type ColunaOrdenavel, type LinhaFunil } from '../../../../../lib/funil-tabela';
+import { lerVisaoPreferida, salvarVisaoPreferida, type VisaoFunil } from '../../../../../lib/funil-view-provider';
 
 // Etapas conhecidas hoje, sempre mostradas como coluna (e como destino no
 // menu Mover) mesmo quando ainda nao tem nenhuma candidatura -- e o caso
@@ -54,6 +56,22 @@ export default function FunilPage() {
   const [perguntasSugeridas, setPerguntasSugeridas] = useState<InterviewQuestionSuggestion | null>(null);
   const [erroPerguntas, setErroPerguntas] = useState<string | null>(null);
   const [gerandoPerguntas, setGerandoPerguntas] = useState(false);
+  const [visao, setVisao] = useState<VisaoFunil>('kanban');
+  const [selecionados, setSelecionados] = useState<Set<string>>(new Set());
+  const [ordenacao, setOrdenacao] = useState<{ coluna: ColunaOrdenavel; direcao: 'asc' | 'desc' } | null>({
+    coluna: 'idade',
+    direcao: 'asc',
+  });
+  const [pagina, setPagina] = useState(1);
+  const [toast, setToast] = useState<{ mensagem: string; acao?: { rotulo: string; onClick: () => void } } | null>(null);
+  // Menu de destino do "Mover etapa" em lote: não é o DropdownMenu do Radix
+  // que o card individual usa (ver KanbanColumn) -- o lote pode conter
+  // candidaturas de etapas de origem DIFERENTES entre si, então não existe
+  // um único `colunasDestino` (que é "todas menos a etapa do item") capaz
+  // de servir o lote inteiro. A escolha aqui é mostrar todas as etapas
+  // conhecidas (`colunas`) como destino possível -- mais simples que tentar
+  // calcular a interseção de destinos válidos por item.
+  const [mostrandoMenuLote, setMostrandoMenuLote] = useState(false);
 
   const carregar = useCallback(() => {
     staffPanelClient
@@ -85,6 +103,18 @@ export default function FunilPage() {
       .catch(() => {})
       .finally(() => setCarregandoImpacto(false));
   }, [carregar, params.id]);
+
+  // Ler a visão preferida só depois de montar -- lendo do localStorage
+  // durante o render inicial divergiria do HTML gerado no servidor (mesmo
+  // motivo do ThemeProvider).
+  useEffect(() => {
+    setVisao(lerVisaoPreferida());
+  }, []);
+
+  function trocarVisao(proxima: VisaoFunil) {
+    setVisao(proxima);
+    salvarVisaoPreferida(proxima);
+  }
 
   async function handleGerarRoteiro() {
     if (!vaga) return;
@@ -172,6 +202,74 @@ export default function FunilPage() {
     void moverCandidatura(payload, destino);
   }
 
+  async function moverEmLote(applicationIds: string[], etapaDestino: string) {
+    // Cada item guarda a PRÓPRIA etapa de origem -- o lote pode conter
+    // candidaturas vindas de etapas diferentes, e desfazer precisa devolver
+    // cada uma pra onde ela estava, não pra uma etapa comum.
+    const origem = new Map<string, string>();
+    for (const [etapa, candidaturas] of Object.entries(funil)) {
+      for (const c of candidaturas) {
+        if (applicationIds.includes(c.id)) origem.set(c.id, etapa);
+      }
+    }
+
+    let sucesso = 0;
+    let falha = 0;
+    // Sequencial, não Promise.all: o pool de conexões do Postgres tem
+    // max=20 -- disparar dezenas em paralelo o esgotaria sob uso
+    // concorrente de vários recrutadores.
+    for (const id of applicationIds) {
+      try {
+        await staffPanelClient.moverEtapa(id, etapaDestino);
+        sucesso++;
+      } catch {
+        falha++;
+      }
+    }
+
+    setSelecionados(new Set());
+    carregar();
+
+    const mensagem = falha === 0 ? `${sucesso} movidos` : `${sucesso} movidos, ${falha} falharam`;
+    setToast({
+      mensagem,
+      acao:
+        sucesso > 0
+          ? {
+              rotulo: 'Desfazer',
+              onClick: () => void desfazerLote([...origem.entries()].filter(([id]) => id)),
+            }
+          : undefined,
+    });
+  }
+
+  async function desfazerLote(itens: [string, string][]) {
+    for (const [id, etapaAnterior] of itens) {
+      try {
+        await staffPanelClient.moverEtapa(id, etapaAnterior);
+      } catch (e) {
+        setErro((e as Error).message);
+      }
+    }
+    carregar();
+    setToast(null);
+  }
+
+  function handleOrdenacaoChange(coluna: string) {
+    setOrdenacao((atual) => {
+      if (atual?.coluna !== coluna) return { coluna: coluna as ColunaOrdenavel, direcao: 'asc' };
+      if (atual.direcao === 'asc') return { coluna: coluna as ColunaOrdenavel, direcao: 'desc' };
+      return null;
+    });
+    setPagina(1);
+    setSelecionados(new Set());
+  }
+
+  function handlePaginaChange(proxima: number) {
+    setPagina(proxima);
+    setSelecionados(new Set());
+  }
+
   const chavesExtras = Object.keys(funil).filter(
     (chave) => !COLUNAS_PADRAO.some((coluna) => coluna.chave === chave),
   );
@@ -179,6 +277,22 @@ export default function FunilPage() {
     ...COLUNAS_PADRAO,
     ...chavesExtras.map((chave) => ({ chave, titulo: capitalizar(chave) })),
   ].map((coluna) => ({ ...coluna, conversao: conversao[coluna.chave] ?? null }));
+
+  const linhasOrdenadas = ordenarCandidaturas(achatarFunil(funil), ordenacao, new Date(), colunas.map((c) => c.chave));
+  const { pagina: linhasDaPagina, totalPaginas } = paginar(linhasOrdenadas, pagina, 25);
+
+  const colunasTabela: ColunaTabela<LinhaFunil>[] = [
+    { chave: 'nome', titulo: 'Nome', largura: '1fr', ordenavel: true, render: (l) => (
+      <Link href={`/staff/painel/candidaturas/${l.id}`} className="text-accent underline">
+        {l.nomeCandidato}
+      </Link>
+    ) },
+    { chave: 'etapa', titulo: 'Etapa', largura: '128px', ordenavel: true, render: (l) => capitalizar(l.etapa) },
+    { chave: 'fit', titulo: 'Fit', largura: '80px', alinhamento: 'direita', ordenavel: true, render: (l) => (l.scoreAderencia ?? '') },
+    { chave: 'assessment', titulo: 'Assessment', largura: '122px', render: (l) => rotuloAssessment(l.assessmentStatus) ?? '' },
+    { chave: 'origem', titulo: 'Origem', largura: '128px', render: (l) => rotuloOrigem(l.origemCanal) ?? '' },
+    { chave: 'idade', titulo: 'Idade', largura: '96px', alinhamento: 'direita', ordenavel: true, render: (l) => idadeRelativa(l.criadoEm, new Date()) },
+  ];
 
   return (
     <PainelShell
@@ -276,25 +390,87 @@ export default function FunilPage() {
             </div>
           )}
         </Card>
-        <KanbanBoard
-          colunas={colunas}
-          itens={funil}
-          onMoverItem={handleMover}
-          onSoltarItem={handleSoltar}
-          labelMover={(c: CandidaturaResumo) => `Mover ${c.nomeCandidato}`}
-          renderItem={(c: CandidaturaResumo, acao) => (
-            <CandidateCard
-              nome={c.nomeCandidato}
-              scoreAderencia={c.scoreAderencia}
-              chips={montarChips(c, new Date())}
-              acao={acao}
-              arrastavel
-              payloadArraste={c.id}
-              href={`/staff/painel/candidaturas/${c.id}`}
-              linkAs={Link}
+
+        <div className="mb-2 flex items-center justify-between">
+          <div className="flex gap-2">
+            <Button variant={visao === 'kanban' ? 'primary' : 'secondary'} onClick={() => trocarVisao('kanban')}>
+              Visão em kanban
+            </Button>
+            <Button variant={visao === 'tabela' ? 'primary' : 'secondary'} onClick={() => trocarVisao('tabela')}>
+              Visão em tabela
+            </Button>
+          </div>
+          {selecionados.size > 0 && (
+            <BarraSelecao
+              quantidade={selecionados.size}
+              onMoverEtapa={() => setMostrandoMenuLote(true)}
+              onLimparSelecao={() => setSelecionados(new Set())}
             />
           )}
-        />
+        </div>
+
+        {visao === 'kanban' && (
+          <KanbanBoard
+            colunas={colunas}
+            itens={funil}
+            onMoverItem={handleMover}
+            onSoltarItem={handleSoltar}
+            labelMover={(c: CandidaturaResumo) => `Mover ${c.nomeCandidato}`}
+            renderItem={(c: CandidaturaResumo, acao) => (
+              <CandidateCard
+                nome={c.nomeCandidato}
+                scoreAderencia={c.scoreAderencia}
+                chips={montarChips(c, new Date())}
+                acao={acao}
+                arrastavel
+                payloadArraste={c.id}
+                href={`/staff/painel/candidaturas/${c.id}`}
+                linkAs={Link}
+              />
+            )}
+          />
+        )}
+
+        {visao === 'tabela' && (
+          <>
+            <TabelaDensa
+              colunas={colunasTabela}
+              linhas={linhasDaPagina}
+              selecionados={selecionados}
+              onSelecaoChange={setSelecionados}
+              ordenacao={ordenacao}
+              onOrdenacaoChange={handleOrdenacaoChange}
+            />
+            <Paginacao
+              paginaAtual={pagina}
+              totalPaginas={totalPaginas}
+              totalItens={linhasOrdenadas.length}
+              itensPorPagina={25}
+              onPaginaChange={handlePaginaChange}
+            />
+          </>
+        )}
+
+        {mostrandoMenuLote && (
+          <div className="mt-2 flex gap-2">
+            {colunas.map((c) => (
+              <Button
+                key={c.chave}
+                variant="secondary"
+                onClick={() => {
+                  setMostrandoMenuLote(false);
+                  void moverEmLote([...selecionados], c.chave);
+                }}
+              >
+                {c.titulo}
+              </Button>
+            ))}
+          </div>
+        )}
+
+        {toast && (
+          <Toast mensagem={toast.mensagem} acao={toast.acao} aoFechar={() => setToast(null)} />
+        )}
       </div>
     </PainelShell>
   );

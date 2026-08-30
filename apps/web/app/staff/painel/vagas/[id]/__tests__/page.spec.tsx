@@ -67,6 +67,7 @@ describe('FunilPage', () => {
     vi.mocked(staffPanelClient.gerarRoteiroEntrevista).mockResolvedValue({ id: 'guide-1' });
     vi.mocked(staffPanelClient.publicarRoteiroEntrevista).mockResolvedValue({ id: 'guide-1', versao: 1 });
     vi.mocked(staffPanelClient.obterImpactoAdverso).mockResolvedValue([]);
+    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue(PERFIL_MOCK);
   });
 
   it('renderiza as colunas do funil com as candidaturas carregadas', async () => {
@@ -544,6 +545,115 @@ describe('FunilPage', () => {
 
     const link = await screen.findByRole('link', { name: 'Ana Souza' });
     expect(link).toHaveAttribute('href', '/staff/painel/candidaturas/app-1');
+  });
+
+  it('alterna para a visao de tabela e mostra as candidaturas em linhas', async () => {
+    vi.mocked(staffPanelClient.obterFunil).mockResolvedValue({
+      funil: {
+        triagem: [
+          { id: 'app-1', personId: 'p-1', nomeCandidato: 'Ana Souza', criadoEm: new Date().toISOString(), assessmentStatus: null, origemCanal: null, scoreAderencia: null },
+        ],
+      },
+      conversao: { triagem: null },
+    });
+
+    render(<FunilPage />);
+    await waitFor(() => expect(screen.getByText('Ana Souza')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: /visão em tabela/i }));
+
+    await waitFor(() => expect(screen.getByRole('table')).toBeInTheDocument());
+    expect(within(screen.getByRole('table')).getByText('Ana Souza')).toBeInTheDocument();
+  });
+
+  it('a visao escolhida persiste em localStorage e sobrevive a recarregar', async () => {
+    vi.mocked(staffPanelClient.obterFunil).mockResolvedValue({
+      funil: { triagem: [] },
+      conversao: { triagem: null },
+    });
+
+    const { unmount } = render(<FunilPage />);
+    await waitFor(() => expect(staffPanelClient.obterFunil).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole('button', { name: /visão em tabela/i }));
+    await waitFor(() => expect(screen.getByRole('table')).toBeInTheDocument());
+    unmount();
+
+    render(<FunilPage />);
+    await waitFor(() => expect(screen.getByRole('table')).toBeInTheDocument());
+  });
+
+  it('selecionar candidaturas e mover em lote chama a API sequencialmente e mostra toast', async () => {
+    vi.mocked(staffPanelClient.obterFunil).mockResolvedValue({
+      funil: {
+        triagem: [
+          { id: 'app-1', personId: 'p-1', nomeCandidato: 'Ana', criadoEm: new Date().toISOString(), assessmentStatus: null, origemCanal: null, scoreAderencia: null },
+          { id: 'app-2', personId: 'p-2', nomeCandidato: 'Bruno', criadoEm: new Date().toISOString(), assessmentStatus: null, origemCanal: null, scoreAderencia: null },
+        ],
+        entrevista: [],
+      },
+      conversao: { triagem: null, entrevista: null },
+    });
+    vi.mocked(staffPanelClient.moverEtapa).mockResolvedValue(undefined);
+
+    render(<FunilPage />);
+    await waitFor(() => expect(screen.getByText('Ana')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /visão em tabela/i }));
+    await waitFor(() => expect(screen.getByRole('table')).toBeInTheDocument());
+
+    const linhaAna = screen.getByText('Ana').closest('tr')!;
+    const linhaBruno = screen.getByText('Bruno').closest('tr')!;
+    fireEvent.click(within(linhaAna).getByRole('checkbox'));
+    fireEvent.click(within(linhaBruno).getByRole('checkbox'));
+
+    fireEvent.click(screen.getByRole('button', { name: /mover etapa/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^entrevista$/i }));
+
+    await waitFor(() => expect(staffPanelClient.moverEtapa).toHaveBeenCalledTimes(2));
+    expect(staffPanelClient.moverEtapa).toHaveBeenNthCalledWith(1, 'app-1', 'entrevista');
+    expect(staffPanelClient.moverEtapa).toHaveBeenNthCalledWith(2, 'app-2', 'entrevista');
+    expect(screen.getByRole('status')).toHaveTextContent('2 movidos');
+  });
+
+  it('desfazer devolve cada candidatura a sua propria etapa anterior', async () => {
+    vi.mocked(staffPanelClient.obterFunil)
+      .mockResolvedValueOnce({
+        funil: {
+          triagem: [{ id: 'app-1', personId: 'p-1', nomeCandidato: 'Ana', criadoEm: new Date().toISOString(), assessmentStatus: null, origemCanal: null, scoreAderencia: null }],
+          entrevista: [{ id: 'app-2', personId: 'p-2', nomeCandidato: 'Bruno', criadoEm: new Date().toISOString(), assessmentStatus: null, origemCanal: null, scoreAderencia: null }],
+        },
+        conversao: { triagem: null, entrevista: null },
+      })
+      .mockResolvedValue({
+        funil: {
+          triagem: [],
+          entrevista: [
+            { id: 'app-1', personId: 'p-1', nomeCandidato: 'Ana', criadoEm: new Date().toISOString(), assessmentStatus: null, origemCanal: null, scoreAderencia: null },
+            { id: 'app-2', personId: 'p-2', nomeCandidato: 'Bruno', criadoEm: new Date().toISOString(), assessmentStatus: null, origemCanal: null, scoreAderencia: null },
+          ],
+        },
+        conversao: { triagem: null, entrevista: null },
+      });
+    vi.mocked(staffPanelClient.moverEtapa).mockResolvedValue(undefined);
+
+    render(<FunilPage />);
+    await waitFor(() => expect(screen.getByText('Ana')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /visão em tabela/i }));
+    await waitFor(() => expect(screen.getByRole('table')).toBeInTheDocument());
+
+    fireEvent.click(within(screen.getByText('Ana').closest('tr')!).getByRole('checkbox'));
+    fireEvent.click(within(screen.getByText('Bruno').closest('tr')!).getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: /mover etapa/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^entrevista$/i }));
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('2 movidos'));
+
+    vi.mocked(staffPanelClient.moverEtapa).mockClear();
+    fireEvent.click(screen.getByRole('button', { name: /desfazer/i }));
+
+    await waitFor(() => expect(staffPanelClient.moverEtapa).toHaveBeenCalledTimes(2));
+    // Ana estava em triagem, Bruno estava em entrevista -- cada um volta
+    // pra ETAPA PRÓPRIA, não pra uma etapa comum.
+    expect(staffPanelClient.moverEtapa).toHaveBeenCalledWith('app-1', 'triagem');
+    expect(staffPanelClient.moverEtapa).toHaveBeenCalledWith('app-2', 'entrevista');
   });
 
 });
