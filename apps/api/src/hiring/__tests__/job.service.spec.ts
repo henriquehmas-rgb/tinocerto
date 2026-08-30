@@ -447,6 +447,57 @@ describe('JobService', () => {
       expect(semNada.origemCanal).toBeNull();
     });
 
+    it('normaliza um status de assessment fora dos 3 conhecidos (ex.: "expirado", 4º valor aceito pela CHECK) para null em vez de vazar pro card um chip vazio', async () => {
+      // A CHECK de assessment_application.status aceita 'expirado' (nenhum
+      // job de expiração grava isso hoje -- é latente), mas
+      // ROTULO_ASSESSMENT em funil-formatacao.ts (apps/web) só tem rótulo
+      // pras outras 3 chaves. Sem normalizar aqui, um status desconhecido
+      // chegaria como string crua no front e indexaria o mapa de rótulos
+      // com `undefined` -- um chip cinza vazio no card.
+      const ctx = new TenantContext(appPool);
+      const service = new JobService(new RequisitionService(), new JobRecrutadorService());
+
+      const job = await adminPool.query<{ id: string }>(
+        `INSERT INTO job (tenant_id, requisition_id, titulo, seo_slug) VALUES ($1, $2, 'Vaga Status Desconhecido', 'vaga-funil-status-desconhecido-0018') RETURNING id`,
+        [tenantId, requisitionId],
+      );
+      const jobStatusDesconhecidoId = job.rows[0].id;
+
+      const person = await adminPool.query<{ id: string }>(
+        `INSERT INTO person (cpf_hash, cpf_encriptado, nome, email_principal)
+         VALUES ('hash-funil-expirado', '{"ciphertext":"x","iv":"y","authTag":"z","wrappedDek":"w"}', 'Elis Expirado', 'elis.expirado@example.com')
+         RETURNING id`,
+      );
+      const personExpiradoId = person.rows[0].id;
+
+      const application = await adminPool.query<{ id: string }>(
+        `INSERT INTO application (tenant_id, job_id, person_id, etapa_funil) VALUES ($1, $2, $3, 'triagem') RETURNING id`,
+        [tenantId, jobStatusDesconhecidoId, personExpiradoId],
+      );
+      const applicationExpiradoId = application.rows[0].id;
+
+      await adminPool.query(
+        `INSERT INTO assessment_application (tenant_id, application_id, person_id, instrument_version_id, status, convidado_em)
+         VALUES ($1, $2, $3, $4, 'expirado', now())`,
+        [tenantId, applicationExpiradoId, personExpiradoId, instrumentVersionFunilId],
+      );
+
+      try {
+        const { funil } = await ctx.run(tenantId, (client) =>
+          service.funil(client, { tenantId, jobId: jobStatusDesconhecidoId }),
+        );
+        const candidatura = funil['triagem'].find((c) => c.id === applicationExpiradoId)!;
+        expect(candidatura.assessmentStatus).toBeNull();
+      } finally {
+        await adminPool.query('DELETE FROM assessment_application WHERE application_id = $1', [
+          applicationExpiradoId,
+        ]);
+        await adminPool.query('DELETE FROM application WHERE id = $1', [applicationExpiradoId]);
+        await adminPool.query('DELETE FROM job WHERE id = $1', [jobStatusDesconhecidoId]);
+        await adminPool.query('DELETE FROM person WHERE id = $1', [personExpiradoId]);
+      }
+    });
+
     it('quando há reaplicação, vale o assessment mais recente', async () => {
       // Insere um assessment ANTERIOR ao já existente: o mais recente por
       // convidado_em é que deve aparecer, não o primeiro nem o último a ser

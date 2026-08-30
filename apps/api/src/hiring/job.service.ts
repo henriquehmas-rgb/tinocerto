@@ -65,6 +65,22 @@ export interface FunilDaVaga {
   conversao: Record<string, number | null>;
 }
 
+// A CHECK de assessment_application.status admite um quarto valor,
+// 'expirado' (nenhum job de expiração escreve isso hoje -- é latente).
+// funil-formatacao.ts (apps/web) indexa o rótulo do chip por essas 3
+// chaves; um quarto status empurraria um chip com rótulo `undefined`, um
+// pill cinza vazio no card. Normaliza na borda: qualquer status fora das
+// 3 chaves conhecidas vira null (sem chip), não um valor que quebra a
+// UI.
+const ASSESSMENT_STATUS_CONHECIDOS = ['convidado', 'iniciado', 'concluido'] as const;
+
+function normalizarAssessmentStatus(status: string | null): CandidaturaResumo['assessmentStatus'] {
+  if (status === null) return null;
+  return (ASSESSMENT_STATUS_CONHECIDOS as readonly string[]).includes(status)
+    ? (status as CandidaturaResumo['assessmentStatus'])
+    : null;
+}
+
 // Ordem canônica do pipeline. Mora na API, não no cliente: conversão é
 // regra de negócio, e sem uma ordem definida "conversão da etapa N" não
 // tem significado. Etapa que aparecer nos dados fora desta lista não
@@ -226,7 +242,7 @@ export class JobService {
         personId: row.person_id,
         nomeCandidato: row.nome,
         criadoEm: row.criado_em,
-        assessmentStatus: (row.assessment_status as CandidaturaResumo['assessmentStatus']) ?? null,
+        assessmentStatus: normalizarAssessmentStatus(row.assessment_status),
         origemCanal: row.origem_canal,
       });
     }
