@@ -30,3 +30,5 @@ export { Toast } from './components/Toast';
 export type { ToastProps } from './components/Toast';
 export { BarraSelecao } from './components/BarraSelecao';
 export type { BarraSelecaoProps } from './components/BarraSelecao';
+export { Paginacao } from './components/Paginacao';
+export type { PaginacaoProps } from './components/Paginacao';
