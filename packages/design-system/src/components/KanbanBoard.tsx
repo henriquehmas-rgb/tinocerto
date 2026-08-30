@@ -1,11 +1,18 @@
 import React from "react";
 import { KanbanColumn } from "./KanbanColumn";
 
+export interface KanbanBoardColuna {
+  chave: string;
+  titulo: string;
+  conversao?: number | null;
+}
+
 export interface KanbanBoardProps<T> {
-  colunas: { chave: string; titulo: string }[];
+  colunas: KanbanBoardColuna[];
   itens: Record<string, T[]>;
-  renderItem: (item: T) => React.ReactNode;
+  renderItem: (item: T, acao: React.ReactNode) => React.ReactNode;
   onMoverItem: (item: T, novaColuna: string) => void;
+  onSoltarItem?: (chaveDestino: string) => void;
   labelMover?: (item: T) => string;
   mensagemVazia?: string;
 }
@@ -15,23 +22,31 @@ export function KanbanBoard<T extends { id: string | number; nome?: string }>({
   itens,
   renderItem,
   onMoverItem,
+  onSoltarItem,
   labelMover,
   mensagemVazia,
 }: KanbanBoardProps<T>) {
   return (
     <div className="flex gap-4 overflow-x-auto">
-      {colunas.map((coluna) => (
-        <KanbanColumn
-          key={coluna.chave}
-          titulo={coluna.titulo}
-          itens={itens[coluna.chave] ?? []}
-          colunasDestino={colunas.filter((c) => c.chave !== coluna.chave)}
-          renderItem={renderItem}
-          labelMover={labelMover ?? ((item) => `Mover ${item.nome ?? "item"}`)}
-          onMoverItem={onMoverItem}
-          mensagemVazia={mensagemVazia}
-        />
-      ))}
+      {colunas.map((coluna) => {
+        const doColuna = itens[coluna.chave] ?? [];
+        return (
+          <KanbanColumn
+            key={coluna.chave}
+            chave={coluna.chave}
+            titulo={coluna.titulo}
+            itens={doColuna}
+            total={doColuna.length}
+            conversao={coluna.conversao}
+            colunasDestino={colunas.filter((c) => c.chave !== coluna.chave)}
+            renderItem={renderItem}
+            labelMover={labelMover ?? ((item) => `Mover ${item.nome ?? "item"}`)}
+            onMoverItem={onMoverItem}
+            onSoltarItem={onSoltarItem}
+            mensagemVazia={mensagemVazia}
+          />
+        );
+      })}
     </div>
   );
 }

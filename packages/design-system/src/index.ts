@@ -11,7 +11,7 @@ export type { CardProps } from './components/Card';
 export { KanbanColumn } from './components/KanbanColumn';
 export type { KanbanColumnProps } from './components/KanbanColumn';
 export { KanbanBoard } from './components/KanbanBoard';
-export type { KanbanBoardProps } from './components/KanbanBoard';
+export type { KanbanBoardProps, KanbanBoardColuna } from './components/KanbanBoard';
 export { PanelNav, iniciaisDe } from './components/PanelNav';
 export type { PanelNavProps, PanelNavItem, PanelNavGrupo } from './components/PanelNav';
 export { PanelLayout } from './components/PanelLayout';
