@@ -418,4 +418,33 @@ describe('FunilPage', () => {
     expect(within(triagem).getByText('Ana Souza')).toBeInTheDocument();
   });
 
+  it('linka o nome do candidato no card para a página de detalhe da candidatura', async () => {
+    // Regressão: o funil é a tela de trabalho do recrutador, e o nome no
+    // card era o único caminho até o detalhe da candidatura (scorecards,
+    // entrevistas, oferta). O componente CandidateCard do design system
+    // passou a renderizar o nome como <span> plano -- sem esse teste, a
+    // perda do link não derruba nenhum outro teste.
+    vi.mocked(staffPanelClient.obterFunil).mockResolvedValue({
+      funil: {
+        triagem: [
+          {
+            id: 'app-1',
+            personId: 'p-1',
+            nomeCandidato: 'Ana Souza',
+            criadoEm: new Date().toISOString(),
+            assessmentStatus: null,
+            origemCanal: null,
+            scoreAderencia: null,
+          },
+        ],
+      },
+      conversao: { triagem: null },
+    });
+
+    render(<FunilPage />);
+
+    const link = await screen.findByRole('link', { name: 'Ana Souza' });
+    expect(link).toHaveAttribute('href', '/staff/painel/candidaturas/app-1');
+  });
+
 });

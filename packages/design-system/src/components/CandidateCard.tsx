@@ -13,6 +13,10 @@ export interface CandidateCardProps {
   acao?: React.ReactNode;
   arrastavel?: boolean;
   onArrastarInicio?: () => void;
+  /** Quando presente, o nome vira link para a candidatura (ex.: página de detalhe). */
+  href?: string;
+  /** Componente de link do consumidor (ex.: `Link` do Next). Padrão: `'a'`. */
+  linkAs?: React.ElementType;
 }
 
 export function CandidateCard({
@@ -22,8 +26,26 @@ export function CandidateCard({
   acao,
   arrastavel = false,
   onArrastarInicio,
+  href,
+  linkAs: Link = "a",
 }: CandidateCardProps) {
   const temFit = scoreAderencia !== null && scoreAderencia !== undefined;
+
+  // O card raiz é `draggable`. Um <a href> nativo dentro dele também é
+  // draggable por padrão, e o navegador prioriza o drag do link (arrastando a
+  // URL) sobre o drag do card. `draggable={false}` no link devolve o drag pro
+  // card, que é o que o funil precisa pra funcionar arrastando a partir do nome.
+  const nomeElemento = href ? (
+    <Link
+      href={href}
+      draggable={false}
+      className="min-w-0 flex-1 truncate font-ui text-[13px] font-semibold text-text no-underline"
+    >
+      {nome}
+    </Link>
+  ) : (
+    <span className="min-w-0 flex-1 truncate font-ui text-[13px] font-semibold text-text">{nome}</span>
+  );
 
   return (
     <div
@@ -41,7 +63,7 @@ export function CandidateCard({
         >
           {iniciaisDe(nome)}
         </span>
-        <span className="min-w-0 flex-1 truncate font-ui text-[13px] font-semibold text-text">{nome}</span>
+        {nomeElemento}
         {temFit && (
           <span data-testid="fit" className="shrink-0 font-num text-[13px] tabular-nums text-text">
             {scoreAderencia}

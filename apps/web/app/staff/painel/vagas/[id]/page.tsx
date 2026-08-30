@@ -284,6 +284,8 @@ export default function FunilPage() {
               onArrastarInicio={() => {
                 arrastandoRef.current = c.id;
               }}
+              href={`/staff/painel/candidaturas/${c.id}`}
+              linkAs={Link}
             />
           )}
         />

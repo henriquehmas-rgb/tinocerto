@@ -59,4 +59,38 @@ describe("CandidateCard", () => {
     render(<CandidateCard nome="Ana Souza" />);
     expect(screen.getByTestId("candidate-card")).not.toHaveAttribute("draggable", "true");
   });
+
+  it("renderiza o nome como link quando href é passado", () => {
+    render(<CandidateCard nome="Ana Souza" href="/staff/painel/candidaturas/app-1" />);
+    const link = screen.getByRole("link", { name: "Ana Souza" });
+    expect(link).toHaveAttribute("href", "/staff/painel/candidaturas/app-1");
+  });
+
+  it("não renderiza o nome como link quando href não é passado", () => {
+    // O caminho de <span> puro (sem link) precisa continuar funcionando --
+    // é o usado por qualquer consumidor do card fora do funil.
+    render(<CandidateCard nome="Ana Souza" />);
+    expect(screen.queryByRole("link", { name: "Ana Souza" })).toBeNull();
+  });
+
+  it("usa o componente de link injetado em linkAs", () => {
+    function LinkFalso({ href, children, ...resto }: React.ComponentProps<"a">) {
+      return (
+        <a href={href} data-link-injetado="sim" {...resto}>
+          {children}
+        </a>
+      );
+    }
+    render(<CandidateCard nome="Ana Souza" href="/staff/painel/candidaturas/app-1" linkAs={LinkFalso} />);
+    expect(screen.getByRole("link", { name: "Ana Souza" })).toHaveAttribute("data-link-injetado", "sim");
+  });
+
+  it("o link do nome tem draggable=false para não competir com o drag do card", () => {
+    // O card raiz é `draggable`, e um <a href> nativo também é arrastável por
+    // padrão -- o navegador prioriza o drag do link (a URL) sobre o do card.
+    // Sem draggable={false} aqui, começar o arrasto pelo nome quebraria o
+    // drag-and-drop do funil.
+    render(<CandidateCard nome="Ana Souza" href="/staff/painel/candidaturas/app-1" />);
+    expect(screen.getByRole("link", { name: "Ana Souza" })).toHaveAttribute("draggable", "false");
+  });
 });
