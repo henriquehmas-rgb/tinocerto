@@ -32,3 +32,5 @@ export { BarraSelecao } from './components/BarraSelecao';
 export type { BarraSelecaoProps } from './components/BarraSelecao';
 export { Paginacao } from './components/Paginacao';
 export type { PaginacaoProps } from './components/Paginacao';
+export { TabelaDensa } from './components/TabelaDensa';
+export type { TabelaDensaProps, ColunaTabela } from './components/TabelaDensa';

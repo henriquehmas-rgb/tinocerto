@@ -1,0 +1,168 @@
+import React, { useRef } from "react";
+
+export interface ColunaTabela<T> {
+  chave: string;
+  titulo: string;
+  largura: string;
+  alinhamento?: "esquerda" | "direita";
+  ordenavel?: boolean;
+  render: (item: T) => React.ReactNode;
+}
+
+export interface TabelaDensaProps<T extends { id: string }> {
+  colunas: ColunaTabela<T>[];
+  linhas: T[];
+  selecionados: Set<string>;
+  onSelecaoChange: (proximo: Set<string>) => void;
+  ordenacao: { coluna: string; direcao: "asc" | "desc" } | null;
+  onOrdenacaoChange: (coluna: string) => void;
+}
+
+function CheckboxCabecalho({
+  todosSelecionados,
+  algunsSelecionados,
+  onChange,
+}: {
+  todosSelecionados: boolean;
+  algunsSelecionados: boolean;
+  onChange: () => void;
+}) {
+  const ref = useRef<HTMLInputElement>(null);
+  React.useEffect(() => {
+    if (ref.current) ref.current.indeterminate = algunsSelecionados && !todosSelecionados;
+  }, [algunsSelecionados, todosSelecionados]);
+
+  return (
+    <input
+      ref={ref}
+      type="checkbox"
+      aria-label="Selecionar todos"
+      checked={todosSelecionados}
+      onChange={onChange}
+      style={{ accentColor: "var(--pr-accent)" }}
+    />
+  );
+}
+
+export function TabelaDensa<T extends { id: string }>({
+  colunas,
+  linhas,
+  selecionados,
+  onSelecaoChange,
+  ordenacao,
+  onOrdenacaoChange,
+}: TabelaDensaProps<T>) {
+  // Âncora do shift+clique: id da última linha clicada individualmente,
+  // não a ordem de seleção -- shift+clique seleciona o intervalo VISUAL
+  // entre a última linha tocada e a atual, como em qualquer lista nativa.
+  const ultimoClicadoRef = useRef<string | null>(null);
+
+  const todosSelecionados = linhas.length > 0 && linhas.every((l) => selecionados.has(l.id));
+  const algunsSelecionados = linhas.some((l) => selecionados.has(l.id));
+
+  function alternarTodos() {
+    if (todosSelecionados) {
+      onSelecaoChange(new Set());
+    } else {
+      onSelecaoChange(new Set(linhas.map((l) => l.id)));
+    }
+  }
+
+  function alternarLinha(id: string, comShift: boolean) {
+    const proximo = new Set(selecionados);
+
+    if (comShift && ultimoClicadoRef.current !== null) {
+      const indices = linhas.map((l) => l.id);
+      const indiceAncora = indices.indexOf(ultimoClicadoRef.current);
+      const indiceAtual = indices.indexOf(id);
+      if (indiceAncora !== -1 && indiceAtual !== -1) {
+        const [inicio, fim] = indiceAncora < indiceAtual ? [indiceAncora, indiceAtual] : [indiceAtual, indiceAncora];
+        for (let i = inicio; i <= fim; i++) proximo.add(indices[i]);
+        onSelecaoChange(proximo);
+        ultimoClicadoRef.current = id;
+        return;
+      }
+    }
+
+    if (proximo.has(id)) {
+      proximo.delete(id);
+    } else {
+      proximo.add(id);
+    }
+    onSelecaoChange(proximo);
+    ultimoClicadoRef.current = id;
+  }
+
+  const gridTemplate = `32px ${colunas.map((c) => c.largura).join(" ")}`;
+
+  return (
+    <table className="w-full border-collapse font-ui text-sm">
+      <thead>
+        <tr
+          className="grid items-center border-b border-border"
+          style={{ gridTemplateColumns: gridTemplate, gap: "12px", height: "34px" }}
+        >
+          <th className="px-3">
+            <CheckboxCabecalho
+              todosSelecionados={todosSelecionados}
+              algunsSelecionados={algunsSelecionados}
+              onChange={alternarTodos}
+            />
+          </th>
+          {colunas.map((coluna) => {
+            const ativa = ordenacao?.coluna === coluna.chave;
+            return (
+              <th
+                key={coluna.chave}
+                className={`font-ui text-xs font-medium text-text-secondary ${
+                  coluna.alinhamento === "direita" ? "text-right" : "text-left"
+                }`}
+                onClick={coluna.ordenavel ? () => onOrdenacaoChange(coluna.chave) : undefined}
+                style={{ cursor: coluna.ordenavel ? "pointer" : undefined }}
+              >
+                {coluna.titulo}
+                {ativa && <span aria-hidden="true"> {ordenacao?.direcao === "asc" ? "↑" : "↓"}</span>}
+              </th>
+            );
+          })}
+        </tr>
+      </thead>
+      <tbody>
+        {linhas.map((linha) => {
+          const selecionada = selecionados.has(linha.id);
+          return (
+            <tr
+              key={linha.id}
+              data-selecionada={selecionada || undefined}
+              className="grid items-center border-b border-border"
+              style={{
+                gridTemplateColumns: gridTemplate,
+                gap: "12px",
+                height: "38px",
+                background: selecionada ? "var(--pr-selected)" : undefined,
+              }}
+            >
+              <td className="px-3">
+                <input
+                  type="checkbox"
+                  aria-label={`Selecionar linha`}
+                  checked={selecionada}
+                  onChange={(evento) => alternarLinha(linha.id, (evento.nativeEvent as MouseEvent).shiftKey)}
+                  style={{ accentColor: "var(--pr-accent)" }}
+                />
+              </td>
+              {colunas.map((coluna) => (
+                <td
+                  key={coluna.chave}
+                  className={`font-ui text-[13px] text-text ${coluna.alinhamento === "direita" ? "text-right font-num tabular-nums" : "text-left"}`}
+                >
+                  {coluna.render(linha)}
+                </td>
+              ))}
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+}
