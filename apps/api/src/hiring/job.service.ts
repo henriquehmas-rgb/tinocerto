@@ -56,7 +56,20 @@ export interface CandidaturaResumo {
   personId: string;
   nomeCandidato: string;
   criadoEm: Date;
+  assessmentStatus: 'convidado' | 'iniciado' | 'concluido' | null;
+  origemCanal: string | null;
 }
+
+export interface FunilDaVaga {
+  funil: Record<string, CandidaturaResumo[]>;
+  conversao: Record<string, number | null>;
+}
+
+// Ordem canônica do pipeline. Mora na API, não no cliente: conversão é
+// regra de negócio, e sem uma ordem definida "conversão da etapa N" não
+// tem significado. Etapa que aparecer nos dados fora desta lista não
+// recebe conversão -- o sistema não inventa a posição dela no funil.
+export const ORDEM_ETAPAS = ['triagem', 'entrevista'] as const;
 
 export interface DashboardMetricas {
   vagasAtivas: number;
@@ -174,21 +187,37 @@ export class JobService {
     };
   }
 
-  async funil(client: PoolClient, input: { tenantId: string; jobId: string }): Promise<Record<string, CandidaturaResumo[]>> {
+  async funil(client: PoolClient, input: { tenantId: string; jobId: string }): Promise<FunilDaVaga> {
+    // LEFT JOIN LATERAL para o assessment: uma candidatura pode ter mais de
+    // uma linha em assessment_application (reaplicação), e vale a mais
+    // recente por convidado_em.
     const result = await client.query<{
       id: string;
       person_id: string;
       nome: string;
       etapa_funil: string;
       criado_em: Date;
+      assessment_status: string | null;
+      origem_canal: string | null;
     }>(
-      `SELECT a.id, a.person_id, p.nome, a.etapa_funil, a.criado_em
+      `SELECT a.id, a.person_id, p.nome, a.etapa_funil, a.criado_em,
+              aa.status AS assessment_status,
+              ct.canal  AS origem_canal
        FROM application a
        JOIN person p ON p.id = a.person_id
+       LEFT JOIN LATERAL (
+         SELECT status FROM assessment_application
+         WHERE tenant_id = a.tenant_id AND application_id = a.id
+         ORDER BY convidado_em DESC
+         LIMIT 1
+       ) aa ON true
+       LEFT JOIN candidate_touchpoint ct
+         ON ct.tenant_id = a.tenant_id AND ct.id = a.touchpoint_id
        WHERE a.tenant_id = $1 AND a.job_id = $2
        ORDER BY a.criado_em ASC`,
       [input.tenantId, input.jobId],
     );
+
     const funil: Record<string, CandidaturaResumo[]> = {};
     for (const row of result.rows) {
       if (!funil[row.etapa_funil]) funil[row.etapa_funil] = [];
@@ -197,9 +226,62 @@ export class JobService {
         personId: row.person_id,
         nomeCandidato: row.nome,
         criadoEm: row.criado_em,
+        assessmentStatus: (row.assessment_status as CandidaturaResumo['assessmentStatus']) ?? null,
+        origemCanal: row.origem_canal,
       });
     }
-    return funil;
+
+    const conversao = await this.conversaoPorEtapa(client, input);
+    return { funil, conversao };
+  }
+
+  // "Alcançou a etapa" = está nela agora OU tem transição com to_state nela.
+  // O OU é necessário: candidaturas nascem em 'triagem' sem gerar linha em
+  // pipeline_stage_transition, então contar só transições daria zero para a
+  // primeira etapa e conversão nula para toda a esteira.
+  private async conversaoPorEtapa(
+    client: PoolClient,
+    input: { tenantId: string; jobId: string },
+  ): Promise<Record<string, number | null>> {
+    // A transição registra from_state -> to_state: quem tem uma transição
+    // com to_state = X alcançou X, mas quem tem from_state = X também
+    // alcançou X (é de lá que ela partiu). Sem o ramo de from_state, uma
+    // candidatura que já passou por uma etapa e seguiu adiante deixa de
+    // contar como tendo alcançado essa etapa, subestimando o denominador.
+    const result = await client.query<{ etapa: string; total: string }>(
+      `SELECT etapa, count(DISTINCT application_id)::text AS total
+       FROM (
+         SELECT a.id AS application_id, a.etapa_funil AS etapa
+         FROM application a
+         WHERE a.tenant_id = $1 AND a.job_id = $2
+         UNION
+         SELECT t.application_id, t.to_state AS etapa
+         FROM pipeline_stage_transition t
+         JOIN application a2 ON a2.id = t.application_id
+         WHERE t.tenant_id = $1 AND a2.job_id = $2
+         UNION
+         SELECT t.application_id, t.from_state AS etapa
+         FROM pipeline_stage_transition t
+         JOIN application a2 ON a2.id = t.application_id
+         WHERE t.tenant_id = $1 AND a2.job_id = $2 AND t.from_state IS NOT NULL
+       ) alcances
+       GROUP BY etapa`,
+      [input.tenantId, input.jobId],
+    );
+
+    const alcancaram: Record<string, number> = {};
+    for (const row of result.rows) alcancaram[row.etapa] = Number(row.total);
+
+    const conversao: Record<string, number | null> = {};
+    ORDEM_ETAPAS.forEach((etapa, indice) => {
+      if (indice === 0) {
+        conversao[etapa] = null;
+        return;
+      }
+      const denominador = alcancaram[ORDEM_ETAPAS[indice - 1]] ?? 0;
+      conversao[etapa] = denominador === 0 ? null : Math.round((100 * (alcancaram[etapa] ?? 0)) / denominador);
+    });
+    return conversao;
   }
 
   async obterMetricas(client: PoolClient, input: ListarJobsInput): Promise<DashboardMetricas> {

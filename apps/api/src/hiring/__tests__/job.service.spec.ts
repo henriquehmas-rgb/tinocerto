@@ -292,6 +292,10 @@ describe('JobService', () => {
     let personEntrevistaId: string;
     let applicationTriagemId: string;
     let applicationEntrevistaId: string;
+    let instrumentVersionFunilId: string;
+    // Não existe em user_account -- actor_id de pipeline_stage_transition
+    // não tem FK para user_account, então não precisa existir de fato.
+    const adminId = '00000000-0000-0000-0000-000000000097';
 
     beforeAll(async () => {
       const job = await adminPool.query<{ id: string }>(
@@ -323,21 +327,63 @@ describe('JobService', () => {
         [tenantId, vagaFunilId, personEntrevistaId],
       );
       applicationEntrevistaId = appEntrevista.rows[0].id;
+
+      // instrument/instrument_version são tabelas GLOBAIS (sem tenant_id):
+      // ids fixos + limpeza explícita no afterAll, mesmo padrão já usado
+      // nos testes de instrumentVersionId desta suíte.
+      await adminPool.query(
+        `INSERT INTO instrument (id, nome) VALUES ('a55e55e0-0000-4000-8000-0000000000f1', 'Instrumento Funil')`,
+      );
+      await adminPool.query(
+        `INSERT INTO instrument_version (id, instrument_id, versao)
+         VALUES ('a55e55e0-0000-4000-8000-0000000000f2', 'a55e55e0-0000-4000-8000-0000000000f1', 1)`,
+      );
+      instrumentVersionFunilId = 'a55e55e0-0000-4000-8000-0000000000f2';
+
+      await adminPool.query(
+        `INSERT INTO assessment_application (tenant_id, application_id, person_id, instrument_version_id, status, convidado_em)
+         VALUES ($1, $2, $3, $4, 'concluido', now())`,
+        [tenantId, applicationTriagemId, personTriagemId, instrumentVersionFunilId],
+      );
+
+      const touchpoint = await adminPool.query<{ id: string }>(
+        `INSERT INTO candidate_touchpoint (tenant_id, person_id, canal) VALUES ($1, $2, 'site_carreiras') RETURNING id`,
+        [tenantId, personTriagemId],
+      );
+      await adminPool.query(`UPDATE application SET touchpoint_id = $1 WHERE id = $2`, [
+        touchpoint.rows[0].id,
+        applicationTriagemId,
+      ]);
+
+      // A candidatura de entrevista passou por triagem antes: sem esta
+      // transição o denominador da conversão seria só quem está em triagem
+      // agora, e o teste de 50% não teria significado.
+      await adminPool.query(
+        `INSERT INTO pipeline_stage_transition (tenant_id, application_id, from_state, to_state, actor_id, actor_type)
+         VALUES ($1, $2, 'triagem', 'entrevista', $3, 'staff')`,
+        [tenantId, applicationEntrevistaId, adminId],
+      );
     });
 
     afterAll(async () => {
+      await adminPool.query('DELETE FROM pipeline_stage_transition WHERE tenant_id = $1', [tenantId]);
+      await adminPool.query('DELETE FROM assessment_application WHERE tenant_id = $1', [tenantId]);
+      await adminPool.query('UPDATE application SET touchpoint_id = NULL WHERE id = $1', [applicationTriagemId]);
+      await adminPool.query('DELETE FROM candidate_touchpoint WHERE tenant_id = $1', [tenantId]);
       await adminPool.query('DELETE FROM application WHERE id = ANY($1)', [
         [applicationTriagemId, applicationEntrevistaId],
       ]);
       await adminPool.query('DELETE FROM job WHERE id = $1', [vagaFunilId]);
       await adminPool.query('DELETE FROM person WHERE id = ANY($1)', [[personTriagemId, personEntrevistaId]]);
+      await adminPool.query(`DELETE FROM instrument_version WHERE id = 'a55e55e0-0000-4000-8000-0000000000f2'`);
+      await adminPool.query(`DELETE FROM instrument WHERE id = 'a55e55e0-0000-4000-8000-0000000000f1'`);
     });
 
     it('agrupa candidaturas da vaga por etapa_funil', async () => {
       const ctx = new TenantContext(appPool);
       const service = new JobService(new RequisitionService(), new JobRecrutadorService());
 
-      const funil = await ctx.run(tenantId, (client) =>
+      const { funil } = await ctx.run(tenantId, (client) =>
         service.funil(client, { tenantId, jobId: vagaFunilId }),
       );
 
@@ -345,6 +391,85 @@ describe('JobService', () => {
         triagem: [expect.objectContaining({ id: applicationTriagemId })],
         entrevista: [expect.objectContaining({ id: applicationEntrevistaId })],
       });
+    });
+
+    it('devolve status do assessment e canal de origem por candidatura', async () => {
+      const ctx = new TenantContext(appPool);
+      const service = new JobService(new RequisitionService(), new JobRecrutadorService());
+
+      const { funil } = await ctx.run(tenantId, (client) =>
+        service.funil(client, { tenantId, jobId: vagaFunilId }),
+      );
+
+      const emTriagem = funil['triagem'].find((c) => c.id === applicationTriagemId)!;
+      expect(emTriagem.assessmentStatus).toBe('concluido');
+      expect(emTriagem.origemCanal).toBe('site_carreiras');
+    });
+
+    it('devolve null nos campos novos quando não há assessment nem origem', async () => {
+      const ctx = new TenantContext(appPool);
+      const service = new JobService(new RequisitionService(), new JobRecrutadorService());
+
+      const { funil } = await ctx.run(tenantId, (client) =>
+        service.funil(client, { tenantId, jobId: vagaFunilId }),
+      );
+
+      const semNada = funil['entrevista'].find((c) => c.id === applicationEntrevistaId)!;
+      expect(semNada.assessmentStatus).toBeNull();
+      expect(semNada.origemCanal).toBeNull();
+    });
+
+    it('quando há reaplicação, vale o assessment mais recente', async () => {
+      // Insere um assessment ANTERIOR ao já existente: o mais recente por
+      // convidado_em é que deve aparecer, não o primeiro nem o último a ser
+      // inserido.
+      await adminPool.query(
+        `INSERT INTO assessment_application (tenant_id, application_id, person_id, instrument_version_id, status, convidado_em)
+         VALUES ($1, $2, $3, $4, 'convidado', now() - interval '10 days')`,
+        [tenantId, applicationTriagemId, personTriagemId, instrumentVersionFunilId],
+      );
+
+      const ctx = new TenantContext(appPool);
+      const service = new JobService(new RequisitionService(), new JobRecrutadorService());
+      const { funil } = await ctx.run(tenantId, (client) =>
+        service.funil(client, { tenantId, jobId: vagaFunilId }),
+      );
+
+      const emTriagem = funil['triagem'].find((c) => c.id === applicationTriagemId)!;
+      expect(emTriagem.assessmentStatus).toBe('concluido');
+    });
+
+    it('a primeira etapa não tem conversão', async () => {
+      const ctx = new TenantContext(appPool);
+      const service = new JobService(new RequisitionService(), new JobRecrutadorService());
+      const { conversao } = await ctx.run(tenantId, (client) =>
+        service.funil(client, { tenantId, jobId: vagaFunilId }),
+      );
+      expect(conversao['triagem']).toBeNull();
+    });
+
+    it('conta como tendo alcançado triagem quem nasceu lá sem transição', async () => {
+      // Candidaturas nascem em 'triagem' sem gerar linha em
+      // pipeline_stage_transition. Contar só transições daria denominador
+      // zero e conversão nula para sempre.
+      const ctx = new TenantContext(appPool);
+      const service = new JobService(new RequisitionService(), new JobRecrutadorService());
+      const { conversao } = await ctx.run(tenantId, (client) =>
+        service.funil(client, { tenantId, jobId: vagaFunilId }),
+      );
+      // Há 2 candidaturas na vaga; ambas alcançaram triagem (uma está lá,
+      // outra passou por lá antes de ir para entrevista). Uma alcançou
+      // entrevista. Logo 1/2 = 50%.
+      expect(conversao['entrevista']).toBe(50);
+    });
+
+    it('etapa fora da ordem conhecida não recebe conversão inventada', async () => {
+      const ctx = new TenantContext(appPool);
+      const service = new JobService(new RequisitionService(), new JobRecrutadorService());
+      const { conversao } = await ctx.run(tenantId, (client) =>
+        service.funil(client, { tenantId, jobId: vagaFunilId }),
+      );
+      expect(conversao['etapa-inexistente']).toBeUndefined();
     });
   });
 
