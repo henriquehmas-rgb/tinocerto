@@ -1,6 +1,6 @@
 import React from "react";
 import { describe, expect, it, vi } from "vitest";
-import { render, screen, fireEvent, within } from "@testing-library/react";
+import { render, screen, fireEvent, within, act } from "@testing-library/react";
 import { TabelaDensa, type ColunaTabela } from "../TabelaDensa";
 
 interface ItemTeste {
@@ -55,6 +55,53 @@ describe("TabelaDensa", () => {
     expect(cabecalhoNome).toHaveAttribute("role", "columnheader");
     expect(screen.getByRole("columnheader", { name: "Nome" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Nome" })).not.toBeInTheDocument();
+  });
+
+  it("aria-sort reflete a coluna e a direcao ativas: ascending, descending e none", () => {
+    const { rerender } = renderTabela({ ordenacao: { coluna: "nome", direcao: "asc" } });
+    expect(screen.getByText("Nome").closest("th")).toHaveAttribute("aria-sort", "ascending");
+    // Coluna ordenavel mas nao ativa (Número) fica "none", nao ausente.
+    expect(screen.getByText("Número").closest("th")).toHaveAttribute("aria-sort", "none");
+
+    rerender(
+      <TabelaDensa
+        colunas={COLUNAS}
+        linhas={ITENS}
+        selecionados={new Set()}
+        onSelecaoChange={vi.fn()}
+        ordenacao={{ coluna: "nome", direcao: "desc" }}
+        onOrdenacaoChange={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Nome").closest("th")).toHaveAttribute("aria-sort", "descending");
+  });
+
+  it("cabecalho de coluna nao-ordenavel nao tem atributo aria-sort", () => {
+    const colunasSemOrdenacao: ColunaTabela<ItemTeste>[] = [
+      { chave: "nome", titulo: "Nome", largura: "1fr", render: (i) => i.nome },
+    ];
+    renderTabela({ colunas: colunasSemOrdenacao });
+    expect(screen.getByText("Nome").closest("th")).not.toHaveAttribute("aria-sort");
+  });
+
+  it("pressionar Enter no cabecalho ordenavel focado dispara onOrdenacaoChange com a chave da coluna", () => {
+    const onOrdenacaoChange = vi.fn();
+    renderTabela({ onOrdenacaoChange });
+    const cabecalhoNome = screen.getByText("Nome").closest("th")!;
+    fireEvent.keyDown(cabecalhoNome, { key: "Enter" });
+    expect(onOrdenacaoChange).toHaveBeenCalledWith("nome");
+  });
+
+  it("pressionar Espaco no cabecalho ordenavel dispara onOrdenacaoChange e previne o scroll padrao da pagina", () => {
+    const onOrdenacaoChange = vi.fn();
+    renderTabela({ onOrdenacaoChange });
+    const cabecalhoNome = screen.getByText("Nome").closest("th")!;
+    const evento = new KeyboardEvent("keydown", { key: " ", bubbles: true, cancelable: true });
+    act(() => {
+      cabecalhoNome.dispatchEvent(evento);
+    });
+    expect(onOrdenacaoChange).toHaveBeenCalledWith("nome");
+    expect(evento.defaultPrevented).toBe(true);
   });
 
   it("checkbox do cabecalho fica desmarcado quando nada esta selecionado", () => {
@@ -185,6 +232,7 @@ describe("TabelaDensa", () => {
     renderTabela({ selecionados: new Set(["b"]) });
     const linhaBruno = screen.getByText("Bruno").closest("tr")!;
     expect(linhaBruno).toHaveAttribute("data-selecionada", "true");
+    expect(linhaBruno).toHaveStyle({ background: "var(--pr-selected)" });
   });
 
   it("clicar no nome de uma coluna nao-ordenavel nao dispara onOrdenacaoChange", () => {
@@ -195,5 +243,17 @@ describe("TabelaDensa", () => {
     renderTabela({ colunas: colunasSemOrdenacao, onOrdenacaoChange });
     fireEvent.click(screen.getByText("Nome"));
     expect(onOrdenacaoChange).not.toHaveBeenCalled();
+  });
+
+  it("usa rotuloLinha para montar o aria-label do checkbox da linha quando fornecido", () => {
+    renderTabela({ rotuloLinha: (item) => item.nome });
+    const linhaBruno = screen.getByText("Bruno").closest("tr")!;
+    expect(within(linhaBruno).getByRole("checkbox", { name: "Selecionar linha Bruno" })).toBeInTheDocument();
+  });
+
+  it("sem rotuloLinha, o aria-label do checkbox da linha cai no id (comportamento atual preservado)", () => {
+    renderTabela();
+    const linhaBruno = screen.getByText("Bruno").closest("tr")!;
+    expect(within(linhaBruno).getByRole("checkbox", { name: "Selecionar linha b" })).toBeInTheDocument();
   });
 });

@@ -16,6 +16,11 @@ export interface TabelaDensaProps<T extends { id: string }> {
   onSelecaoChange: (proximo: Set<string>) => void;
   ordenacao: { coluna: string; direcao: "asc" | "desc" } | null;
   onOrdenacaoChange: (coluna: string) => void;
+  // Rótulo por item pro aria-label do checkbox da linha -- sem isto, cada
+  // linha caía no fallback de `linha.id` (o UUID cru), que um leitor de
+  // tela lê como ~36 caracteres de hex por linha. Opcional pra não quebrar
+  // consumidores/testes existentes que não passam essa prop.
+  rotuloLinha?: (item: T) => string;
 }
 
 function CheckboxCabecalho({
@@ -51,6 +56,7 @@ export function TabelaDensa<T extends { id: string }>({
   onSelecaoChange,
   ordenacao,
   onOrdenacaoChange,
+  rotuloLinha,
 }: TabelaDensaProps<T>) {
   // Âncora do shift+clique: id da última linha clicada individualmente,
   // não a ordem de seleção -- shift+clique seleciona o intervalo VISUAL
@@ -108,9 +114,23 @@ export function TabelaDensa<T extends { id: string }>({
         <tr
           role="row"
           className="grid items-center border-b border-border"
-          style={{ gridTemplateColumns: gridTemplate, gap: "12px", height: "34px" }}
+          style={{
+            gridTemplateColumns: gridTemplate,
+            gap: "12px",
+            height: "34px",
+            // Cabeçalho fixo ao rolar -- numa página cheia (25 linhas), sem
+            // isto o recrutador perdia de vista os títulos das colunas (e o
+            // indicador de ordenação) assim que rolava além das primeiras
+            // linhas. `background` sólido é indispensável aqui: sem ele o
+            // conteúdo rolando por baixo aparece por trás do texto do
+            // cabeçalho, o que fica pior do que não ter o sticky.
+            position: "sticky",
+            top: 0,
+            zIndex: 1,
+            background: "var(--pr-surface)",
+          }}
         >
-          <th role="cell" className="px-3">
+          <th role="columnheader" className="px-3">
             <CheckboxCabecalho
               todosSelecionados={todosSelecionados}
               algunsSelecionados={algunsSelecionados}
@@ -165,7 +185,7 @@ export function TabelaDensa<T extends { id: string }>({
               <td role="cell" className="px-3">
                 <input
                   type="checkbox"
-                  aria-label={`Selecionar linha ${linha.id}`}
+                  aria-label={`Selecionar linha ${rotuloLinha ? rotuloLinha(linha) : linha.id}`}
                   checked={selecionada}
                   onChange={(evento) => alternarLinha(linha.id, (evento.nativeEvent as MouseEvent).shiftKey)}
                   style={{ accentColor: "var(--pr-accent)" }}

@@ -32,4 +32,17 @@ describe("BarraSelecao", () => {
     fireEvent.click(screen.getByRole("button", { name: /limpar seleção/i }));
     expect(onLimparSelecao).toHaveBeenCalledTimes(1);
   });
+
+  it("botao mover etapa fica desabilitado quando desabilitado=true", () => {
+    render(<BarraSelecao quantidade={2} onMoverEtapa={vi.fn()} onLimparSelecao={vi.fn()} desabilitado />);
+    expect(screen.getByRole("button", { name: /mover etapa/i })).toBeDisabled();
+  });
+
+  it("botao mover etapa fica habilitado quando desabilitado esta ausente ou false", () => {
+    render(<BarraSelecao quantidade={2} onMoverEtapa={vi.fn()} onLimparSelecao={vi.fn()} />);
+    expect(screen.getByRole("button", { name: /mover etapa/i })).not.toBeDisabled();
+
+    render(<BarraSelecao quantidade={2} onMoverEtapa={vi.fn()} onLimparSelecao={vi.fn()} desabilitado={false} />);
+    expect(screen.getAllByRole("button", { name: /mover etapa/i })[1]).not.toBeDisabled();
+  });
 });
