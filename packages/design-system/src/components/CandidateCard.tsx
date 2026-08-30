@@ -1,5 +1,6 @@
 import React from "react";
 import { iniciaisDe } from "./PanelNav";
+import { TIPO_MIME_CANDIDATURA } from "./drag-payload";
 
 export interface CandidateCardChip {
   rotulo: string;
@@ -12,6 +13,17 @@ export interface CandidateCardProps {
   chips?: CandidateCardChip[];
   acao?: React.ReactNode;
   arrastavel?: boolean;
+  /**
+   * Payload que viaja no próprio evento nativo de drag (dataTransfer), em
+   * vez de um estado externo (ex.: ref na página) que fica desatualizado
+   * quando o drag é abortado sem soltar em lugar nenhum -- achado F3 da
+   * revisão final: sem isso, um drop de arquivo/texto alheio sobre uma
+   * coluna podia mover a candidatura errada usando o id da candidatura
+   * anterior. Também corrige o Firefox (achado F2): sem NENHUM
+   * dataTransfer.setData ao fim do dragstart, o Firefox aborta o drag
+   * (Chrome/Safari toleram um data store vazio).
+   */
+  payloadArraste?: string;
   onArrastarInicio?: () => void;
   /** Quando presente, o nome vira link para a candidatura (ex.: página de detalhe). */
   href?: string;
@@ -25,11 +37,22 @@ export function CandidateCard({
   chips = [],
   acao,
   arrastavel = false,
+  payloadArraste,
   onArrastarInicio,
   href,
   linkAs: Link = "a",
 }: CandidateCardProps) {
   const temFit = scoreAderencia !== null && scoreAderencia !== undefined;
+
+  function lidarComArrastarInicio(evento: React.DragEvent<HTMLDivElement>) {
+    if (payloadArraste !== undefined) {
+      evento.dataTransfer?.setData(TIPO_MIME_CANDIDATURA, payloadArraste);
+      // 'text/plain' também: é o que faz o Firefox aceitar o drag quando
+      // nenhum alvo lê o tipo customizado (ver TIPO_MIME_CANDIDATURA).
+      evento.dataTransfer?.setData("text/plain", payloadArraste);
+    }
+    onArrastarInicio?.();
+  }
 
   // O card raiz é `draggable`. Um <a href> nativo dentro dele também é
   // draggable por padrão, e o navegador prioriza o drag do link (arrastando a
@@ -51,7 +74,7 @@ export function CandidateCard({
     <div
       data-testid="candidate-card"
       draggable={arrastavel || undefined}
-      onDragStart={onArrastarInicio}
+      onDragStart={lidarComArrastarInicio}
       className="flex w-[228px] flex-col gap-2 rounded-card border border-border bg-surface px-3 py-[11px]"
       style={{ boxShadow: "var(--pr-shadow-rest)" }}
     >

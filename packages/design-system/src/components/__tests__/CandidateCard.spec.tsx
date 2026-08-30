@@ -2,6 +2,7 @@ import React from "react";
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { CandidateCard } from "../CandidateCard";
+import { TIPO_MIME_CANDIDATURA } from "../drag-payload";
 
 describe("CandidateCard", () => {
   it("mostra o nome e as iniciais no avatar", () => {
@@ -58,6 +59,28 @@ describe("CandidateCard", () => {
   it("não é arrastável por padrão", () => {
     render(<CandidateCard nome="Ana Souza" />);
     expect(screen.getByTestId("candidate-card")).not.toHaveAttribute("draggable", "true");
+  });
+
+  it("grava o payload no dataTransfer ao iniciar o drag, no tipo MIME customizado e em text/plain (Firefox aborta um drag cujo data store fica vazio)", () => {
+    const setData = vi.fn();
+    render(<CandidateCard nome="Ana Souza" arrastavel payloadArraste="app-1" />);
+    const card = screen.getByTestId("candidate-card");
+
+    fireEvent.dragStart(card, { dataTransfer: { setData } });
+
+    expect(setData).toHaveBeenCalledWith(TIPO_MIME_CANDIDATURA, "app-1");
+    expect(setData).toHaveBeenCalledWith("text/plain", "app-1");
+  });
+
+  it("não grava nada no dataTransfer quando payloadArraste não é passado", () => {
+    // Sem payload não há o que colocar no dataTransfer -- não deve
+    // lançar mesmo sem um dataTransfer real (jsdom não fornece um).
+    const onArrastarInicio = vi.fn();
+    render(<CandidateCard nome="Ana Souza" arrastavel onArrastarInicio={onArrastarInicio} />);
+    const card = screen.getByTestId("candidate-card");
+
+    expect(() => fireEvent.dragStart(card)).not.toThrow();
+    expect(onArrastarInicio).toHaveBeenCalledTimes(1);
   });
 
   it("renderiza o nome como link quando href é passado", () => {

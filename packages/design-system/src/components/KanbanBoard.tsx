@@ -12,7 +12,7 @@ export interface KanbanBoardProps<T> {
   itens: Record<string, T[]>;
   renderItem: (item: T, acao: React.ReactNode) => React.ReactNode;
   onMoverItem: (item: T, novaColuna: string) => void;
-  onSoltarItem?: (chaveDestino: string) => void;
+  onSoltarItem?: (chaveDestino: string, payload: string) => void;
   labelMover?: (item: T) => string;
   mensagemVazia?: string;
 }
