@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { KanbanBoard, CandidateCard, Card, Badge, Button, Table, TabelaDensa, Paginacao, BarraSelecao, Toast, type ColunaTabela } from '@tinocerto/design-system';
@@ -25,6 +25,11 @@ const COLUNAS_PADRAO = [
   { chave: 'triagem', titulo: 'Triagem' },
   { chave: 'entrevista', titulo: 'Entrevista' },
 ];
+
+// Tamanho de página da tabela densa -- usado tanto no cálculo de
+// paginação quanto no rótulo "X–Y de Z" do componente Paginacao, pra não
+// duplicar o literal em dois lugares que precisam concordar.
+const ITENS_POR_PAGINA = 25;
 
 function capitalizar(texto: string): string {
   if (!texto) return texto;
@@ -72,6 +77,29 @@ export default function FunilPage() {
   // conhecidas (`colunas`) como destino possível -- mais simples que tentar
   // calcular a interseção de destinos válidos por item.
   const [mostrandoMenuLote, setMostrandoMenuLote] = useState(false);
+  // Guarda de reentrância pro lote (mover ou desfazer): `loteEmAndamento`
+  // (state) só serve pra desabilitar botão na tela -- o próprio React
+  // re-renderiza a cada mudança dele. Mas o clique de "Desfazer" do toast
+  // é um closure criado e guardado dentro do state `toast` no meio de
+  // moverEmLote, que roda depois de vários `await` -- esse closure fica
+  // preso pra sempre ao valor de `loteEmAndamento` que existia no render
+  // em que moverEmLote foi disparado (sempre `false`, já que o lote não
+  // tinha começado ainda), então checar o state ali NUNCA bloquearia nada.
+  // `loteEmAndamentoRef` existe pra resolver isso: é mutável e sempre
+  // atual, então o guard dentro desses closures "presos" lê o valor certo
+  // não importa quantos renders tenham passado.
+  const [loteEmAndamento, setLoteEmAndamento] = useState(false);
+  const loteEmAndamentoRef = useRef(false);
+
+  function iniciarLote() {
+    loteEmAndamentoRef.current = true;
+    setLoteEmAndamento(true);
+  }
+
+  function finalizarLote() {
+    loteEmAndamentoRef.current = false;
+    setLoteEmAndamento(false);
+  }
 
   const carregar = useCallback(() => {
     staffPanelClient
@@ -114,6 +142,12 @@ export default function FunilPage() {
   function trocarVisao(proxima: VisaoFunil) {
     setVisao(proxima);
     salvarVisaoPreferida(proxima);
+    // A seleção (e a barra/menu de lote que ela liga) é um conceito da
+    // visão em tabela -- sem isto, trocar pra kanban com linhas
+    // selecionadas deixava a "N selecionados" e o menu de destino
+    // grudados na tela por cima do kanban.
+    setSelecionados(new Set());
+    setMostrandoMenuLote(false);
   }
 
   async function handleGerarRoteiro() {
@@ -203,56 +237,103 @@ export default function FunilPage() {
   }
 
   async function moverEmLote(applicationIds: string[], etapaDestino: string) {
-    // Cada item guarda a PRÓPRIA etapa de origem -- o lote pode conter
-    // candidaturas vindas de etapas diferentes, e desfazer precisa devolver
-    // cada uma pra onde ela estava, não pra uma etapa comum.
-    const origem = new Map<string, string>();
-    for (const [etapa, candidaturas] of Object.entries(funil)) {
-      for (const c of candidaturas) {
-        if (applicationIds.includes(c.id)) origem.set(c.id, etapa);
-      }
-    }
+    // Guarda contra um segundo lote (mover ou desfazer) começar enquanto
+    // este ainda roda -- ver comentário de loteEmAndamentoRef acima.
+    if (loteEmAndamentoRef.current) return;
+    iniciarLote();
 
-    let sucesso = 0;
-    let falha = 0;
-    // Sequencial, não Promise.all: o pool de conexões do Postgres tem
-    // max=20 -- disparar dezenas em paralelo o esgotaria sob uso
-    // concorrente de vários recrutadores.
-    for (const id of applicationIds) {
-      try {
-        await staffPanelClient.moverEtapa(id, etapaDestino);
-        sucesso++;
-      } catch {
-        falha++;
-      }
-    }
-
+    // Otimista: fecha a barra de seleção já no disparo, não só depois do
+    // loop sequencial terminar -- N requisições podem levar um tempo, e a
+    // barra continuar na tela por todo esse tempo tanto mente sobre o que
+    // já foi disparado quanto deixa "Mover etapa" clicável de novo (a
+    // própria seleção some, então não sobra o que mover de novo).
     setSelecionados(new Set());
-    carregar();
 
-    const mensagem = falha === 0 ? `${sucesso} movidos` : `${sucesso} movidos, ${falha} falharam`;
-    setToast({
-      mensagem,
-      acao:
-        sucesso > 0
-          ? {
-              rotulo: 'Desfazer',
-              onClick: () => void desfazerLote([...origem.entries()].filter(([id]) => id)),
-            }
-          : undefined,
-    });
+    try {
+      // Cada item guarda a PRÓPRIA etapa de origem -- o lote pode conter
+      // candidaturas vindas de etapas diferentes, e desfazer precisa
+      // devolver cada uma pra onde ela estava, não pra uma etapa comum.
+      const origem = new Map<string, string>();
+      for (const [etapa, candidaturas] of Object.entries(funil)) {
+        for (const c of candidaturas) {
+          if (applicationIds.includes(c.id)) origem.set(c.id, etapa);
+        }
+      }
+
+      // Mesma regra de resolverDestino do caminho single-candidate: soltar
+      // na própria etapa não é um movimento. Sem este filtro, cada item já
+      // na etapa de destino ainda dispararia moverEtapa -- a API aceita
+      // (from === to) e grava uma transição e um evento de outbox à toa.
+      const idsParaMover = applicationIds.filter((id) => origem.get(id) !== etapaDestino);
+
+      if (idsParaMover.length === 0) {
+        // Nada pra mover, nada pra reportar -- nem toast "0 movidos", nem
+        // recarregar um funil que não mudou.
+        return;
+      }
+
+      let sucesso = 0;
+      let falha = 0;
+      const idsComSucesso = new Set<string>();
+      // Sequencial, não Promise.all: o pool de conexões do Postgres tem
+      // max=20 -- disparar dezenas em paralelo o esgotaria sob uso
+      // concorrente de vários recrutadores.
+      for (const id of idsParaMover) {
+        try {
+          await staffPanelClient.moverEtapa(id, etapaDestino);
+          sucesso++;
+          idsComSucesso.add(id);
+        } catch {
+          falha++;
+        }
+      }
+
+      carregar();
+
+      const mensagem = falha === 0 ? `${sucesso} movidos` : `${sucesso} movidos, ${falha} falharam`;
+      setToast({
+        mensagem,
+        acao:
+          sucesso > 0
+            ? {
+                rotulo: 'Desfazer',
+                onClick: () => {
+                  if (loteEmAndamentoRef.current) return;
+                  // Só desfaz quem realmente moveu -- um item que falhou
+                  // nunca saiu da etapa original, e mandar ele de volta
+                  // pra lá seria uma transição from===to tão fantasma
+                  // quanto a do achado F2.
+                  void desfazerLote([...origem.entries()].filter(([id]) => idsComSucesso.has(id)));
+                },
+              }
+            : undefined,
+      });
+    } finally {
+      finalizarLote();
+    }
   }
 
   async function desfazerLote(itens: [string, string][]) {
-    for (const [id, etapaAnterior] of itens) {
-      try {
-        await staffPanelClient.moverEtapa(id, etapaAnterior);
-      } catch (e) {
-        setErro((e as Error).message);
-      }
-    }
-    carregar();
+    if (loteEmAndamentoRef.current) return;
+    iniciarLote();
+    // Fecha (e descarta a ação de) o toast já no clique, antes do loop --
+    // senão o botão "Desfazer" continua na tela e clicável durante todo o
+    // loop sequencial, e um segundo clique nesse vão disparava um segundo
+    // desfazerLote com as mesmas transições duplicadas.
     setToast(null);
+
+    try {
+      for (const [id, etapaAnterior] of itens) {
+        try {
+          await staffPanelClient.moverEtapa(id, etapaAnterior);
+        } catch (e) {
+          setErro((e as Error).message);
+        }
+      }
+      carregar();
+    } finally {
+      finalizarLote();
+    }
   }
 
   function handleOrdenacaoChange(coluna: string) {
@@ -279,7 +360,18 @@ export default function FunilPage() {
   ].map((coluna) => ({ ...coluna, conversao: conversao[coluna.chave] ?? null }));
 
   const linhasOrdenadas = ordenarCandidaturas(achatarFunil(funil), ordenacao, new Date(), colunas.map((c) => c.chave));
-  const { pagina: linhasDaPagina, totalPaginas } = paginar(linhasOrdenadas, pagina, 25);
+  const { pagina: linhasDaPagina, totalPaginas } = paginar(linhasOrdenadas, pagina, ITENS_POR_PAGINA);
+
+  // Um refetch (após mover, mover em lote ou desfazer) pode encolher o
+  // funil o bastante pra derrubar o total de páginas abaixo da página
+  // atual -- sem isto, um recrutador na página 5 que acabou de ver as
+  // últimas linhas saírem dali ficava preso numa tabela vazia, só
+  // recuperável clicando "Anterior". Roda a cada novo totalPaginas (não
+  // uma vez só no mount), então funciona não importa quando o carregar()
+  // resolve em relação ao render.
+  useEffect(() => {
+    setPagina((atual) => Math.min(atual, totalPaginas));
+  }, [totalPaginas]);
 
   const colunasTabela: ColunaTabela<LinhaFunil>[] = [
     { chave: 'nome', titulo: 'Nome', largura: '1fr', ordenavel: true, render: (l) => (
@@ -403,7 +495,10 @@ export default function FunilPage() {
           {selecionados.size > 0 && (
             <BarraSelecao
               quantidade={selecionados.size}
-              onMoverEtapa={() => setMostrandoMenuLote(true)}
+              onMoverEtapa={() => {
+                if (loteEmAndamento) return;
+                setMostrandoMenuLote(true);
+              }}
               onLimparSelecao={() => setSelecionados(new Set())}
             />
           )}
@@ -445,7 +540,7 @@ export default function FunilPage() {
               paginaAtual={pagina}
               totalPaginas={totalPaginas}
               totalItens={linhasOrdenadas.length}
-              itensPorPagina={25}
+              itensPorPagina={ITENS_POR_PAGINA}
               onPaginaChange={handlePaginaChange}
             />
           </>
@@ -457,7 +552,9 @@ export default function FunilPage() {
               <Button
                 key={c.chave}
                 variant="secondary"
+                disabled={loteEmAndamento}
                 onClick={() => {
+                  if (loteEmAndamento) return;
                   setMostrandoMenuLote(false);
                   void moverEmLote([...selecionados], c.chave);
                 }}

@@ -52,6 +52,11 @@ vi.mock('../../../../../../lib/staff-panel-client', () => ({
 describe('FunilPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // A visão preferida (kanban/tabela) persiste em localStorage entre
+    // renders -- sem limpar aqui, um teste que troca de visão vaza esse
+    // estado pro próximo teste que rodar em seguida, ficando dependente
+    // da ordem dos testes no arquivo.
+    window.localStorage.clear();
     // Provide default mock returns for new methods
     vi.mocked(staffPanelClient.obterVaga).mockResolvedValue({
       id: 'job-1',
@@ -615,23 +620,28 @@ describe('FunilPage', () => {
   });
 
   it('desfazer devolve cada candidatura a sua propria etapa anterior', async () => {
+    // Ana em triagem e Bruno em oferta -- os dois PRECISAM mover pra
+    // entrevista (nenhum já está lá), senão o filtro do achado F2 (que
+    // pula quem já está na etapa de destino) descartaria Bruno da conta.
     vi.mocked(staffPanelClient.obterFunil)
       .mockResolvedValueOnce({
         funil: {
           triagem: [{ id: 'app-1', personId: 'p-1', nomeCandidato: 'Ana', criadoEm: new Date().toISOString(), assessmentStatus: null, origemCanal: null, scoreAderencia: null }],
-          entrevista: [{ id: 'app-2', personId: 'p-2', nomeCandidato: 'Bruno', criadoEm: new Date().toISOString(), assessmentStatus: null, origemCanal: null, scoreAderencia: null }],
+          entrevista: [],
+          oferta: [{ id: 'app-2', personId: 'p-2', nomeCandidato: 'Bruno', criadoEm: new Date().toISOString(), assessmentStatus: null, origemCanal: null, scoreAderencia: null }],
         },
-        conversao: { triagem: null, entrevista: null },
+        conversao: { triagem: null, entrevista: null, oferta: null },
       })
       .mockResolvedValue({
         funil: {
           triagem: [],
+          oferta: [],
           entrevista: [
             { id: 'app-1', personId: 'p-1', nomeCandidato: 'Ana', criadoEm: new Date().toISOString(), assessmentStatus: null, origemCanal: null, scoreAderencia: null },
             { id: 'app-2', personId: 'p-2', nomeCandidato: 'Bruno', criadoEm: new Date().toISOString(), assessmentStatus: null, origemCanal: null, scoreAderencia: null },
           ],
         },
-        conversao: { triagem: null, entrevista: null },
+        conversao: { triagem: null, entrevista: null, oferta: null },
       });
     vi.mocked(staffPanelClient.moverEtapa).mockResolvedValue(undefined);
 
@@ -650,10 +660,269 @@ describe('FunilPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /desfazer/i }));
 
     await waitFor(() => expect(staffPanelClient.moverEtapa).toHaveBeenCalledTimes(2));
-    // Ana estava em triagem, Bruno estava em entrevista -- cada um volta
+    // Ana estava em triagem, Bruno estava em oferta -- cada um volta
     // pra ETAPA PRÓPRIA, não pra uma etapa comum.
     expect(staffPanelClient.moverEtapa).toHaveBeenCalledWith('app-1', 'triagem');
-    expect(staffPanelClient.moverEtapa).toHaveBeenCalledWith('app-2', 'entrevista');
+    expect(staffPanelClient.moverEtapa).toHaveBeenCalledWith('app-2', 'oferta');
+  });
+
+  it('mover em lote nunca tem mais de uma chamada a API em andamento por vez (achado F1)', async () => {
+    // Regressão: um teste que só checa a ORDEM das chamadas (toHaveBeenNthCalledWith)
+    // não prova sequencialidade -- .map() + Promise.allSettled produz a mesma
+    // ordem de chamadas, só que todas disparadas antes de qualquer await
+    // resolver. Este teste torna o paralelismo observável contando quantas
+    // chamadas a moverEtapa estão em andamento (iniciadas e ainda não
+    // resolvidas) a cada instante.
+    vi.mocked(staffPanelClient.obterFunil).mockResolvedValue({
+      funil: {
+        triagem: [
+          { id: 'app-1', personId: 'p-1', nomeCandidato: 'Ana', criadoEm: new Date().toISOString(), assessmentStatus: null, origemCanal: null, scoreAderencia: null },
+        ],
+        entrevista: [
+          { id: 'app-2', personId: 'p-2', nomeCandidato: 'Bruno', criadoEm: new Date().toISOString(), assessmentStatus: null, origemCanal: null, scoreAderencia: null },
+        ],
+        oferta: [],
+      },
+      conversao: { triagem: null, entrevista: null, oferta: null },
+    });
+
+    let emAndamento = 0;
+    let maxEmAndamento = 0;
+    vi.mocked(staffPanelClient.moverEtapa).mockImplementation(async () => {
+      emAndamento++;
+      maxEmAndamento = Math.max(maxEmAndamento, emAndamento);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      emAndamento--;
+    });
+
+    render(<FunilPage />);
+    await waitFor(() => expect(screen.getByText('Ana')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /visão em tabela/i }));
+    await waitFor(() => expect(screen.getByRole('table')).toBeInTheDocument());
+
+    fireEvent.click(within(screen.getByText('Ana').closest('tr')!).getByRole('checkbox'));
+    fireEvent.click(within(screen.getByText('Bruno').closest('tr')!).getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: /mover etapa/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^oferta$/i }));
+
+    await waitFor(() => expect(staffPanelClient.moverEtapa).toHaveBeenCalledTimes(2));
+    expect(maxEmAndamento).toBe(1);
+  });
+
+  it('lote ignora candidaturas já na etapa de destino, mesmo quando outras do lote precisam mover (achado F2)', async () => {
+    vi.mocked(staffPanelClient.obterFunil).mockResolvedValue({
+      funil: {
+        triagem: [
+          { id: 'app-1', personId: 'p-1', nomeCandidato: 'Ana', criadoEm: new Date().toISOString(), assessmentStatus: null, origemCanal: null, scoreAderencia: null },
+        ],
+        entrevista: [
+          { id: 'app-2', personId: 'p-2', nomeCandidato: 'Bruno', criadoEm: new Date().toISOString(), assessmentStatus: null, origemCanal: null, scoreAderencia: null },
+          { id: 'app-3', personId: 'p-3', nomeCandidato: 'Carla', criadoEm: new Date().toISOString(), assessmentStatus: null, origemCanal: null, scoreAderencia: null },
+        ],
+      },
+      conversao: { triagem: null, entrevista: null },
+    });
+    vi.mocked(staffPanelClient.moverEtapa).mockResolvedValue(undefined);
+
+    render(<FunilPage />);
+    await waitFor(() => expect(screen.getByText('Ana')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /visão em tabela/i }));
+    await waitFor(() => expect(screen.getByRole('table')).toBeInTheDocument());
+
+    fireEvent.click(within(screen.getByText('Ana').closest('tr')!).getByRole('checkbox'));
+    fireEvent.click(within(screen.getByText('Bruno').closest('tr')!).getByRole('checkbox'));
+    fireEvent.click(within(screen.getByText('Carla').closest('tr')!).getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: /mover etapa/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^entrevista$/i }));
+
+    // Só Ana (triagem) precisava mover -- Bruno e Carla já estavam em
+    // entrevista, então não geram chamada nenhuma nem entram na contagem.
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('1 movidos'));
+    expect(staffPanelClient.moverEtapa).toHaveBeenCalledTimes(1);
+    expect(staffPanelClient.moverEtapa).toHaveBeenCalledWith('app-1', 'entrevista');
+  });
+
+  it('lote inteiro já na etapa de destino não chama a API nem mostra toast (achado F2)', async () => {
+    vi.mocked(staffPanelClient.obterFunil).mockResolvedValue({
+      funil: {
+        triagem: [
+          { id: 'app-1', personId: 'p-1', nomeCandidato: 'Ana', criadoEm: new Date().toISOString(), assessmentStatus: null, origemCanal: null, scoreAderencia: null },
+          { id: 'app-2', personId: 'p-2', nomeCandidato: 'Bruno', criadoEm: new Date().toISOString(), assessmentStatus: null, origemCanal: null, scoreAderencia: null },
+        ],
+      },
+      conversao: { triagem: null },
+    });
+    vi.mocked(staffPanelClient.moverEtapa).mockResolvedValue(undefined);
+
+    render(<FunilPage />);
+    await waitFor(() => expect(screen.getByText('Ana')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /visão em tabela/i }));
+    await waitFor(() => expect(screen.getByRole('table')).toBeInTheDocument());
+
+    fireEvent.click(within(screen.getByText('Ana').closest('tr')!).getByRole('checkbox'));
+    fireEvent.click(within(screen.getByText('Bruno').closest('tr')!).getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: /mover etapa/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^triagem$/i }));
+
+    // A seleção some (otimista) mesmo quando não havia nada pra mover de
+    // verdade -- é esse desaparecimento que sinaliza "processado".
+    await waitFor(() => expect(screen.queryByText('2 selecionados')).toBeNull());
+    expect(staffPanelClient.moverEtapa).not.toHaveBeenCalled();
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  it('desfazer após lote parcial só reenvia quem realmente moveu, não quem falhou (achado F3)', async () => {
+    vi.mocked(staffPanelClient.obterFunil)
+      .mockResolvedValueOnce({
+        funil: {
+          triagem: [
+            { id: 'app-1', personId: 'p-1', nomeCandidato: 'Ana', criadoEm: new Date().toISOString(), assessmentStatus: null, origemCanal: null, scoreAderencia: null },
+            { id: 'app-2', personId: 'p-2', nomeCandidato: 'Bruno', criadoEm: new Date().toISOString(), assessmentStatus: null, origemCanal: null, scoreAderencia: null },
+          ],
+          entrevista: [],
+        },
+        conversao: { triagem: null, entrevista: null },
+      })
+      .mockResolvedValue({
+        funil: {
+          triagem: [
+            { id: 'app-2', personId: 'p-2', nomeCandidato: 'Bruno', criadoEm: new Date().toISOString(), assessmentStatus: null, origemCanal: null, scoreAderencia: null },
+          ],
+          entrevista: [
+            { id: 'app-1', personId: 'p-1', nomeCandidato: 'Ana', criadoEm: new Date().toISOString(), assessmentStatus: null, origemCanal: null, scoreAderencia: null },
+          ],
+        },
+        conversao: { triagem: null, entrevista: null },
+      });
+    // app-1 (Ana) move com sucesso, app-2 (Bruno) falha -- nunca sai de
+    // triagem de verdade.
+    vi.mocked(staffPanelClient.moverEtapa).mockImplementation(async (id: unknown) => {
+      if (id === 'app-2') throw new Error('Transição não permitida');
+    });
+
+    render(<FunilPage />);
+    await waitFor(() => expect(screen.getByText('Ana')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /visão em tabela/i }));
+    await waitFor(() => expect(screen.getByRole('table')).toBeInTheDocument());
+
+    fireEvent.click(within(screen.getByText('Ana').closest('tr')!).getByRole('checkbox'));
+    fireEvent.click(within(screen.getByText('Bruno').closest('tr')!).getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: /mover etapa/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^entrevista$/i }));
+
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('1 movidos, 1 falharam'));
+
+    vi.mocked(staffPanelClient.moverEtapa).mockClear();
+    vi.mocked(staffPanelClient.moverEtapa).mockResolvedValue(undefined);
+    fireEvent.click(screen.getByRole('button', { name: /desfazer/i }));
+
+    // Só Ana (quem moveu de verdade) volta -- Bruno nunca saiu de triagem,
+    // então mandar ele "de volta" pra lá seria uma transição fantasma.
+    await waitFor(() => expect(staffPanelClient.moverEtapa).toHaveBeenCalledTimes(1));
+    expect(staffPanelClient.moverEtapa).toHaveBeenCalledWith('app-1', 'triagem');
+  });
+
+  it('trocar de tabela para kanban limpa a seleção e fecha o menu de lote (achado F4)', async () => {
+    vi.mocked(staffPanelClient.obterFunil).mockResolvedValue({
+      funil: {
+        triagem: [
+          { id: 'app-1', personId: 'p-1', nomeCandidato: 'Ana', criadoEm: new Date().toISOString(), assessmentStatus: null, origemCanal: null, scoreAderencia: null },
+        ],
+      },
+      conversao: { triagem: null },
+    });
+
+    render(<FunilPage />);
+    await waitFor(() => expect(screen.getByText('Ana')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /visão em tabela/i }));
+    await waitFor(() => expect(screen.getByRole('table')).toBeInTheDocument());
+
+    fireEvent.click(within(screen.getByText('Ana').closest('tr')!).getByRole('checkbox'));
+    await waitFor(() => expect(screen.getByText('1 selecionado')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /mover etapa/i }));
+    expect(screen.getByRole('button', { name: /^triagem$/i })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /visão em kanban/i }));
+
+    expect(screen.queryByText('1 selecionado')).toBeNull();
+    expect(screen.queryByRole('button', { name: /mover etapa/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^triagem$/i })).toBeNull();
+  });
+
+  it('clicar "Desfazer" duas vezes rápido só dispara um conjunto de chamadas (achado F6)', async () => {
+    vi.mocked(staffPanelClient.obterFunil).mockResolvedValue({
+      funil: {
+        triagem: [
+          { id: 'app-1', personId: 'p-1', nomeCandidato: 'Ana', criadoEm: new Date().toISOString(), assessmentStatus: null, origemCanal: null, scoreAderencia: null },
+        ],
+        entrevista: [],
+      },
+      conversao: { triagem: null, entrevista: null },
+    });
+    vi.mocked(staffPanelClient.moverEtapa).mockResolvedValue(undefined);
+
+    render(<FunilPage />);
+    await waitFor(() => expect(screen.getByText('Ana')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /visão em tabela/i }));
+    await waitFor(() => expect(screen.getByRole('table')).toBeInTheDocument());
+
+    fireEvent.click(within(screen.getByText('Ana').closest('tr')!).getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: /mover etapa/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^entrevista$/i }));
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('1 movidos'));
+
+    vi.mocked(staffPanelClient.moverEtapa).mockClear();
+    const botaoDesfazer = screen.getByRole('button', { name: /desfazer/i });
+    fireEvent.click(botaoDesfazer);
+    fireEvent.click(botaoDesfazer);
+
+    await waitFor(() => expect(staffPanelClient.moverEtapa).toHaveBeenCalledTimes(1));
+    expect(staffPanelClient.moverEtapa).toHaveBeenCalledWith('app-1', 'triagem');
+    // O toast (e o botão "Desfazer" junto) some assim que o primeiro
+    // clique é processado -- não sobra nada pra um segundo clique acionar.
+    expect(screen.queryByRole('button', { name: /desfazer/i })).toBeNull();
+  });
+
+  it('página corrente é reduzida quando um refetch encolhe o total de páginas (achado F7)', async () => {
+    const candidatura = (i: number) => ({
+      id: `app-${i}`,
+      personId: `p-${i}`,
+      nomeCandidato: `Candidato ${i}`,
+      criadoEm: new Date().toISOString(),
+      assessmentStatus: null,
+      origemCanal: null,
+      scoreAderencia: null,
+    });
+    const muitasCandidaturas = Array.from({ length: 26 }, (_, i) => candidatura(i + 1));
+
+    vi.mocked(staffPanelClient.obterFunil)
+      .mockResolvedValueOnce({
+        funil: { triagem: muitasCandidaturas, entrevista: [] },
+        conversao: { triagem: null, entrevista: null },
+      })
+      .mockResolvedValue({
+        funil: { triagem: [candidatura(1)], entrevista: [] },
+        conversao: { triagem: null, entrevista: null },
+      });
+    vi.mocked(staffPanelClient.moverEtapa).mockResolvedValue(undefined);
+
+    render(<FunilPage />);
+    await waitFor(() => expect(screen.getByText('Candidato 1')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /visão em tabela/i }));
+    await waitFor(() => expect(screen.getByRole('table')).toBeInTheDocument());
+
+    // Vai pra página 2, onde só o 26º candidato aparece (25 por página).
+    fireEvent.click(screen.getByRole('button', { name: 'Próxima' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Anterior' })).not.toBeDisabled());
+    await waitFor(() => expect(screen.getByText('Candidato 26')).toBeInTheDocument());
+
+    fireEvent.click(within(screen.getByText('Candidato 26').closest('tr')!).getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: /mover etapa/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^entrevista$/i }));
+
+    // O refetch devolve só 1 candidatura no total (1 página) -- a página 2
+    // em que o recrutador estava não existe mais, e precisa voltar pra 1.
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Anterior' })).toBeDisabled());
   });
 
 });
