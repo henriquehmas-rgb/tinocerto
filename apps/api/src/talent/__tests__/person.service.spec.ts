@@ -1,4 +1,4 @@
-import { Pool } from 'pg';
+import { Pool, PoolClient } from 'pg';
 import { EnvelopeEncryptionService } from '../envelope-encryption.service';
 import { PersonService, QUERY_HABILIDADES_POR_PESSOA, QUERY_PERFIL_CITAVEL_POR_PESSOA } from '../person.service';
 
@@ -226,5 +226,81 @@ describe('PersonService', () => {
       expect(colunasPermitidas).toContain(coluna);
     }
     expect(colunasNaQuery.has('resumo')).toBe(false);
+  });
+
+  // [R2a / Kanban Enriquecido] habilidadesEmLote é a versão em lote de
+  // habilidades() -- existe porque o funil precisa do score de aderência de
+  // todos os candidatos de uma vaga, e chamar habilidades() em laço daria
+  // uma consulta por candidato. Este arquivo não tem ctx/TenantContext nem
+  // appPool -- person/person_profile são tabelas globais (sem tenant_id),
+  // então os demais testes desta suíte já exercitam o serviço direto com
+  // adminPool.connect(); este describe segue o mesmo padrão.
+  describe('habilidadesEmLote', () => {
+    let pessoaComPerfil: string;
+    let pessoaSemPerfil: string;
+
+    beforeAll(async () => {
+      const encryption = new EnvelopeEncryptionService();
+      const service = new PersonService(encryption);
+      const client = await adminPool.connect();
+      try {
+        const a = await service.create(client, {
+          cpf: '39053344705',
+          nome: 'Com Perfil',
+          emailPrincipal: 'com@lote.example',
+        });
+        const b = await service.create(client, {
+          cpf: '19131243055',
+          nome: 'Sem Perfil',
+          emailPrincipal: 'sem@lote.example',
+        });
+        pessoaComPerfil = a.id;
+        pessoaSemPerfil = b.id;
+      } finally {
+        client.release();
+      }
+      await adminPool.query(
+        `INSERT INTO person_profile (person_id, experiencias, formacao, habilidades)
+         VALUES ($1, '[]'::jsonb, '[]'::jsonb, $2::jsonb)`,
+        [pessoaComPerfil, JSON.stringify([{ nome: 'TypeScript' }, { nome: 'Postgres' }])],
+      );
+    });
+
+    afterAll(async () => {
+      await adminPool.query('DELETE FROM person_profile WHERE person_id = ANY($1)', [
+        [pessoaComPerfil, pessoaSemPerfil],
+      ]);
+      await adminPool.query('DELETE FROM person WHERE id = ANY($1)', [[pessoaComPerfil, pessoaSemPerfil]]);
+    });
+
+    it('devolve os nomes das habilidades por pessoa', async () => {
+      const service = new PersonService(new EnvelopeEncryptionService());
+      const client = await adminPool.connect();
+      try {
+        const mapa = await service.habilidadesEmLote(client, [pessoaComPerfil, pessoaSemPerfil]);
+        expect(mapa.get(pessoaComPerfil)).toEqual(['TypeScript', 'Postgres']);
+      } finally {
+        client.release();
+      }
+    });
+
+    it('omite do mapa quem não tem perfil, em vez de devolver lista vazia', async () => {
+      const service = new PersonService(new EnvelopeEncryptionService());
+      const client = await adminPool.connect();
+      try {
+        const mapa = await service.habilidadesEmLote(client, [pessoaComPerfil, pessoaSemPerfil]);
+        expect(mapa.has(pessoaSemPerfil)).toBe(false);
+      } finally {
+        client.release();
+      }
+    });
+
+    it('com lista vazia não consulta o banco e devolve mapa vazio', async () => {
+      const service = new PersonService(new EnvelopeEncryptionService());
+      const client = { query: jest.fn() } as unknown as PoolClient;
+      const mapa = await service.habilidadesEmLote(client, []);
+      expect(mapa.size).toBe(0);
+      expect(client.query).not.toHaveBeenCalled();
+    });
   });
 });

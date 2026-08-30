@@ -51,6 +51,14 @@ function hashCpf(cpf: string): string {
 // Testada em __tests__/person.service.spec.ts.
 export const QUERY_HABILIDADES_POR_PESSOA = `SELECT habilidades FROM person_profile WHERE person_id = $1`;
 
+// Allowlist estrutural irmã de QUERY_HABILIDADES_POR_PESSOA: mesma coluna,
+// mesma tabela, só que para várias pessoas de uma vez. Existe porque o
+// funil precisa do score de aderência de todos os candidatos de uma vaga e
+// chamar habilidades() em laço daria uma consulta por candidato.
+// Selecionar `person_id` aqui é necessário para montar o Map de volta --
+// nunca selecione `resumo`/`experiencias`/`formacao`.
+export const QUERY_HABILIDADES_EM_LOTE = `SELECT person_id, habilidades FROM person_profile WHERE person_id = ANY($1)`;
+
 // [Fase 3c / Copiloto] Allowlist estrutural irmã da acima -- segunda (e
 // última) query autorizada contra person_profile fora deste arquivo.
 // Seleciona SÓ experiencias/formacao/habilidades (cada item com
@@ -116,6 +124,25 @@ export class PersonService {
     ]);
     if (result.rows.length === 0) return [];
     return (result.rows[0].habilidades ?? []).map((h) => h.nome);
+  }
+
+  /**
+   * Versão em lote de habilidades(). Mesmo contrato: devolve só os nomes.
+   * Pessoa sem perfil simplesmente NÃO aparece no Map -- quem consome trata
+   * ausência como lista vazia. Lista vazia de entrada não toca o banco.
+   */
+  async habilidadesEmLote(client: PoolClient, personIds: string[]): Promise<Map<string, string[]>> {
+    const mapa = new Map<string, string[]>();
+    if (personIds.length === 0) return mapa;
+
+    const result = await client.query<{ person_id: string; habilidades: { nome: string }[] | null }>(
+      QUERY_HABILIDADES_EM_LOTE,
+      [personIds],
+    );
+    for (const row of result.rows) {
+      mapa.set(row.person_id, (row.habilidades ?? []).map((h) => h.nome));
+    }
+    return mapa;
   }
 
   /**
