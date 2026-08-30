@@ -49,6 +49,14 @@ describe("TabelaDensa", () => {
     expect(onOrdenacaoChange).toHaveBeenCalledWith("nome");
   });
 
+  it("cabecalho de coluna ordenavel mantem role columnheader (nao button) para preservar a semantica de coluna para leitores de tela", () => {
+    renderTabela();
+    const cabecalhoNome = screen.getByText("Nome").closest("th")!;
+    expect(cabecalhoNome).toHaveAttribute("role", "columnheader");
+    expect(screen.getByRole("columnheader", { name: "Nome" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Nome" })).not.toBeInTheDocument();
+  });
+
   it("checkbox do cabecalho fica desmarcado quando nada esta selecionado", () => {
     renderTabela({ selecionados: new Set() });
     const checkboxCabecalho = screen.getByRole("checkbox", { name: /selecionar todos/i });

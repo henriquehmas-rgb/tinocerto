@@ -129,7 +129,7 @@ export function TabelaDensa<T extends { id: string }>({
             return (
               <th
                 key={coluna.chave}
-                role={coluna.ordenavel ? "button" : "columnheader"}
+                role="columnheader"
                 tabIndex={coluna.ordenavel ? 0 : undefined}
                 aria-sort={ariaSort}
                 className={`font-ui text-xs font-medium text-text-secondary ${
