@@ -235,10 +235,21 @@ export class JobService {
     return { funil, conversao };
   }
 
-  // "Alcançou a etapa" = está nela agora OU tem transição com to_state nela.
-  // O OU é necessário: candidaturas nascem em 'triagem' sem gerar linha em
-  // pipeline_stage_transition, então contar só transições daria zero para a
-  // primeira etapa e conversão nula para toda a esteira.
+  // "Alcançou a etapa" = está nela agora (etapa_funil atual) OU tem uma
+  // transição com to_state nela OU tem uma transição com from_state nela.
+  // O ramo do estado atual é necessário: candidaturas nascem em 'triagem'
+  // sem gerar linha em pipeline_stage_transition, então contar só
+  // transições daria zero para a primeira etapa e conversão nula para toda
+  // a esteira.
+  //
+  // AdverseImpactSnapshotService.recompute (insights/adverse-impact-snapshot.service.ts)
+  // responde a mesma pergunta ("quem alcançou a etapa X?") com uma
+  // definição deliberadamente diferente (baseline literal 'triagem' UNION
+  // to_state, sem from_state e sem olhar o estado atual) -- os dois
+  // divergem em candidaturas que já saíram da primeira etapa mas não têm
+  // transição para a etapa em questão. Ver o comentário lá para a
+  // justificativa daquela definição; não convirja os dois aqui sem revisar
+  // ambos os conjuntos de testes.
   private async conversaoPorEtapa(
     client: PoolClient,
     input: { tenantId: string; jobId: string },

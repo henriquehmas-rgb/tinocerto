@@ -120,8 +120,11 @@ describe('Gate consolidado — Painel do Recrutador (Fase 5a, Tasks 2-4)', () =>
           headers: { authorization: `Bearer ${recrutador1Token}` },
         });
         expect(respFunilTriagem.status).toBe(200);
-        const corpoFunilTriagem = (await respFunilTriagem.json()) as Record<string, Array<{ id: string }>>;
-        expect(corpoFunilTriagem.triagem?.map((c) => c.id)).toContain(applicationId);
+        const corpoFunilTriagem = (await respFunilTriagem.json()) as {
+          funil: Record<string, Array<{ id: string }>>;
+          conversao: Record<string, number | null>;
+        };
+        expect(corpoFunilTriagem.funil.triagem?.map((c) => c.id)).toContain(applicationId);
 
         // --- 6. recrutador atribuído move a candidatura -- reflete em "entrevista" no funil seguinte ---
         const respMoveStage = await fetch(`${serverUrl}/v1/applications/${applicationId}/actions/move-stage`, {
@@ -137,9 +140,12 @@ describe('Gate consolidado — Painel do Recrutador (Fase 5a, Tasks 2-4)', () =>
           headers: { authorization: `Bearer ${recrutador1Token}` },
         });
         expect(respFunilEntrevista.status).toBe(200);
-        const corpoFunilEntrevista = (await respFunilEntrevista.json()) as Record<string, Array<{ id: string }>>;
-        expect(corpoFunilEntrevista.entrevista?.map((c) => c.id)).toContain(applicationId);
-        expect(corpoFunilEntrevista.triagem?.map((c) => c.id) ?? []).not.toContain(applicationId);
+        const corpoFunilEntrevista = (await respFunilEntrevista.json()) as {
+          funil: Record<string, Array<{ id: string }>>;
+          conversao: Record<string, number | null>;
+        };
+        expect(corpoFunilEntrevista.funil.entrevista?.map((c) => c.id)).toContain(applicationId);
+        expect(corpoFunilEntrevista.funil.triagem?.map((c) => c.id) ?? []).not.toContain(applicationId);
 
         // --- 7. recrutador atribuído consulta assessment-report sem result_grant -- devolve
         // relatorio null (candidato ainda não fez assessment) sem lançar erro ---

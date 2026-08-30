@@ -288,10 +288,13 @@ describe('JobService', () => {
 
   describe('funil', () => {
     let vagaFunilId: string;
+    let vagaSemCandidaturasId: string;
     let personTriagemId: string;
     let personEntrevistaId: string;
+    let personOfertaId: string;
     let applicationTriagemId: string;
     let applicationEntrevistaId: string;
+    let applicationOfertaId: string;
     let instrumentVersionFunilId: string;
     // Não existe em user_account -- actor_id de pipeline_stage_transition
     // não tem FK para user_account, então não precisa existir de fato.
@@ -303,6 +306,12 @@ describe('JobService', () => {
         [tenantId, requisitionId],
       );
       vagaFunilId = job.rows[0].id;
+
+      const vagaSemCandidaturas = await adminPool.query<{ id: string }>(
+        `INSERT INTO job (tenant_id, requisition_id, titulo, seo_slug) VALUES ($1, $2, 'Vaga Funil Sem Candidaturas', 'vaga-funil-sem-candidaturas-0018') RETURNING id`,
+        [tenantId, requisitionId],
+      );
+      vagaSemCandidaturasId = vagaSemCandidaturas.rows[0].id;
 
       const personA = await adminPool.query<{ id: string }>(
         `INSERT INTO person (cpf_hash, cpf_encriptado, nome, email_principal)
@@ -316,6 +325,12 @@ describe('JobService', () => {
          RETURNING id`,
       );
       personEntrevistaId = personB.rows[0].id;
+      const personC = await adminPool.query<{ id: string }>(
+        `INSERT INTO person (cpf_hash, cpf_encriptado, nome, email_principal)
+         VALUES ('hash-funil-oferta', '{"ciphertext":"x","iv":"y","authTag":"z","wrappedDek":"w"}', 'Duda Oferta', 'duda.oferta@example.com')
+         RETURNING id`,
+      );
+      personOfertaId = personC.rows[0].id;
 
       const appTriagem = await adminPool.query<{ id: string }>(
         `INSERT INTO application (tenant_id, job_id, person_id, etapa_funil) VALUES ($1, $2, $3, 'triagem') RETURNING id`,
@@ -327,6 +342,16 @@ describe('JobService', () => {
         [tenantId, vagaFunilId, personEntrevistaId],
       );
       applicationEntrevistaId = appEntrevista.rows[0].id;
+      // 'oferta' fica fora de ORDEM_ETAPAS (só ['triagem', 'entrevista']):
+      // existe nos dados do funil, mas não deve receber conversão
+      // inventada. Sem esta candidatura, o teste de etapa desconhecida
+      // passaria com qualquer implementação -- inclusive uma que iterasse
+      // as chaves dos dados em vez de ORDEM_ETAPAS.
+      const appOferta = await adminPool.query<{ id: string }>(
+        `INSERT INTO application (tenant_id, job_id, person_id, etapa_funil) VALUES ($1, $2, $3, 'oferta') RETURNING id`,
+        [tenantId, vagaFunilId, personOfertaId],
+      );
+      applicationOfertaId = appOferta.rows[0].id;
 
       // instrument/instrument_version são tabelas GLOBAIS (sem tenant_id):
       // ids fixos + limpeza explícita no afterAll, mesmo padrão já usado
@@ -371,10 +396,12 @@ describe('JobService', () => {
       await adminPool.query('UPDATE application SET touchpoint_id = NULL WHERE id = $1', [applicationTriagemId]);
       await adminPool.query('DELETE FROM candidate_touchpoint WHERE tenant_id = $1', [tenantId]);
       await adminPool.query('DELETE FROM application WHERE id = ANY($1)', [
-        [applicationTriagemId, applicationEntrevistaId],
+        [applicationTriagemId, applicationEntrevistaId, applicationOfertaId],
       ]);
-      await adminPool.query('DELETE FROM job WHERE id = $1', [vagaFunilId]);
-      await adminPool.query('DELETE FROM person WHERE id = ANY($1)', [[personTriagemId, personEntrevistaId]]);
+      await adminPool.query('DELETE FROM job WHERE id = ANY($1)', [[vagaFunilId, vagaSemCandidaturasId]]);
+      await adminPool.query('DELETE FROM person WHERE id = ANY($1)', [
+        [personTriagemId, personEntrevistaId, personOfertaId],
+      ]);
       await adminPool.query(`DELETE FROM instrument_version WHERE id = 'a55e55e0-0000-4000-8000-0000000000f2'`);
       await adminPool.query(`DELETE FROM instrument WHERE id = 'a55e55e0-0000-4000-8000-0000000000f1'`);
     });
@@ -390,6 +417,7 @@ describe('JobService', () => {
       expect(funil).toEqual({
         triagem: [expect.objectContaining({ id: applicationTriagemId })],
         entrevista: [expect.objectContaining({ id: applicationEntrevistaId })],
+        oferta: [expect.objectContaining({ id: applicationOfertaId })],
       });
     });
 
@@ -423,20 +451,28 @@ describe('JobService', () => {
       // Insere um assessment ANTERIOR ao já existente: o mais recente por
       // convidado_em é que deve aparecer, não o primeiro nem o último a ser
       // inserido.
-      await adminPool.query(
+      const assessmentAnterior = await adminPool.query<{ id: string }>(
         `INSERT INTO assessment_application (tenant_id, application_id, person_id, instrument_version_id, status, convidado_em)
-         VALUES ($1, $2, $3, $4, 'convidado', now() - interval '10 days')`,
+         VALUES ($1, $2, $3, $4, 'convidado', now() - interval '10 days') RETURNING id`,
         [tenantId, applicationTriagemId, personTriagemId, instrumentVersionFunilId],
       );
 
-      const ctx = new TenantContext(appPool);
-      const service = new JobService(new RequisitionService(), new JobRecrutadorService());
-      const { funil } = await ctx.run(tenantId, (client) =>
-        service.funil(client, { tenantId, jobId: vagaFunilId }),
-      );
+      try {
+        const ctx = new TenantContext(appPool);
+        const service = new JobService(new RequisitionService(), new JobRecrutadorService());
+        const { funil } = await ctx.run(tenantId, (client) =>
+          service.funil(client, { tenantId, jobId: vagaFunilId }),
+        );
 
-      const emTriagem = funil['triagem'].find((c) => c.id === applicationTriagemId)!;
-      expect(emTriagem.assessmentStatus).toBe('concluido');
+        const emTriagem = funil['triagem'].find((c) => c.id === applicationTriagemId)!;
+        expect(emTriagem.assessmentStatus).toBe('concluido');
+      } finally {
+        // Não deixa a linha extra para trás: testes posteriores neste
+        // bloco (e o afterAll, que só limpa por tenant) não devem depender
+        // da ordem de execução para ver um único assessment por
+        // candidatura.
+        await adminPool.query('DELETE FROM assessment_application WHERE id = $1', [assessmentAnterior.rows[0].id]);
+      }
     });
 
     it('a primeira etapa não tem conversão', async () => {
@@ -457,9 +493,10 @@ describe('JobService', () => {
       const { conversao } = await ctx.run(tenantId, (client) =>
         service.funil(client, { tenantId, jobId: vagaFunilId }),
       );
-      // Há 2 candidaturas na vaga; ambas alcançaram triagem (uma está lá,
-      // outra passou por lá antes de ir para entrevista). Uma alcançou
-      // entrevista. Logo 1/2 = 50%.
+      // Das 3 candidaturas na vaga, 2 alcançaram triagem (uma está lá,
+      // outra passou por lá antes de ir para entrevista; a terceira está em
+      // 'oferta', que nunca passou por triagem nem entrevista). Uma
+      // alcançou entrevista. Logo 1/2 = 50%.
       expect(conversao['entrevista']).toBe(50);
     });
 
@@ -470,6 +507,26 @@ describe('JobService', () => {
         service.funil(client, { tenantId, jobId: vagaFunilId }),
       );
       expect(conversao['etapa-inexistente']).toBeUndefined();
+      // 'oferta' existe nos dados do funil (há uma candidatura lá -- ver
+      // fixture no beforeAll) mas está fora de ORDEM_ETAPAS, então não deve
+      // receber conversão. Sem uma candidatura real em 'oferta', esta
+      // asserção passaria mesmo se a implementação iterasse as chaves dos
+      // dados em vez de ORDEM_ETAPAS -- prova: trocar
+      // `ORDEM_ETAPAS.forEach` por iteração sobre as chaves de
+      // `alcancaram` faz este teste falhar (conversao['oferta'] passa a
+      // existir).
+      expect(conversao['oferta']).toBeUndefined();
+    });
+
+    it('denominador zero -- vaga sem nenhuma candidatura não recebe conversão inventada', async () => {
+      const ctx = new TenantContext(appPool);
+      const service = new JobService(new RequisitionService(), new JobRecrutadorService());
+      const { conversao } = await ctx.run(tenantId, (client) =>
+        service.funil(client, { tenantId, jobId: vagaSemCandidaturasId }),
+      );
+      // Denominador (quem alcançou triagem) é zero: não pode virar 0% nem
+      // NaN, tem que ser null (sem dado, não "0% de conversão").
+      expect(conversao['entrevista']).toBeNull();
     });
   });
 

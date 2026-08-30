@@ -45,6 +45,16 @@ export class AdverseImpactSnapshotService {
    * diretamente, ou inverter a comparação) -- decisão de design que não
    * existia quando esta task foi escrita. Até essa decisão ser tomada,
    * melhor não emitir o sinal do que emitir um sinal errado.
+   *
+   * JobService.conversaoPorEtapa (hiring/job.service.ts) responde a mesma
+   * pergunta ("quem alcançou a etapa X?") para o funil comum, mas com uma
+   * definição deliberadamente diferente: soma também quem tem a etapa como
+   * etapa_funil atual e quem tem uma transição com from_state nela, não só
+   * o baseline 'triagem' UNION to_state usado aqui. Os dois divergem em
+   * candidaturas que já saíram da primeira etapa sem gerar uma transição
+   * PARA a etapa em questão. Esta query fica com a definição mais simples
+   * porque é a que os testes deste service fixam; não convirja os dois sem
+   * revisar ambos os conjuntos de testes.
    */
   async recompute(client: PoolClient, tenantId: string, jobId: string): Promise<void> {
     // Achado Important de re-revisão adversarial: sem isto, duas chamadas
