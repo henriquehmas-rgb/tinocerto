@@ -1,12 +1,13 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { KanbanBoard, Card, Badge, Button, Table } from '@tinocerto/design-system';
+import { KanbanBoard, CandidateCard, Card, Badge, Button, Table } from '@tinocerto/design-system';
 import { PainelShell } from '../../../../../components/painel-shell';
 import { staffPanelClient, CandidaturaResumo, RoteiroEntrevista, VagaCompleta, ImpactoAdversoRow, InterviewQuestionSuggestion } from '../../../../../lib/staff-panel-client';
 import { isErroDeAutenticacao } from '../../../../../lib/staff-auth-client';
+import { montarChips, resolverDestino } from '../../../../../lib/funil-formatacao';
 
 // Etapas conhecidas hoje, sempre mostradas como coluna (e como destino no
 // menu Mover) mesmo quando ainda nao tem nenhuma candidatura -- e o caso
@@ -43,6 +44,8 @@ export default function FunilPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const [funil, setFunil] = useState<Record<string, CandidaturaResumo[]>>({});
+  const [conversao, setConversao] = useState<Record<string, number | null>>({});
+  const arrastandoRef = useRef<string | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [vaga, setVaga] = useState<VagaCompleta | null>(null);
   const [roteiro, setRoteiro] = useState<RoteiroEntrevista | null>(null);
@@ -57,7 +60,8 @@ export default function FunilPage() {
     staffPanelClient
       .obterFunil(params.id)
       .then((dados) => {
-        setFunil(dados);
+        setFunil(dados.funil);
+        setConversao(dados.conversao);
       })
       .catch((e) => {
         if (isErroDeAutenticacao(e)) {
@@ -121,9 +125,43 @@ export default function FunilPage() {
     }
   }
 
-  async function handleMover(candidatura: CandidaturaResumo, novaColuna: string) {
-    await staffPanelClient.moverEtapa(candidatura.id, novaColuna);
-    carregar();
+  async function moverCandidatura(applicationId: string, destino: string) {
+    const anterior = funil;
+    // Otimista: move no estado local antes da resposta, e desfaz se falhar.
+    setFunil((atual) => {
+      const proximo: Record<string, CandidaturaResumo[]> = {};
+      let movida: CandidaturaResumo | undefined;
+      for (const [etapa, lista] of Object.entries(atual)) {
+        proximo[etapa] = lista.filter((c) => {
+          if (c.id !== applicationId) return true;
+          movida = c;
+          return false;
+        });
+      }
+      if (movida) proximo[destino] = [...(proximo[destino] ?? []), movida];
+      return proximo;
+    });
+
+    try {
+      await staffPanelClient.moverEtapa(applicationId, destino);
+      carregar();
+    } catch (e) {
+      setFunil(anterior);
+      setErro((e as Error).message);
+    }
+  }
+
+  function handleMover(candidatura: CandidaturaResumo, novaColuna: string) {
+    void moverCandidatura(candidatura.id, novaColuna);
+  }
+
+  function handleSoltar(chaveDestino: string) {
+    const applicationId = arrastandoRef.current;
+    if (!applicationId) return;
+    arrastandoRef.current = null;
+    const destino = resolverDestino(funil, applicationId, chaveDestino);
+    if (destino === null) return;
+    void moverCandidatura(applicationId, destino);
   }
 
   const chavesExtras = Object.keys(funil).filter(
@@ -132,7 +170,7 @@ export default function FunilPage() {
   const colunas = [
     ...COLUNAS_PADRAO,
     ...chavesExtras.map((chave) => ({ chave, titulo: capitalizar(chave) })),
-  ];
+  ].map((coluna) => ({ ...coluna, conversao: conversao[coluna.chave] ?? null }));
 
   return (
     <PainelShell
@@ -233,11 +271,21 @@ export default function FunilPage() {
         <KanbanBoard
           colunas={colunas}
           itens={funil}
-          renderItem={(item: CandidaturaResumo) => (
-            <Link href={`/staff/painel/candidaturas/${item.id}`}>{item.nomeCandidato}</Link>
-          )}
-          labelMover={(item: CandidaturaResumo) => `Mover ${item.nomeCandidato}`}
           onMoverItem={handleMover}
+          onSoltarItem={handleSoltar}
+          labelMover={(c: CandidaturaResumo) => `Mover ${c.nomeCandidato}`}
+          renderItem={(c: CandidaturaResumo, acao) => (
+            <CandidateCard
+              nome={c.nomeCandidato}
+              scoreAderencia={c.scoreAderencia}
+              chips={montarChips(c, new Date())}
+              acao={acao}
+              arrastavel
+              onArrastarInicio={() => {
+                arrastandoRef.current = c.id;
+              }}
+            />
+          )}
         />
       </div>
     </PainelShell>

@@ -42,6 +42,14 @@ export interface CandidaturaResumo {
   personId: string;
   nomeCandidato: string;
   criadoEm: string;
+  assessmentStatus: 'convidado' | 'iniciado' | 'concluido' | null;
+  origemCanal: string | null;
+  scoreAderencia: number | null;
+}
+
+export interface RespostaFunil {
+  funil: Record<string, CandidaturaResumo[]>;
+  conversao: Record<string, number | null>;
 }
 
 export interface CandidaturaDetalhe {
@@ -214,7 +222,7 @@ export const staffPanelClient = {
     const response = await staffAuthClient.authenticatedFetch('/v1/instrument-versions');
     return tratarResposta(response, 'Não foi possível carregar os instrumentos de assessment');
   },
-  async obterFunil(jobId: string): Promise<Record<string, CandidaturaResumo[]>> {
+  async obterFunil(jobId: string): Promise<RespostaFunil> {
     const response = await staffAuthClient.authenticatedFetch(`/v1/jobs/${jobId}/funil`);
     return tratarResposta(response, 'Não foi possível carregar o funil');
   },

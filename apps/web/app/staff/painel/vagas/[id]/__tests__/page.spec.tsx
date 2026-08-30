@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import FunilPage from '../page';
 import { staffPanelClient } from '../../../../../../lib/staff-panel-client';
 
@@ -57,7 +57,10 @@ describe('FunilPage', () => {
     // com todo mundo em triagem retorna só { triagem: [...] }, sem a chave
     // 'entrevista'.
     vi.mocked(staffPanelClient.obterFunil).mockResolvedValue({
-      triagem: [{ id: 'app-1', personId: 'person-1', nomeCandidato: 'Ana', criadoEm: '2026-08-01T00:00:00Z' }],
+      funil: {
+        triagem: [{ id: 'app-1', personId: 'person-1', nomeCandidato: 'Ana', criadoEm: '2026-08-01T00:00:00Z', assessmentStatus: null, origemCanal: null, scoreAderencia: null }],
+      },
+      conversao: { triagem: null },
     });
     vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue({
       userId: 'u1',
@@ -77,7 +80,10 @@ describe('FunilPage', () => {
     // (e o menu Mover ficar vazio) sempre que ninguém ainda tivesse chegado lá --
     // o caso mais comum de todos, uma vaga nova.
     vi.mocked(staffPanelClient.obterFunil).mockResolvedValue({
-      triagem: [{ id: 'app-1', personId: 'person-1', nomeCandidato: 'Ana', criadoEm: '2026-08-01T00:00:00Z' }],
+      funil: {
+        triagem: [{ id: 'app-1', personId: 'person-1', nomeCandidato: 'Ana', criadoEm: '2026-08-01T00:00:00Z', assessmentStatus: null, origemCanal: null, scoreAderencia: null }],
+      },
+      conversao: { triagem: null },
     });
     vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue({
       userId: 'u1',
@@ -99,10 +105,16 @@ describe('FunilPage', () => {
   it('move uma candidatura de etapa e recarrega o funil', async () => {
     vi.mocked(staffPanelClient.obterFunil)
       .mockResolvedValueOnce({
-        triagem: [{ id: 'app-1', personId: 'person-1', nomeCandidato: 'Ana', criadoEm: '2026-08-01T00:00:00Z' }],
+        funil: {
+          triagem: [{ id: 'app-1', personId: 'person-1', nomeCandidato: 'Ana', criadoEm: '2026-08-01T00:00:00Z', assessmentStatus: null, origemCanal: null, scoreAderencia: null }],
+        },
+        conversao: { triagem: null },
       })
       .mockResolvedValueOnce({
-        entrevista: [{ id: 'app-1', personId: 'person-1', nomeCandidato: 'Ana', criadoEm: '2026-08-01T00:00:00Z' }],
+        funil: {
+          entrevista: [{ id: 'app-1', personId: 'person-1', nomeCandidato: 'Ana', criadoEm: '2026-08-01T00:00:00Z', assessmentStatus: null, origemCanal: null, scoreAderencia: null }],
+        },
+        conversao: { entrevista: null },
       });
     vi.mocked(staffPanelClient.moverEtapa).mockResolvedValue(undefined);
     vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue({
@@ -126,7 +138,7 @@ describe('FunilPage', () => {
   });
 
   it('renderiza um link para editar a vaga apontando para a rota correta', async () => {
-    vi.mocked(staffPanelClient.obterFunil).mockResolvedValue({});
+    vi.mocked(staffPanelClient.obterFunil).mockResolvedValue({ funil: {}, conversao: {} });
     vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue({
       userId: 'u1',
       tenantId: 't1',
@@ -142,7 +154,10 @@ describe('FunilPage', () => {
 
   it('deriva as colunas dinamicamente do funil, mostrando etapas fora da lista fixa antiga', async () => {
     vi.mocked(staffPanelClient.obterFunil).mockResolvedValue({
-      oferta: [{ id: 'app-2', personId: 'person-2', nomeCandidato: 'Bruno', criadoEm: '2026-08-01T00:00:00Z' }],
+      funil: {
+        oferta: [{ id: 'app-2', personId: 'person-2', nomeCandidato: 'Bruno', criadoEm: '2026-08-01T00:00:00Z', assessmentStatus: null, origemCanal: null, scoreAderencia: null }],
+      },
+      conversao: { oferta: null },
     });
     vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue({
       userId: 'u1',
@@ -176,7 +191,7 @@ describe('FunilPage', () => {
 
 
   it('mostra botão de gerar roteiro quando a vaga ainda não tem nenhum', async () => {
-    vi.mocked(staffPanelClient.obterFunil).mockResolvedValue({});
+    vi.mocked(staffPanelClient.obterFunil).mockResolvedValue({ funil: {}, conversao: {} });
     vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue(PERFIL_MOCK);
     vi.mocked(staffPanelClient.obterVaga).mockResolvedValue({
       id: 'job-1', titulo: 'Vaga X', descricao: 'Descrição da vaga X',
@@ -191,7 +206,7 @@ describe('FunilPage', () => {
   });
 
   it('mostra botão de publicar quando o roteiro está em rascunho', async () => {
-    vi.mocked(staffPanelClient.obterFunil).mockResolvedValue({});
+    vi.mocked(staffPanelClient.obterFunil).mockResolvedValue({ funil: {}, conversao: {} });
     vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue(PERFIL_MOCK);
     vi.mocked(staffPanelClient.obterVaga).mockResolvedValue({
       id: 'job-1', titulo: 'Vaga X', descricao: 'Descrição da vaga X',
@@ -210,7 +225,7 @@ describe('FunilPage', () => {
   });
 
   it('mostra badge "Publicado" quando o roteiro já foi publicado', async () => {
-    vi.mocked(staffPanelClient.obterFunil).mockResolvedValue({});
+    vi.mocked(staffPanelClient.obterFunil).mockResolvedValue({ funil: {}, conversao: {} });
     vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue(PERFIL_MOCK);
     vi.mocked(staffPanelClient.obterVaga).mockResolvedValue({
       id: 'job-1', titulo: 'Vaga X', descricao: 'Descrição da vaga X',
@@ -228,7 +243,7 @@ describe('FunilPage', () => {
   });
 
   it('mostra mensagem de dado insuficiente quando nao ha impacto adverso calculado', async () => {
-    vi.mocked(staffPanelClient.obterFunil).mockResolvedValue({});
+    vi.mocked(staffPanelClient.obterFunil).mockResolvedValue({ funil: {}, conversao: {} });
     vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue(PERFIL_MOCK);
     vi.mocked(staffPanelClient.obterVaga).mockResolvedValue(VAGA_MOCK);
     vi.mocked(staffPanelClient.obterRoteiroEntrevista).mockResolvedValue(null);
@@ -244,7 +259,7 @@ describe('FunilPage', () => {
   });
 
   it('agrupa por etapa e dimensao, e mostra badge de alerta para razao abaixo de 0.8', async () => {
-    vi.mocked(staffPanelClient.obterFunil).mockResolvedValue({});
+    vi.mocked(staffPanelClient.obterFunil).mockResolvedValue({ funil: {}, conversao: {} });
     vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue(PERFIL_MOCK);
     vi.mocked(staffPanelClient.obterVaga).mockResolvedValue(VAGA_MOCK);
     vi.mocked(staffPanelClient.obterRoteiroEntrevista).mockResolvedValue(null);
@@ -261,7 +276,7 @@ describe('FunilPage', () => {
   });
 
   it('botao de sugerir perguntas fica desabilitado sem roteiro publicado', async () => {
-    vi.mocked(staffPanelClient.obterFunil).mockResolvedValue({});
+    vi.mocked(staffPanelClient.obterFunil).mockResolvedValue({ funil: {}, conversao: {} });
     vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue(PERFIL_MOCK);
     vi.mocked(staffPanelClient.obterVaga).mockResolvedValue(VAGA_MOCK);
     vi.mocked(staffPanelClient.obterRoteiroEntrevista).mockResolvedValue(null);
@@ -274,7 +289,7 @@ describe('FunilPage', () => {
   });
 
   it('gera e mostra perguntas agrupadas por competencia quando o roteiro esta publicado', async () => {
-    vi.mocked(staffPanelClient.obterFunil).mockResolvedValue({});
+    vi.mocked(staffPanelClient.obterFunil).mockResolvedValue({ funil: {}, conversao: {} });
     vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue(PERFIL_MOCK);
     vi.mocked(staffPanelClient.obterVaga).mockResolvedValue(VAGA_MOCK);
     vi.mocked(staffPanelClient.obterRoteiroEntrevista).mockResolvedValue({
@@ -299,7 +314,7 @@ describe('FunilPage', () => {
   });
 
   it('mostra mensagem de indisponibilidade quando gerar perguntas falha com 503', async () => {
-    vi.mocked(staffPanelClient.obterFunil).mockResolvedValue({});
+    vi.mocked(staffPanelClient.obterFunil).mockResolvedValue({ funil: {}, conversao: {} });
     vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue(PERFIL_MOCK);
     vi.mocked(staffPanelClient.obterVaga).mockResolvedValue(VAGA_MOCK);
     vi.mocked(staffPanelClient.obterRoteiroEntrevista).mockResolvedValue({
@@ -319,6 +334,88 @@ describe('FunilPage', () => {
     await waitFor(() =>
       expect(screen.getByText('Geração por IA indisponível no momento, tente novamente.')).toBeInTheDocument(),
     );
+  });
+
+  it('mostra o card do candidato com chips e sem fit quando não há score', async () => {
+    vi.mocked(staffPanelClient.obterFunil).mockResolvedValue({
+      funil: {
+        triagem: [
+          {
+            id: 'app-1',
+            personId: 'p-1',
+            nomeCandidato: 'Ana Souza',
+            criadoEm: new Date().toISOString(),
+            assessmentStatus: 'concluido',
+            origemCanal: 'site_carreiras',
+            scoreAderencia: null,
+          },
+        ],
+      },
+      conversao: { triagem: null },
+    });
+
+    render(<FunilPage />);
+
+    await waitFor(() => expect(screen.getByText('Ana Souza')).toBeInTheDocument());
+    expect(screen.getByText('Assessment concluído')).toBeInTheDocument();
+    expect(screen.getByText('Site de carreiras')).toBeInTheDocument();
+    expect(screen.queryByTestId('fit')).toBeNull();
+  });
+
+  it('mostra o fit quando a API devolve score', async () => {
+    vi.mocked(staffPanelClient.obterFunil).mockResolvedValue({
+      funil: {
+        triagem: [
+          {
+            id: 'app-1',
+            personId: 'p-1',
+            nomeCandidato: 'Ana Souza',
+            criadoEm: new Date().toISOString(),
+            assessmentStatus: null,
+            origemCanal: null,
+            scoreAderencia: 72,
+          },
+        ],
+      },
+      conversao: { triagem: null },
+    });
+
+    render(<FunilPage />);
+
+    await waitFor(() => expect(screen.getByTestId('fit')).toHaveTextContent('72'));
+  });
+
+  it('volta o card para a coluna de origem quando mover falha', async () => {
+    // Movimento otimista: o card muda de coluna antes da resposta. Se a API
+    // recusar, ele precisa voltar -- senão a tela mente sobre o estado real.
+    vi.mocked(staffPanelClient.obterFunil).mockResolvedValue({
+      funil: {
+        triagem: [
+          {
+            id: 'app-1',
+            personId: 'p-1',
+            nomeCandidato: 'Ana Souza',
+            criadoEm: new Date().toISOString(),
+            assessmentStatus: null,
+            origemCanal: null,
+            scoreAderencia: null,
+          },
+        ],
+        entrevista: [],
+      },
+      conversao: { triagem: null, entrevista: null },
+    });
+    vi.mocked(staffPanelClient.moverEtapa).mockRejectedValue(new Error('Transição não permitida'));
+
+    render(<FunilPage />);
+    await waitFor(() => expect(screen.getByText('Ana Souza')).toBeInTheDocument());
+
+    fireEvent.dragStart(screen.getByTestId('candidate-card'));
+    fireEvent.drop(screen.getByTestId('coluna-entrevista'));
+
+    await waitFor(() => expect(screen.getByText('Transição não permitida')).toBeInTheDocument());
+    const triagem = screen.getByTestId('coluna-triagem');
+    expect(within(triagem).getByText('Ana Souza')).toBeInTheDocument();
   });
 
 });
