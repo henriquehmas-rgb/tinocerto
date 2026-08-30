@@ -314,6 +314,31 @@ describe('AdherenceService', () => {
       expect(consultas).toBe(2);
     });
 
+    it('não duplica person_id na consulta em lote mesmo com múltiplas candidaturas da mesma pessoa', async () => {
+      const personService = new PersonService(new EnvelopeEncryptionService());
+      const service = new AdherenceService(personService);
+      const spy = jest.spyOn(personService, 'habilidadesEmLote');
+
+      const mapa = await ctx.run(tenantId, (client) =>
+        service.porCandidaturasDaVaga(client, {
+          jobId: vagaComHabilidadesId,
+          candidatos: [
+            { applicationId: 'app-dup-1', personId: personComPerfilId },
+            { applicationId: 'app-dup-2', personId: personComPerfilId },
+            { applicationId: 'app-dup-3', personId: personSemPerfilId },
+          ],
+        }),
+      );
+
+      expect(spy).toHaveBeenCalledTimes(1);
+      const capturedPersonIds = spy.mock.calls[0][1] as string[];
+      expect(capturedPersonIds).toHaveLength(2);
+      expect(capturedPersonIds).toContain(personComPerfilId);
+      expect(capturedPersonIds).toContain(personSemPerfilId);
+
+      spy.mockRestore();
+    });
+
     it('com nenhum candidato devolve mapa vazio', async () => {
       const service = new AdherenceService(new PersonService(new EnvelopeEncryptionService()));
       const mapa = await ctx.run(tenantId, (client) =>
