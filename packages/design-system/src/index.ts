@@ -24,3 +24,5 @@ export { EmptyState } from "./components/EmptyState";
 export type { EmptyStateProps } from "./components/EmptyState";
 export { ThemeToggle } from "./components/ThemeToggle";
 export type { ThemeToggleProps, Tema } from "./components/ThemeToggle";
+export { CandidateCard } from './components/CandidateCard';
+export type { CandidateCardProps, CandidateCardChip } from './components/CandidateCard';
