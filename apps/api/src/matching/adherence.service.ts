@@ -17,6 +17,11 @@ export const QUERY_ADERENCIA_POR_CANDIDATURA = `
   WHERE a.id = $1
 `;
 
+// Allowlist estrutural irmã de QUERY_ADERENCIA_POR_CANDIDATURA: para o
+// funil inteiro, as habilidades exigidas são lidas UMA vez (é a mesma
+// vaga para todos os candidatos), e os person_id já vêm do chamador.
+export const QUERY_HABILIDADES_EXIGIDAS_DA_VAGA = `SELECT habilidades_exigidas FROM job WHERE id = $1`;
+
 @Injectable()
 export class AdherenceService {
   constructor(private readonly personService: PersonService) {}
@@ -38,5 +43,33 @@ export class AdherenceService {
     const row = result.rows[0];
     const habilidadesCandidato = await this.personService.habilidades(client, row.person_id);
     return calcularScoreAderencia(row.habilidades_exigidas, habilidadesCandidato);
+  }
+
+  /**
+   * Fit de todos os candidatos de uma vaga em DUAS consultas fixas
+   * (habilidades exigidas + habilidades em lote), nunca uma por candidato.
+   * Mesma allowlist de features do método por candidatura: só
+   * job.habilidades_exigidas e as habilidades do perfil entram na decisão.
+   */
+  async porCandidaturasDaVaga(
+    client: PoolClient,
+    input: { jobId: string; candidatos: { applicationId: string; personId: string }[] },
+  ): Promise<Map<string, number | null>> {
+    const scores = new Map<string, number | null>();
+    if (input.candidatos.length === 0) return scores;
+
+    const vaga = await client.query<{ habilidades_exigidas: string[] }>(QUERY_HABILIDADES_EXIGIDAS_DA_VAGA, [
+      input.jobId,
+    ]);
+    const exigidas = vaga.rows[0]?.habilidades_exigidas ?? [];
+
+    const personIds = [...new Set(input.candidatos.map((c) => c.personId))];
+    const habilidadesPorPessoa = await this.personService.habilidadesEmLote(client, personIds);
+
+    for (const candidato of input.candidatos) {
+      const doCandidato = habilidadesPorPessoa.get(candidato.personId) ?? [];
+      scores.set(candidato.applicationId, calcularScoreAderencia(exigidas, doCandidato).scoreAderencia);
+    }
+    return scores;
   }
 }

@@ -203,4 +203,123 @@ describe('AdherenceService', () => {
     // texto da query desta classe.
     expect(QUERY_ADERENCIA_POR_CANDIDATURA.toLowerCase()).not.toContain('person_profile');
   });
+
+  describe('porCandidaturasDaVaga', () => {
+    const ctx = new TenantContext(appPool);
+
+    let orgUnitLoteId: string;
+    let requisitionLoteId: string;
+    let vagaComHabilidadesId: string;
+    let vagaSemHabilidadesId: string;
+    let personSemPerfilId: string;
+
+    beforeAll(async () => {
+      // `requisitionId` não está em escopo nesta suíte (a `requisition`
+      // criada no `beforeAll` externo só vive na variável local `req`) --
+      // por isso este bloco cria a sua própria org_unit + requisição
+      // aprovada, no mesmo padrão de job.service.spec.ts, e as remove no
+      // afterAll correspondente.
+      const org = await adminPool.query<{ id: string }>(
+        `INSERT INTO org_unit (tenant_id, tipo, nome, materialized_path) VALUES ($1, 'empresa', 'Matriz Lote', 'matriz-lote') RETURNING id`,
+        [tenantId],
+      );
+      orgUnitLoteId = org.rows[0].id;
+
+      const req = await adminPool.query<{ id: string }>(
+        `INSERT INTO requisition (tenant_id, org_unit_id, titulo, status, approved_at) VALUES ($1, $2, 'Req Adherence Lote', 'aprovada', now()) RETURNING id`,
+        [tenantId, orgUnitLoteId],
+      );
+      requisitionLoteId = req.rows[0].id;
+
+      const comSkills = await adminPool.query<{ id: string }>(
+        `INSERT INTO job (tenant_id, requisition_id, titulo, seo_slug, habilidades_exigidas)
+         VALUES ($1, $2, 'Vaga Com Skills', 'vaga-com-skills-lote', ARRAY['TypeScript','Go'])
+         RETURNING id`,
+        [tenantId, requisitionLoteId],
+      );
+      vagaComHabilidadesId = comSkills.rows[0].id;
+
+      const semSkills = await adminPool.query<{ id: string }>(
+        `INSERT INTO job (tenant_id, requisition_id, titulo, seo_slug, habilidades_exigidas)
+         VALUES ($1, $2, 'Vaga Sem Skills', 'vaga-sem-skills-lote', ARRAY[]::text[])
+         RETURNING id`,
+        [tenantId, requisitionLoteId],
+      );
+      vagaSemHabilidadesId = semSkills.rows[0].id;
+
+      const pessoa = await adminPool.query<{ id: string }>(
+        `INSERT INTO person (cpf_hash, cpf_encriptado, nome, email_principal)
+         VALUES ('hash-sem-perfil-lote', '{"ciphertext":"x","iv":"y","authTag":"z","wrappedDek":"w"}', 'Sem Perfil Lote', 'semperfil.lote@example.com')
+         RETURNING id`,
+      );
+      personSemPerfilId = pessoa.rows[0].id;
+    });
+
+    afterAll(async () => {
+      await adminPool.query('DELETE FROM job WHERE id = ANY($1)', [
+        [vagaComHabilidadesId, vagaSemHabilidadesId],
+      ]);
+      await adminPool.query('DELETE FROM requisition WHERE id = $1', [requisitionLoteId]);
+      await adminPool.query('DELETE FROM org_unit WHERE id = $1', [orgUnitLoteId]);
+      await adminPool.query('DELETE FROM person WHERE id = $1', [personSemPerfilId]);
+    });
+
+    it('devolve null para todos quando a vaga não exige habilidades', async () => {
+      const service = new AdherenceService(new PersonService(new EnvelopeEncryptionService()));
+      const mapa = await ctx.run(tenantId, (client) =>
+        service.porCandidaturasDaVaga(client, {
+          jobId: vagaSemHabilidadesId,
+          candidatos: [{ applicationId: 'app-1', personId: personComPerfilId }],
+        }),
+      );
+      expect(mapa.get('app-1')).toBeNull();
+    });
+
+    it('dá score 0 para candidato sem perfil quando a vaga exige habilidades', async () => {
+      const service = new AdherenceService(new PersonService(new EnvelopeEncryptionService()));
+      const mapa = await ctx.run(tenantId, (client) =>
+        service.porCandidaturasDaVaga(client, {
+          jobId: vagaComHabilidadesId,
+          candidatos: [{ applicationId: 'app-2', personId: personSemPerfilId }],
+        }),
+      );
+      expect(mapa.get('app-2')).toBe(0);
+    });
+
+    it('não faz uma consulta por candidato -- o custo não cresce com o número deles', async () => {
+      // O ponto desta fase: chamar habilidades() em laço daria N+1. Duas
+      // consultas fixas (habilidades exigidas da vaga + habilidades em lote)
+      // independentemente de quantos candidatos entram.
+      const service = new AdherenceService(new PersonService(new EnvelopeEncryptionService()));
+      const candidatos = Array.from({ length: 25 }, (_, i) => ({
+        applicationId: `app-${i}`,
+        personId: personComPerfilId,
+      }));
+      let consultas = 0;
+      await ctx.run(tenantId, async (client) => {
+        const original = client.query.bind(client);
+        (client as unknown as { query: unknown }).query = (...args: unknown[]) => {
+          consultas++;
+          return (original as (...a: unknown[]) => unknown)(...args);
+        };
+        await service.porCandidaturasDaVaga(client, { jobId: vagaComHabilidadesId, candidatos });
+        // Restaura client.query ANTES de devolver o controle a ctx.run --
+        // senão o COMMIT que TenantContext.run emite depois deste callback
+        // também seria contado (o mock mutou a propriedade no próprio
+        // objeto client, então continua interceptando até ser desfeito).
+        // Sem isto, `consultas` mediria "duas consultas do serviço + um
+        // COMMIT alheio", não o que este teste se propõe a medir.
+        (client as unknown as { query: unknown }).query = original;
+      });
+      expect(consultas).toBe(2);
+    });
+
+    it('com nenhum candidato devolve mapa vazio', async () => {
+      const service = new AdherenceService(new PersonService(new EnvelopeEncryptionService()));
+      const mapa = await ctx.run(tenantId, (client) =>
+        service.porCandidaturasDaVaga(client, { jobId: vagaComHabilidadesId, candidatos: [] }),
+      );
+      expect(mapa.size).toBe(0);
+    });
+  });
 });
