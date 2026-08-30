@@ -53,9 +53,16 @@ describe('ordenarCandidaturas', () => {
   });
 
   it('fit nulo vai sempre por último, em asc e em desc', () => {
+    // O item COM fit vem primeiro no array de ENTRADA -- um comparador
+    // quebrado que devolvesse 0 pra qualquer comparação com nulo (em vez
+    // do 1/-1 correto) passaria despercebido aqui se o item sem fit já
+    // viesse depois: um sort estável deixaria a ordem já correta intacta,
+    // sem provar nada sobre a regra de nulo-por-último. Colocando o item
+    // sem fit PRIMEIRO na entrada, o sort só passa se realmente mover ele
+    // pro final.
     const linhas = [
-      { ...candidatura({ id: 'com-fit', scoreAderencia: 40 }), etapa: 'triagem' },
       { ...candidatura({ id: 'sem-fit', scoreAderencia: null }), etapa: 'triagem' },
+      { ...candidatura({ id: 'com-fit', scoreAderencia: 40 }), etapa: 'triagem' },
     ];
     const asc = ordenarCandidaturas(linhas, { coluna: 'fit', direcao: 'asc' }, AGORA, ORDEM);
     expect(asc.map((l) => l.id)).toEqual(['com-fit', 'sem-fit']);
@@ -114,6 +121,13 @@ describe('paginar', () => {
 
   it('lista vazia devolve pagina vazia e 1 pagina total', () => {
     const resultado = paginar([], 1, 25);
+    expect(resultado.pagina).toEqual([]);
+    expect(resultado.totalPaginas).toBe(1);
+  });
+
+  it('pagina muito alem do total devolve pagina vazia mas mantem o totalPaginas correto', () => {
+    const itens = [1, 2, 3];
+    const resultado = paginar(itens, 99, 10);
     expect(resultado.pagina).toEqual([]);
     expect(resultado.totalPaginas).toBe(1);
   });

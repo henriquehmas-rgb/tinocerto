@@ -68,7 +68,14 @@ export default function FunilPage() {
     direcao: 'asc',
   });
   const [pagina, setPagina] = useState(1);
-  const [toast, setToast] = useState<{ mensagem: string; acao?: { rotulo: string; onClick: () => void } } | null>(null);
+  const [toast, setToast] = useState<{ id: number; mensagem: string; acao?: { rotulo: string; onClick: () => void } } | null>(null);
+  // Contador monotônico pro `key` do Toast: sem um key que muda a cada
+  // toast novo, o React reaproveita a MESMA instância do componente (não
+  // há remount) quando um segundo toast substitui o primeiro -- e o efeito
+  // que arma o timer de 6s (ver comentário em Toast.tsx) roda só uma vez
+  // por instância, então o toast novo herdava o tempo que já tinha
+  // decorrido no anterior em vez de ganhar os 6s completos dele mesmo.
+  const proximoToastIdRef = useRef(0);
   // Menu de destino do "Mover etapa" em lote: não é o DropdownMenu do Radix
   // que o card individual usa (ver KanbanColumn) -- o lote pode conter
   // candidaturas de etapas de origem DIFERENTES entre si, então não existe
@@ -288,10 +295,19 @@ export default function FunilPage() {
         }
       }
 
+      // Mesma lógica do caminho single-candidate (moverCandidatura): um
+      // erro de um movimento anterior (single ou lote) não pode continuar
+      // mentindo sobre o estado atual depois que este lote teve pelo
+      // menos um sucesso.
+      if (sucesso > 0) setErro(null);
+
       carregar();
 
-      const mensagem = falha === 0 ? `${sucesso} movidos` : `${sucesso} movidos, ${falha} falharam`;
+      const rotuloMovidos = sucesso === 1 ? 'movido' : 'movidos';
+      const rotuloFalhas = falha === 1 ? 'falhou' : 'falharam';
+      const mensagem = falha === 0 ? `${sucesso} ${rotuloMovidos}` : `${sucesso} ${rotuloMovidos}, ${falha} ${rotuloFalhas}`;
       setToast({
+        id: ++proximoToastIdRef.current,
         mensagem,
         acao:
           sucesso > 0
@@ -344,11 +360,17 @@ export default function FunilPage() {
     });
     setPagina(1);
     setSelecionados(new Set());
+    // Fecha o menu de destino junto -- ele fica ligado à seleção que acabou
+    // de ser limpa, então deixá-lo aberto mostraria um menu "flutuante" sem
+    // nenhuma linha selecionada por trás dele.
+    setMostrandoMenuLote(false);
   }
 
   function handlePaginaChange(proxima: number) {
     setPagina(proxima);
     setSelecionados(new Set());
+    // Mesmo motivo do handleOrdenacaoChange acima.
+    setMostrandoMenuLote(false);
   }
 
   const chavesExtras = Object.keys(funil).filter(
@@ -493,14 +515,40 @@ export default function FunilPage() {
             </Button>
           </div>
           {selecionados.size > 0 && (
-            <BarraSelecao
-              quantidade={selecionados.size}
-              onMoverEtapa={() => {
-                if (loteEmAndamento) return;
-                setMostrandoMenuLote(true);
-              }}
-              onLimparSelecao={() => setSelecionados(new Set())}
-            />
+            <div className="flex items-center gap-2">
+              <BarraSelecao
+                quantidade={selecionados.size}
+                onMoverEtapa={() => {
+                  if (loteEmAndamento) return;
+                  setMostrandoMenuLote(true);
+                }}
+                onLimparSelecao={() => {
+                  setSelecionados(new Set());
+                  // Mesmo motivo do handleOrdenacaoChange/handlePaginaChange:
+                  // o menu de destino não faz sentido sem seleção por trás.
+                  setMostrandoMenuLote(false);
+                }}
+                desabilitado={loteEmAndamento}
+              />
+              {mostrandoMenuLote && (
+                <div className="flex gap-2">
+                  {colunas.map((c) => (
+                    <Button
+                      key={c.chave}
+                      variant="secondary"
+                      disabled={loteEmAndamento}
+                      onClick={() => {
+                        if (loteEmAndamento) return;
+                        setMostrandoMenuLote(false);
+                        void moverEmLote([...selecionados], c.chave);
+                      }}
+                    >
+                      {c.titulo}
+                    </Button>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
         </div>
 
@@ -535,6 +583,7 @@ export default function FunilPage() {
               onSelecaoChange={setSelecionados}
               ordenacao={ordenacao}
               onOrdenacaoChange={handleOrdenacaoChange}
+              rotuloLinha={(l) => l.nomeCandidato}
             />
             <Paginacao
               paginaAtual={pagina}
@@ -546,27 +595,8 @@ export default function FunilPage() {
           </>
         )}
 
-        {mostrandoMenuLote && (
-          <div className="mt-2 flex gap-2">
-            {colunas.map((c) => (
-              <Button
-                key={c.chave}
-                variant="secondary"
-                disabled={loteEmAndamento}
-                onClick={() => {
-                  if (loteEmAndamento) return;
-                  setMostrandoMenuLote(false);
-                  void moverEmLote([...selecionados], c.chave);
-                }}
-              >
-                {c.titulo}
-              </Button>
-            ))}
-          </div>
-        )}
-
         {toast && (
-          <Toast mensagem={toast.mensagem} acao={toast.acao} aoFechar={() => setToast(null)} />
+          <Toast key={toast.id} mensagem={toast.mensagem} acao={toast.acao} aoFechar={() => setToast(null)} />
         )}
       </div>
     </PainelShell>

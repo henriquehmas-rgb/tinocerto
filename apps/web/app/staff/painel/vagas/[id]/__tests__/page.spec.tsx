@@ -737,7 +737,9 @@ describe('FunilPage', () => {
 
     // Só Ana (triagem) precisava mover -- Bruno e Carla já estavam em
     // entrevista, então não geram chamada nenhuma nem entram na contagem.
-    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('1 movidos'));
+    // O toast usa a forma singular pra contagem 1 -- "1 movido", não "1
+    // movidos" (achado F4 da revisão final).
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('1 movido'));
     expect(staffPanelClient.moverEtapa).toHaveBeenCalledTimes(1);
     expect(staffPanelClient.moverEtapa).toHaveBeenCalledWith('app-1', 'entrevista');
   });
@@ -810,7 +812,8 @@ describe('FunilPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /mover etapa/i }));
     fireEvent.click(screen.getByRole('button', { name: /^entrevista$/i }));
 
-    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('1 movidos, 1 falharam'));
+    // "1 movido, 1 falhou" -- singular pra cada contagem que for 1 (achado F4).
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('1 movido, 1 falhou'));
 
     vi.mocked(staffPanelClient.moverEtapa).mockClear();
     vi.mocked(staffPanelClient.moverEtapa).mockResolvedValue(undefined);
@@ -869,7 +872,7 @@ describe('FunilPage', () => {
     fireEvent.click(within(screen.getByText('Ana').closest('tr')!).getByRole('checkbox'));
     fireEvent.click(screen.getByRole('button', { name: /mover etapa/i }));
     fireEvent.click(screen.getByRole('button', { name: /^entrevista$/i }));
-    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('1 movidos'));
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('1 movido'));
 
     vi.mocked(staffPanelClient.moverEtapa).mockClear();
     const botaoDesfazer = screen.getByRole('button', { name: /desfazer/i });
@@ -923,6 +926,91 @@ describe('FunilPage', () => {
     // O refetch devolve só 1 candidatura no total (1 página) -- a página 2
     // em que o recrutador estava não existe mais, e precisa voltar pra 1.
     await waitFor(() => expect(screen.getByRole('button', { name: 'Anterior' })).toBeDisabled());
+  });
+
+  it('trocar a coluna de ordenação limpa a seleção da tabela (achado F1: a "Decisão: seleção é por página" existe pra evitar mover em lote candidatos que o recrutador nunca viu numa ordenação diferente)', async () => {
+    vi.mocked(staffPanelClient.obterFunil).mockResolvedValue({
+      funil: {
+        triagem: [
+          { id: 'app-1', personId: 'p-1', nomeCandidato: 'Ana', criadoEm: new Date().toISOString(), assessmentStatus: null, origemCanal: null, scoreAderencia: null },
+        ],
+      },
+      conversao: { triagem: null },
+    });
+
+    render(<FunilPage />);
+    await waitFor(() => expect(screen.getByText('Ana')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /visão em tabela/i }));
+    await waitFor(() => expect(screen.getByRole('table')).toBeInTheDocument());
+
+    fireEvent.click(within(screen.getByText('Ana').closest('tr')!).getByRole('checkbox'));
+    await waitFor(() => expect(screen.getByText('1 selecionado')).toBeInTheDocument());
+
+    // Ordenação inicial é por idade -- clicar em "Nome" troca a coluna ativa.
+    fireEvent.click(screen.getByText('Nome'));
+
+    expect(screen.queryByText('1 selecionado')).toBeNull();
+  });
+
+  it('trocar de página limpa a seleção da tabela (achado F1: mesma razão da "Decisão: seleção é por página")', async () => {
+    const candidatura = (i: number) => ({
+      id: `app-${i}`,
+      personId: `p-${i}`,
+      nomeCandidato: `Candidato ${i}`,
+      criadoEm: new Date().toISOString(),
+      assessmentStatus: null,
+      origemCanal: null,
+      scoreAderencia: null,
+    });
+    const muitasCandidaturas = Array.from({ length: 26 }, (_, i) => candidatura(i + 1));
+
+    vi.mocked(staffPanelClient.obterFunil).mockResolvedValue({
+      funil: { triagem: muitasCandidaturas },
+      conversao: { triagem: null },
+    });
+
+    render(<FunilPage />);
+    await waitFor(() => expect(screen.getByText('Candidato 1')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /visão em tabela/i }));
+    await waitFor(() => expect(screen.getByRole('table')).toBeInTheDocument());
+
+    fireEvent.click(within(screen.getByText('Candidato 1').closest('tr')!).getByRole('checkbox'));
+    await waitFor(() => expect(screen.getByText('1 selecionado')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Próxima' }));
+
+    expect(screen.queryByText('1 selecionado')).toBeNull();
+  });
+
+  it('cicla a ordenação da coluna Nome ao clicar repetidamente: ascendente -> descendente -> nenhuma (achado F10)', async () => {
+    vi.mocked(staffPanelClient.obterFunil).mockResolvedValue({
+      funil: {
+        triagem: [
+          { id: 'app-1', personId: 'p-1', nomeCandidato: 'Ana', criadoEm: new Date().toISOString(), assessmentStatus: null, origemCanal: null, scoreAderencia: null },
+          { id: 'app-2', personId: 'p-2', nomeCandidato: 'Bruno', criadoEm: new Date().toISOString(), assessmentStatus: null, origemCanal: null, scoreAderencia: null },
+        ],
+      },
+      conversao: { triagem: null },
+    });
+
+    render(<FunilPage />);
+    await waitFor(() => expect(screen.getByText('Ana')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /visão em tabela/i }));
+    await waitFor(() => expect(screen.getByRole('table')).toBeInTheDocument());
+
+    const cabecalhoNome = screen.getByText('Nome').closest('th')!;
+    // A ordenação inicial da página é por idade -- Nome é ordenável mas
+    // não é a coluna ativa, então começa "none".
+    expect(cabecalhoNome).toHaveAttribute('aria-sort', 'none');
+
+    fireEvent.click(cabecalhoNome);
+    expect(cabecalhoNome).toHaveAttribute('aria-sort', 'ascending');
+
+    fireEvent.click(cabecalhoNome);
+    expect(cabecalhoNome).toHaveAttribute('aria-sort', 'descending');
+
+    fireEvent.click(cabecalhoNome);
+    expect(cabecalhoNome).toHaveAttribute('aria-sort', 'none');
   });
 
 });
