@@ -1,12 +1,13 @@
-import { BadRequestException, Body, Controller, Get, Param, Patch, Post, Req, UseGuards, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Logger, Param, Patch, Post, Req, UseGuards, NotFoundException } from '@nestjs/common';
 import { ArrayNotEmpty, IsArray, IsNotEmpty, IsOptional, IsString, IsUUID, ValidateIf } from 'class-validator';
 import { Request } from 'express';
 import { TenantContext } from '../database/tenant-context';
 import { DatabaseService } from '../database/database.service';
 import { CerbosGuard } from '../authz/cerbos.guard';
 import { CerbosCheck } from '../authz/cerbos-check.decorator';
-import { JobService } from './job.service';
+import { JobService, CandidaturaResumo } from './job.service';
 import { JobRecrutadorService, RecrutadorInvalidoError } from './job-recrutador.service';
+import { AdherenceService } from '../matching/adherence.service';
 
 export class CreateJobDto {
   @IsUUID()
@@ -98,11 +99,13 @@ interface RequestWithAuthContext extends Request {
 @UseGuards(CerbosGuard)
 export class JobController {
   private readonly tenantContext: TenantContext;
+  private readonly logger = new Logger(JobController.name);
 
   constructor(
     private readonly jobService: JobService,
     private readonly jobRecrutadorService: JobRecrutadorService,
     databaseService: DatabaseService,
+    private readonly adherenceService: AdherenceService,
   ) {
     this.tenantContext = new TenantContext(databaseService.pool);
   }
@@ -193,7 +196,32 @@ export class JobController {
         userId: req.userId,
         userRoles: req.userRoles,
       });
-      return this.jobService.funil(client, { tenantId: req.tenantId, jobId: id });
+
+      const { funil, conversao } = await this.jobService.funil(client, { tenantId: req.tenantId, jobId: id });
+
+      const candidatos = Object.values(funil)
+        .flat()
+        .map((c) => ({ applicationId: c.id, personId: c.personId }));
+
+      // Fit é best-effort: o funil é a tela de trabalho do recrutador e não
+      // pode cair porque o matching quebrou. Falha vira score nulo em todos
+      // os cards, registrada no log.
+      let scores = new Map<string, number | null>();
+      try {
+        scores = await this.adherenceService.porCandidaturasDaVaga(client, { jobId: id, candidatos });
+      } catch (err) {
+        this.logger.error(
+          `Falha ao calcular aderência do funil da vaga ${id} -- devolvendo funil sem score`,
+          err as Error,
+        );
+      }
+
+      const funilComScore: Record<string, (CandidaturaResumo & { scoreAderencia: number | null })[]> = {};
+      for (const [etapa, candidaturas] of Object.entries(funil)) {
+        funilComScore[etapa] = candidaturas.map((c) => ({ ...c, scoreAderencia: scores.get(c.id) ?? null }));
+      }
+
+      return { funil: funilComScore, conversao };
     });
   }
 

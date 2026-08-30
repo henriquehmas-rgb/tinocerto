@@ -7,11 +7,13 @@ import { JobService } from '../job.service';
 import { JobRecrutadorService, RecrutadorInvalidoError } from '../job-recrutador.service';
 import { DatabaseService } from '../../database/database.service';
 import { CerbosGuard } from '../../authz/cerbos.guard';
+import { AdherenceService } from '../../matching/adherence.service';
 
 describe('JobController', () => {
   async function buildController(
     jobServiceMock: Partial<Record<keyof JobService, jest.Mock>>,
     jobRecrutadorServiceMock: Partial<Record<keyof JobRecrutadorService, jest.Mock>> = {},
+    adherenceServiceMock: Partial<Record<keyof AdherenceService, jest.Mock>> = {},
   ) {
     const fakeClient = { query: jest.fn().mockResolvedValue({ rows: [] }), release: jest.fn() };
     const fakePool = { connect: jest.fn().mockResolvedValue(fakeClient) };
@@ -21,6 +23,7 @@ describe('JobController', () => {
         { provide: JobService, useValue: jobServiceMock },
         { provide: JobRecrutadorService, useValue: jobRecrutadorServiceMock },
         { provide: DatabaseService, useValue: { pool: fakePool } },
+        { provide: AdherenceService, useValue: adherenceServiceMock },
       ],
     })
       .overrideGuard(CerbosGuard)
@@ -28,6 +31,54 @@ describe('JobController', () => {
       .compile();
     return moduleRef.get(JobController);
   }
+
+  describe('funil', () => {
+    it('acrescenta scoreAderencia em cada candidatura', async () => {
+      const funilMock = jest.fn().mockResolvedValue({
+        funil: {
+          triagem: [
+            { id: 'app-1', personId: 'p-1', nomeCandidato: 'Ana', criadoEm: new Date(), assessmentStatus: null, origemCanal: null },
+          ],
+        },
+        conversao: { triagem: null },
+      });
+      const controller = await buildController(
+        { funil: funilMock },
+        { exigirAcesso: jest.fn().mockResolvedValue(undefined) },
+        { porCandidaturasDaVaga: jest.fn().mockResolvedValue(new Map([['app-1', 72]])) },
+      );
+      const req = { tenantId: 'tenant-1', userId: 'user-1', userRoles: ['recrutador'] } as any;
+
+      const resposta = await controller.funil(req, 'vaga-1');
+
+      expect(resposta.funil.triagem[0].scoreAderencia).toBe(72);
+      expect(resposta.conversao).toEqual({ triagem: null });
+    });
+
+    it('renderiza o funil mesmo quando o cálculo de aderência falha', async () => {
+      // O funil é a tela de trabalho do recrutador. Ela não pode cair
+      // porque o subsistema de matching quebrou -- fit é best-effort.
+      const funilMock = jest.fn().mockResolvedValue({
+        funil: {
+          triagem: [
+            { id: 'app-1', personId: 'p-1', nomeCandidato: 'Ana', criadoEm: new Date(), assessmentStatus: null, origemCanal: null },
+          ],
+        },
+        conversao: { triagem: null },
+      });
+      const controller = await buildController(
+        { funil: funilMock },
+        { exigirAcesso: jest.fn().mockResolvedValue(undefined) },
+        { porCandidaturasDaVaga: jest.fn().mockRejectedValue(new Error('person_profile indisponível')) },
+      );
+      const req = { tenantId: 'tenant-1', userId: 'user-1', userRoles: ['recrutador'] } as any;
+
+      const resposta = await controller.funil(req, 'vaga-1');
+
+      expect(resposta.funil.triagem[0].scoreAderencia).toBeNull();
+      expect(resposta.funil.triagem[0].nomeCandidato).toBe('Ana');
+    });
+  });
 
   it('GET / delega para jobService.listar com tenantId/userId/userRoles da requisição', async () => {
     const listarMock = jest
