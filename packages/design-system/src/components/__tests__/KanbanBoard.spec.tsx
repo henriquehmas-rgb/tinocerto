@@ -1,6 +1,6 @@
 import React from "react";
 import { describe, expect, it, vi } from "vitest";
-import { render, screen, fireEvent, within } from "@testing-library/react";
+import { render, screen, fireEvent, within, act } from "@testing-library/react";
 import { KanbanBoard, type KanbanBoardProps } from "../KanbanBoard";
 
 interface ItemTeste {
@@ -109,6 +109,22 @@ describe("KanbanBoard - cabeçalho e drop", () => {
     expect(within(triagem).queryByTestId("conversao")).toBeNull();
   });
 
+  it("mostra 0% quando a conversão é exatamente zero (zero é uma taxa legítima, não 'ausência de dado')", () => {
+    // Risco sinalizado: uma guarda escrita como checagem "truthy"
+    // (`conversao ? ... : null`) esconderia esse zero por engano. A guarda
+    // correta compara explicitamente com null/undefined.
+    render(
+      <KanbanBoard
+        colunas={[{ chave: "triagem", titulo: "Triagem", conversao: 0 }]}
+        itens={{ triagem: [] }}
+        renderItem={(item: ItemTeste) => <span>{item.nome}</span>}
+        onMoverItem={vi.fn()}
+      />,
+    );
+    const triagem = screen.getByTestId("coluna-triagem");
+    expect(within(triagem).getByTestId("conversao")).toHaveTextContent("0%");
+  });
+
   it("avisa a chave da coluna ao soltar um item nela", () => {
     const onSoltarItem = vi.fn();
     renderBoard({ onSoltarItem });
@@ -121,7 +137,75 @@ describe("KanbanBoard - cabeçalho e drop", () => {
     // é o erro clássico de drag-and-drop nativo.
     renderBoard({ onSoltarItem: vi.fn() });
     const evento = new Event("dragover", { bubbles: true, cancelable: true });
-    screen.getByTestId("coluna-entrevista").dispatchEvent(evento);
+    act(() => {
+      screen.getByTestId("coluna-entrevista").dispatchEvent(evento);
+    });
     expect(evento.defaultPrevented).toBe(true);
+  });
+});
+
+// O jsdom usado neste projeto não implementa o construtor nativo
+// `DragEvent` (window.DragEvent é undefined). O fireEvent.dragLeave do
+// testing-library cai então para um `Event` genérico, que ignora
+// silenciosamente a opção `relatedTarget` — o campo não existe em Event.
+// Por isso construímos o evento manualmente e definimos `relatedTarget`
+// via Object.defineProperty antes de despachar, igual ao teste de
+// dragover logo acima que já despacha um Event bruto diretamente.
+function dispararDragLeave(elemento: Element, relatedTarget: EventTarget | null) {
+  const evento = new Event("dragleave", { bubbles: true, cancelable: true });
+  Object.defineProperty(evento, "relatedTarget", { value: relatedTarget });
+  act(() => {
+    elemento.dispatchEvent(evento);
+  });
+}
+
+describe("KanbanBoard - destaque de alvo de drop", () => {
+  it("marca a coluna como alvo ao arrastar um item sobre ela, e desmarca ao sair", () => {
+    renderBoard({ onSoltarItem: vi.fn() });
+    const coluna = screen.getByTestId("coluna-entrevista");
+
+    fireEvent.dragEnter(coluna);
+    expect(coluna).toHaveAttribute("data-sobreposto", "true");
+
+    // Sai da coluna de fato: relatedTarget fica fora dela.
+    dispararDragLeave(coluna, document.body);
+    expect(coluna).not.toHaveAttribute("data-sobreposto");
+  });
+
+  it("não pisca o destaque quando o dragleave é disparado ao entrar num card filho", () => {
+    // Armadilha clássica: dragleave dispara ao cruzar para um elemento
+    // filho (o card), não só ao sair da coluna. O destaque deve persistir.
+    renderBoard({ onSoltarItem: vi.fn() });
+    const coluna = screen.getByTestId("coluna-entrevista");
+
+    fireEvent.dragEnter(coluna);
+    expect(coluna).toHaveAttribute("data-sobreposto", "true");
+
+    const cardFilho = within(coluna).getByText("Bruno");
+    dispararDragLeave(coluna, cardFilho);
+    expect(coluna).toHaveAttribute("data-sobreposto", "true");
+  });
+
+  it("desmarca o alvo ao soltar o item", () => {
+    const onSoltarItem = vi.fn();
+    renderBoard({ onSoltarItem });
+    const coluna = screen.getByTestId("coluna-entrevista");
+
+    fireEvent.dragEnter(coluna);
+    expect(coluna).toHaveAttribute("data-sobreposto", "true");
+
+    fireEvent.drop(coluna);
+    expect(coluna).not.toHaveAttribute("data-sobreposto");
+  });
+
+  it("nunca marca o alvo numa coluna sem onSoltarItem", () => {
+    renderBoard();
+    const coluna = screen.getByTestId("coluna-entrevista");
+
+    fireEvent.dragEnter(coluna);
+    expect(coluna).not.toHaveAttribute("data-sobreposto");
+
+    fireEvent.dragOver(coluna);
+    expect(coluna).not.toHaveAttribute("data-sobreposto");
   });
 });
