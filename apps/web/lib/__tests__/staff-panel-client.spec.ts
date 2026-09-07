@@ -116,3 +116,55 @@ describe('staffPanelClient.obterFunilConsolidado', () => {
     );
   });
 });
+
+describe('staffPanelClient.listarRequisicoes', () => {
+  const originalFetch = global.fetch;
+
+  beforeEach(() => {
+    localStorage.setItem('tinocerto_staff_access_token', 'token-de-teste');
+    localStorage.setItem('tinocerto_staff_refresh_token', 'refresh-de-teste');
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    localStorage.clear();
+    vi.restoreAllMocks();
+  });
+
+  it('busca /v1/requisitions', async () => {
+    global.fetch = vi
+      .fn()
+      .mockResolvedValue(new Response(JSON.stringify([{ id: 'req-1', titulo: 'Inicial', status: 'aprovada' }])));
+
+    const requisicoes = await staffPanelClient.listarRequisicoes();
+
+    expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining('/v1/requisitions'), expect.anything());
+    expect(requisicoes).toEqual([{ id: 'req-1', titulo: 'Inicial', status: 'aprovada' }]);
+  });
+});
+
+describe('staffPanelClient.listarEquipe', () => {
+  const originalFetch = global.fetch;
+
+  beforeEach(() => {
+    localStorage.setItem('tinocerto_staff_access_token', 'token-de-teste');
+    localStorage.setItem('tinocerto_staff_refresh_token', 'refresh-de-teste');
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    localStorage.clear();
+    vi.restoreAllMocks();
+  });
+
+  it('busca /v1/staff', async () => {
+    global.fetch = vi
+      .fn()
+      .mockResolvedValue(new Response(JSON.stringify([{ id: 'u1', email: 'ana@empresa.example', papeis: ['recrutador'] }])));
+
+    const equipe = await staffPanelClient.listarEquipe();
+
+    expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining('/v1/staff'), expect.anything());
+    expect(equipe).toEqual([{ id: 'u1', email: 'ana@empresa.example', papeis: ['recrutador'] }]);
+  });
+});
