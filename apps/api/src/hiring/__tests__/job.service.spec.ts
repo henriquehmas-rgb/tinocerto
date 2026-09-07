@@ -786,7 +786,12 @@ describe('JobService', () => {
 
       const datas = tendencia.map((dia) => dia.data);
       expect(datas).toEqual([...datas].sort());
-      expect(datas[datas.length - 1]).toBe(new Date().toISOString().slice(0, 10));
+      const hojeResult = await adminPool.query<{ hoje: string }>(
+        `SELECT to_char(now() AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM-DD') AS hoje`,
+      );
+      const hojeStr = hojeResult.rows[0].hoje;
+
+      expect(datas[datas.length - 1]).toBe(hojeStr);
     });
 
     it('recrutador sem a vaga atribuída não vê as candidaturas dela na tendência', async () => {
