@@ -142,6 +142,22 @@ export class JobController {
       ),
     );
   }
+
+  @Get('funil-agregado')
+  @CerbosCheck('job', 'read')
+  async funilAgregado(@Req() req: RequestWithAuthContext, @Query('janela') janelaRaw?: string) {
+    const janela = janelaRaw ?? '30d';
+    if (janela !== '30d' && janela !== '90d' && janela !== 'tudo') {
+      throw new BadRequestException("janela deve ser '30d', '90d' ou 'tudo'");
+    }
+    return this.tenantContext.run(req.tenantId, (client) =>
+      this.jobService.obterFunilConsolidado(
+        client,
+        { tenantId: req.tenantId, userId: req.userId, userRoles: req.userRoles },
+        janela,
+      ),
+    );
+  }
   @Post()
   @CerbosCheck('job', 'create')
   async create(@Req() req: RequestWithAuthContext, @Body() dto: CreateJobDto) {

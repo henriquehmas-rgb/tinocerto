@@ -99,6 +99,14 @@ export interface TendenciaCandidaturasDia {
   total: number;
 }
 
+export type JanelaFunilAgregado = '30d' | '90d' | 'tudo';
+
+export interface EtapaFunilAgregado {
+  etapa: string;
+  total: number;
+  conversao: number | null;
+}
+
 @Injectable()
 export class JobService {
   private readonly outbox = new OutboxService();
@@ -304,6 +312,16 @@ export class JobService {
     const alcancaram: Record<string, number> = {};
     for (const row of result.rows) alcancaram[row.etapa] = Number(row.total);
 
+    return this.calcularConversaoPorEtapa(alcancaram);
+  }
+
+  // Extraído de conversaoPorEtapa: primeira etapa nunca tem conversão (não
+  // existe etapa anterior para comparar); demais etapas dividem pelo total
+  // que alcançou a etapa anterior, null quando esse total é 0 (sem
+  // denominador, não "0%"). Compartilhado com obterFunilConsolidado, que
+  // faz a mesma pergunta ("quem alcançou cada etapa?") num escopo maior
+  // que uma única vaga.
+  private calcularConversaoPorEtapa(alcancaram: Record<string, number>): Record<string, number | null> {
     const conversao: Record<string, number | null> = {};
     ORDEM_ETAPAS.forEach((etapa, indice) => {
       if (indice === 0) {
@@ -423,6 +441,71 @@ export class JobService {
     const result = await client.query<{ data: string; total: string }>(query, params);
 
     return result.rows.map((row) => ({ data: row.data, total: Number(row.total) }));
+  }
+
+  async obterFunilConsolidado(
+    client: PoolClient,
+    input: ListarJobsInput,
+    janela: JanelaFunilAgregado,
+  ): Promise<EtapaFunilAgregado[]> {
+    const somenteRecrutador = !input.userRoles.some((papel) => PAPEIS_COM_ACESSO_TOTAL.includes(papel));
+    const desde = janela === 'tudo' ? new Date(0) : new Date(Date.now() - (janela === '30d' ? 30 : 90) * 86400000);
+
+    // Mesma união de três ramos que conversaoPorEtapa usa por vaga (etapa
+    // atual + to_state + from_state das transições), mas sem filtro por
+    // job_id -- soma o tenant (ou as vagas do recrutador) inteiro -- e com
+    // o filtro de janela aplicado em application.criado_em: a janela
+    // decide QUAIS candidaturas entram na conta, não quais transições.
+    const query = somenteRecrutador
+      ? `SELECT etapa, count(DISTINCT application_id)::text AS total
+         FROM (
+           SELECT a.id AS application_id, a.etapa_funil AS etapa
+           FROM application a
+           JOIN job_recrutador jr ON jr.job_id = a.job_id AND jr.tenant_id = a.tenant_id
+           WHERE a.tenant_id = $1 AND jr.staff_id = $3 AND a.criado_em >= $2
+           UNION
+           SELECT t.application_id, t.to_state AS etapa
+           FROM pipeline_stage_transition t
+           JOIN application a2 ON a2.id = t.application_id
+           JOIN job_recrutador jr2 ON jr2.job_id = a2.job_id AND jr2.tenant_id = a2.tenant_id
+           WHERE t.tenant_id = $1 AND jr2.staff_id = $3 AND a2.criado_em >= $2
+           UNION
+           SELECT t.application_id, t.from_state AS etapa
+           FROM pipeline_stage_transition t
+           JOIN application a2 ON a2.id = t.application_id
+           JOIN job_recrutador jr2 ON jr2.job_id = a2.job_id AND jr2.tenant_id = a2.tenant_id
+           WHERE t.tenant_id = $1 AND jr2.staff_id = $3 AND a2.criado_em >= $2 AND t.from_state IS NOT NULL
+         ) alcances
+         GROUP BY etapa`
+      : `SELECT etapa, count(DISTINCT application_id)::text AS total
+         FROM (
+           SELECT a.id AS application_id, a.etapa_funil AS etapa
+           FROM application a
+           WHERE a.tenant_id = $1 AND a.criado_em >= $2
+           UNION
+           SELECT t.application_id, t.to_state AS etapa
+           FROM pipeline_stage_transition t
+           JOIN application a2 ON a2.id = t.application_id
+           WHERE t.tenant_id = $1 AND a2.criado_em >= $2
+           UNION
+           SELECT t.application_id, t.from_state AS etapa
+           FROM pipeline_stage_transition t
+           JOIN application a2 ON a2.id = t.application_id
+           WHERE t.tenant_id = $1 AND a2.criado_em >= $2 AND t.from_state IS NOT NULL
+         ) alcances
+         GROUP BY etapa`;
+    const params = somenteRecrutador ? [input.tenantId, desde, input.userId] : [input.tenantId, desde];
+    const result = await client.query<{ etapa: string; total: string }>(query, params);
+
+    const alcancaram: Record<string, number> = {};
+    for (const row of result.rows) alcancaram[row.etapa] = Number(row.total);
+
+    const conversao = this.calcularConversaoPorEtapa(alcancaram);
+    return ORDEM_ETAPAS.map((etapa) => ({
+      etapa,
+      total: alcancaram[etapa] ?? 0,
+      conversao: conversao[etapa],
+    }));
   }
 
   async editar(client: PoolClient, input: EditarJobInput): Promise<void> {

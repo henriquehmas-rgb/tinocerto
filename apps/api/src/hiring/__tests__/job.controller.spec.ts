@@ -151,6 +151,40 @@ describe('JobController', () => {
     await expect(controller.dashboardTendencia(req, 'abc')).rejects.toThrow(BadRequestException);
   });
 
+  it('GET funil-agregado delega para jobService.obterFunilConsolidado com janela=30d por padrão', async () => {
+    const obterFunilMock = jest.fn().mockResolvedValue([{ etapa: 'triagem', total: 5, conversao: null }]);
+    const controller = await buildController({ obterFunilConsolidado: obterFunilMock });
+    const req = { tenantId: 'tenant-1', userId: 'user-1', userRoles: ['recrutador'] } as any;
+
+    const result = await controller.funilAgregado(req, undefined);
+
+    expect(obterFunilMock).toHaveBeenCalledWith(
+      expect.anything(),
+      { tenantId: 'tenant-1', userId: 'user-1', userRoles: ['recrutador'] },
+      '30d',
+    );
+    expect(result).toEqual([{ etapa: 'triagem', total: 5, conversao: null }]);
+  });
+
+  it('GET funil-agregado aceita ?janela=90d e ?janela=tudo', async () => {
+    const obterFunilMock = jest.fn().mockResolvedValue([]);
+    const controller = await buildController({ obterFunilConsolidado: obterFunilMock });
+    const req = { tenantId: 'tenant-1', userId: 'user-1', userRoles: ['recrutador'] } as any;
+
+    await controller.funilAgregado(req, '90d');
+    expect(obterFunilMock).toHaveBeenCalledWith(expect.anything(), expect.anything(), '90d');
+
+    await controller.funilAgregado(req, 'tudo');
+    expect(obterFunilMock).toHaveBeenCalledWith(expect.anything(), expect.anything(), 'tudo');
+  });
+
+  it('GET funil-agregado rejeita janela inválida com 400', async () => {
+    const controller = await buildController({ obterFunilConsolidado: jest.fn() });
+    const req = { tenantId: 'tenant-1', userId: 'user-1', userRoles: ['recrutador'] } as any;
+
+    await expect(controller.funilAgregado(req, '7d')).rejects.toThrow(BadRequestException);
+  });
+
   it('POST :id/actions/atribuir-recrutadores delega para jobRecrutadorService.exigirAcesso e atribuir', async () => {
     const exigirAcessoMock = jest.fn().mockResolvedValue(undefined);
     const atribuirMock = jest.fn().mockResolvedValue(undefined);

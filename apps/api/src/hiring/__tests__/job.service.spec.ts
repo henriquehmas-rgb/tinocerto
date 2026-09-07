@@ -829,6 +829,128 @@ describe('JobService', () => {
     });
   });
 
+  describe('obterFunilConsolidado', () => {
+    let vagaId: string;
+    let recrutadorId: string;
+    let personTriagemId: string;
+    let personEntrevistaId: string;
+    let personAntigaId: string;
+
+    beforeAll(async () => {
+      const vaga = await adminPool.query<{ id: string }>(
+        `INSERT INTO job (tenant_id, requisition_id, titulo, seo_slug, publicado_em) VALUES ($1, $2, 'Vaga Funil Agregado', 'vaga-funil-agregado-0018', now()) RETURNING id`,
+        [tenantId, requisitionId],
+      );
+      vagaId = vaga.rows[0].id;
+
+      const staff = await adminPool.query<{ id: string }>(
+        `INSERT INTO user_account (tenant_id, email) VALUES ($1, 'recrutador-funil-agregado@empresa-018.example') RETURNING id`,
+        [tenantId],
+      );
+      recrutadorId = staff.rows[0].id;
+      await adminPool.query(`INSERT INTO job_recrutador (job_id, tenant_id, staff_id) VALUES ($1, $2, $3)`, [
+        vagaId,
+        tenantId,
+        recrutadorId,
+      ]);
+
+      const p1 = await adminPool.query<{ id: string }>(
+        `INSERT INTO person (cpf_hash, cpf_encriptado, nome, email_principal)
+         VALUES ('hash-funil-agregado-001', '{"ciphertext":"x","iv":"y","authTag":"z","wrappedDek":"w"}', 'Fátima Funil', 'fatima.funil@example.com')
+         RETURNING id`,
+      );
+      personTriagemId = p1.rows[0].id;
+      await adminPool.query(
+        `INSERT INTO application (tenant_id, job_id, person_id, etapa_funil) VALUES ($1, $2, $3, 'triagem')`,
+        [tenantId, vagaId, personTriagemId],
+      );
+
+      const p2 = await adminPool.query<{ id: string }>(
+        `INSERT INTO person (cpf_hash, cpf_encriptado, nome, email_principal)
+         VALUES ('hash-funil-agregado-002', '{"ciphertext":"x","iv":"y","authTag":"z","wrappedDek":"w"}', 'Gustavo Funil', 'gustavo.funil@example.com')
+         RETURNING id`,
+      );
+      personEntrevistaId = p2.rows[0].id;
+      await adminPool.query(
+        `INSERT INTO application (tenant_id, job_id, person_id, etapa_funil) VALUES ($1, $2, $3, 'entrevista')`,
+        [tenantId, vagaId, personEntrevistaId],
+      );
+
+      // Candidatura "antiga" (criado_em manualmente no passado) -- prova
+      // que a janela de 30 dias a exclui mas 'tudo' a inclui.
+      const p3 = await adminPool.query<{ id: string }>(
+        `INSERT INTO person (cpf_hash, cpf_encriptado, nome, email_principal)
+         VALUES ('hash-funil-agregado-003', '{"ciphertext":"x","iv":"y","authTag":"z","wrappedDek":"w"}', 'Helena Antiga', 'helena.antiga@example.com')
+         RETURNING id`,
+      );
+      personAntigaId = p3.rows[0].id;
+      await adminPool.query(
+        `INSERT INTO application (tenant_id, job_id, person_id, etapa_funil, criado_em) VALUES ($1, $2, $3, 'triagem', now() - interval '60 days')`,
+        [tenantId, vagaId, personAntigaId],
+      );
+    });
+
+    afterAll(async () => {
+      await adminPool.query('DELETE FROM application WHERE job_id = $1', [vagaId]);
+      await adminPool.query('DELETE FROM person WHERE id = ANY($1)', [
+        [personTriagemId, personEntrevistaId, personAntigaId],
+      ]);
+      await adminPool.query('DELETE FROM job_recrutador WHERE job_id = $1', [vagaId]);
+      await adminPool.query('DELETE FROM user_account WHERE id = $1', [recrutadorId]);
+      await adminPool.query('DELETE FROM job WHERE id = $1', [vagaId]);
+    });
+
+    it('devolve um item por etapa de ORDEM_ETAPAS, nessa ordem, com total e conversao', async () => {
+      const ctx = new TenantContext(appPool);
+      const service = new JobService(new RequisitionService(), new JobRecrutadorService());
+
+      const funil = await ctx.run(tenantId, (client) =>
+        service.obterFunilConsolidado(client, { tenantId, userId: recrutadorId, userRoles: ['recrutador'] }, '30d'),
+      );
+
+      expect(funil.map((item) => item.etapa)).toEqual(['triagem', 'entrevista']);
+      expect(funil[0].total).toBeGreaterThanOrEqual(1);
+      expect(funil[0].conversao).toBeNull();
+      expect(funil[1].total).toBeGreaterThanOrEqual(1);
+    });
+
+    it('janela 30d exclui candidatura mais antiga que 30 dias', async () => {
+      const ctx = new TenantContext(appPool);
+      const service = new JobService(new RequisitionService(), new JobRecrutadorService());
+
+      const funil30d = await ctx.run(tenantId, (client) =>
+        service.obterFunilConsolidado(client, { tenantId, userId: recrutadorId, userRoles: ['recrutador'] }, '30d'),
+      );
+      const funilTudo = await ctx.run(tenantId, (client) =>
+        service.obterFunilConsolidado(client, { tenantId, userId: recrutadorId, userRoles: ['recrutador'] }, 'tudo'),
+      );
+
+      const triagem30d = funil30d.find((item) => item.etapa === 'triagem')!.total;
+      const triagemTudo = funilTudo.find((item) => item.etapa === 'triagem')!.total;
+      expect(triagemTudo).toBe(triagem30d + 1);
+    });
+
+    it('recrutador sem a vaga atribuída não vê nada dela no funil agregado', async () => {
+      const ctx = new TenantContext(appPool);
+      const service = new JobService(new RequisitionService(), new JobRecrutadorService());
+      const outroStaff = await adminPool.query<{ id: string }>(
+        `INSERT INTO user_account (tenant_id, email) VALUES ($1, 'outro-recrutador-funil-agregado@empresa-018.example') RETURNING id`,
+        [tenantId],
+      );
+
+      const funil = await ctx.run(tenantId, (client) =>
+        service.obterFunilConsolidado(
+          client,
+          { tenantId, userId: outroStaff.rows[0].id, userRoles: ['recrutador'] },
+          'tudo',
+        ),
+      );
+
+      expect(funil.every((item) => item.total === 0)).toBe(true);
+      await adminPool.query('DELETE FROM user_account WHERE id = $1', [outroStaff.rows[0].id]);
+    });
+  });
+
   describe('editar', () => {
     it('atualiza titulo, descricao e habilidadesExigidas da vaga', async () => {
       const ctx = new TenantContext(appPool);

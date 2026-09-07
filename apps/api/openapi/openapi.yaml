@@ -62,6 +62,8 @@ paths:
     $ref: './paths/jobs.yaml#/dashboardMetrics'
   /v1/jobs/dashboard-tendencia:
     $ref: './paths/jobs.yaml#/dashboardTendencia'
+  /v1/jobs/funil-agregado:
+    $ref: './paths/jobs.yaml#/funilAgregado'
   /v1/jobs/{id}/actions/publish:
     $ref: './paths/jobs.yaml#/publish'
   /v1/jobs/{id}:

@@ -59,6 +59,26 @@ dashboardTendencia:
       '400':
         description: Parâmetro dias inválido (não é um inteiro entre 1 e 90).
 
+funilAgregado:
+  get:
+    operationId: getJobFunilAgregado
+    summary: Funil consolidado (uma linha por etapa de ORDEM_ETAPAS, com total e conversao) agregado sobre todas as vagas visíveis ao requisitante, filtrado por janela de tempo.
+    x-tinocerto-auth: session-only
+    parameters:
+      - name: janela
+        in: query
+        schema: { type: string, enum: [30d, 90d, tudo], default: 30d }
+    responses:
+      '200':
+        description: Uma linha por etapa de ORDEM_ETAPAS, nessa ordem.
+        content:
+          application/json:
+            schema:
+              type: array
+              items: { $ref: '../components/schemas/hiring.yaml#/schemas/EtapaFunilAgregado' }
+      '400':
+        description: Parâmetro janela inválido (não é '30d', '90d' nem 'tudo').
+
 publish:
   post:
     operationId: publishJob
