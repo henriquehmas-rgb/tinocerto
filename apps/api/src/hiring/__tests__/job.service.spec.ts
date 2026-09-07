@@ -690,8 +690,305 @@ describe('JobService', () => {
       expect(metricas.candidaturasEmAndamento).toBe(1);
       expect(metricas.porEstagio).toEqual({ triagem: 1 });
     });
+
+    it('ordena porEstagio por ORDEM_ETAPAS, não pela ordem do banco', async () => {
+      const ctx = new TenantContext(appPool);
+      const service = new JobService(new RequisitionService(), new JobRecrutadorService());
+
+      const metricas = await ctx.run(tenantId, (client) =>
+        service.obterMetricas(client, { tenantId, userId: adminId, userRoles: ['admin_tenant'] }),
+      );
+
+      expect(Object.keys(metricas.porEstagio)).toEqual(['triagem', 'entrevista']);
+    });
   });
 
+  describe('obterTendenciaCandidaturas', () => {
+    let vagaId: string;
+    let recrutadorId: string;
+    let outroRecrutadorId: string;
+    const personIds: string[] = [];
+
+    beforeAll(async () => {
+      const vaga = await adminPool.query<{ id: string }>(
+        `INSERT INTO job (tenant_id, requisition_id, titulo, seo_slug, publicado_em) VALUES ($1, $2, 'Vaga Tendência', 'vaga-tendencia-0018', now()) RETURNING id`,
+        [tenantId, requisitionId],
+      );
+      vagaId = vaga.rows[0].id;
+
+      const staff = await adminPool.query<{ id: string }>(
+        `INSERT INTO user_account (tenant_id, email) VALUES ($1, 'recrutador-tendencia@empresa-018.example') RETURNING id`,
+        [tenantId],
+      );
+      recrutadorId = staff.rows[0].id;
+      const outroStaff = await adminPool.query<{ id: string }>(
+        `INSERT INTO user_account (tenant_id, email) VALUES ($1, 'outro-recrutador-tendencia@empresa-018.example') RETURNING id`,
+        [tenantId],
+      );
+      outroRecrutadorId = outroStaff.rows[0].id;
+      await adminPool.query(`INSERT INTO job_recrutador (job_id, tenant_id, staff_id) VALUES ($1, $2, $3)`, [
+        vagaId,
+        tenantId,
+        recrutadorId,
+      ]);
+
+      // Duas candidaturas HOJE (criado_em = now(), default da coluna) e
+      // nenhuma ontem -- prova tanto a contagem quanto o dia com total 0.
+      for (let i = 0; i < 2; i++) {
+        const person = await adminPool.query<{ id: string }>(
+          `INSERT INTO person (cpf_hash, cpf_encriptado, nome, email_principal)
+           VALUES ($1, '{"ciphertext":"x","iv":"y","authTag":"z","wrappedDek":"w"}', $2, $3)
+           RETURNING id`,
+          [`hash-tendencia-${i}`, `Pessoa Tendência ${i}`, `pessoa.tendencia.${i}@example.com`],
+        );
+        personIds.push(person.rows[0].id);
+        await adminPool.query(
+          `INSERT INTO application (tenant_id, job_id, person_id, etapa_funil) VALUES ($1, $2, $3, 'triagem')`,
+          [tenantId, vagaId, person.rows[0].id],
+        );
+      }
+    });
+
+    afterAll(async () => {
+      await adminPool.query('DELETE FROM application WHERE job_id = $1', [vagaId]);
+      await adminPool.query('DELETE FROM person WHERE id = ANY($1)', [personIds]);
+      await adminPool.query('DELETE FROM job_recrutador WHERE job_id = $1', [vagaId]);
+      await adminPool.query('DELETE FROM user_account WHERE id = ANY($1)', [[recrutadorId, outroRecrutadorId]]);
+      await adminPool.query('DELETE FROM job WHERE id = $1', [vagaId]);
+    });
+
+    it('devolve um item por dia do intervalo, com total 0 nos dias sem candidatura', async () => {
+      const ctx = new TenantContext(appPool);
+      const service = new JobService(new RequisitionService(), new JobRecrutadorService());
+
+      const tendencia = await ctx.run(tenantId, (client) =>
+        service.obterTendenciaCandidaturas(client, { tenantId, userId: recrutadorId, userRoles: ['recrutador'] }, 7),
+      );
+
+      expect(tendencia).toHaveLength(7);
+      const hojeResult = await adminPool.query<{ hoje: string }>(
+        `SELECT to_char(now() AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM-DD') AS hoje`,
+      );
+      const hojeStr = hojeResult.rows[0].hoje;
+      const hoje = tendencia.find((dia) => dia.data === hojeStr);
+      expect(hoje?.total).toBe(2);
+      expect(tendencia.every((dia) => typeof dia.data === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dia.data))).toBe(true);
+      expect(tendencia.every((dia) => Number.isInteger(dia.total))).toBe(true);
+    });
+
+    it('ordena os dias em ordem ascendente terminando hoje', async () => {
+      const ctx = new TenantContext(appPool);
+      const service = new JobService(new RequisitionService(), new JobRecrutadorService());
+
+      const tendencia = await ctx.run(tenantId, (client) =>
+        service.obterTendenciaCandidaturas(client, { tenantId, userId: recrutadorId, userRoles: ['recrutador'] }, 7),
+      );
+
+      const datas = tendencia.map((dia) => dia.data);
+      expect(datas).toEqual([...datas].sort());
+      const hojeResult = await adminPool.query<{ hoje: string }>(
+        `SELECT to_char(now() AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM-DD') AS hoje`,
+      );
+      const hojeStr = hojeResult.rows[0].hoje;
+
+      expect(datas[datas.length - 1]).toBe(hojeStr);
+    });
+
+    it('recrutador sem a vaga atribuída não vê as candidaturas dela na tendência', async () => {
+      const ctx = new TenantContext(appPool);
+      const service = new JobService(new RequisitionService(), new JobRecrutadorService());
+
+      const tendencia = await ctx.run(tenantId, (client) =>
+        service.obterTendenciaCandidaturas(
+          client,
+          { tenantId, userId: outroRecrutadorId, userRoles: ['recrutador'] },
+          7,
+        ),
+      );
+
+      expect(tendencia.reduce((soma, dia) => soma + dia.total, 0)).toBe(0);
+    });
+
+    it('admin_tenant vê o tenant inteiro, sem depender de job_recrutador', async () => {
+      const ctx = new TenantContext(appPool);
+      const service = new JobService(new RequisitionService(), new JobRecrutadorService());
+
+      const tendencia = await ctx.run(tenantId, (client) =>
+        service.obterTendenciaCandidaturas(
+          client,
+          { tenantId, userId: '00000000-0000-0000-0000-000000000098', userRoles: ['admin_tenant'] },
+          7,
+        ),
+      );
+
+      const hojeResult = await adminPool.query<{ hoje: string }>(
+        `SELECT to_char(now() AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM-DD') AS hoje`,
+      );
+      const hojeStr = hojeResult.rows[0].hoje;
+      expect(tendencia.find((dia) => dia.data === hojeStr)?.total).toBeGreaterThanOrEqual(2);
+    });
+
+    it('candidatura das 22h BRT (01h UTC do dia seguinte) aparece no bucket do dia correto, nao do dia seguinte', async () => {
+      const ctx = new TenantContext(appPool);
+      const service = new JobService(new RequisitionService(), new JobRecrutadorService());
+
+      // 22h BRT de "ontem" = 01h UTC de "hoje" -- se o bucket fosse calculado
+      // em UTC (o bug que a Task 2 corrigiu), essa candidatura apareceria no
+      // dia de HOJE em vez do dia de ONTEM (BRT), que e o bucket correto.
+      const pessoaFronteira = await adminPool.query<{ id: string }>(
+        `INSERT INTO person (cpf_hash, cpf_encriptado, nome, email_principal)
+         VALUES ('hash-tendencia-fronteira', '{"ciphertext":"x","iv":"y","authTag":"z","wrappedDek":"w"}', 'Pessoa Fronteira', 'pessoa.fronteira@example.com')
+         RETURNING id`,
+      );
+      const criadoEmFronteira = await adminPool.query<{ criado_em_brt: string; ontem_brt: string }>(
+        `SELECT
+           (date_trunc('day', now() AT TIME ZONE 'America/Sao_Paulo') - interval '1 day' + interval '22 hours')
+             AT TIME ZONE 'America/Sao_Paulo' AS criado_em_brt,
+           to_char(date_trunc('day', now() AT TIME ZONE 'America/Sao_Paulo') - interval '1 day', 'YYYY-MM-DD') AS ontem_brt`,
+      );
+      const criadoEm = criadoEmFronteira.rows[0].criado_em_brt;
+      const ontemBrt = criadoEmFronteira.rows[0].ontem_brt;
+
+      await adminPool.query(
+        `INSERT INTO application (tenant_id, job_id, person_id, etapa_funil, criado_em) VALUES ($1, $2, $3, 'triagem', $4)`,
+        [tenantId, vagaId, pessoaFronteira.rows[0].id, criadoEm],
+      );
+
+      const tendencia = await ctx.run(tenantId, (client) =>
+        service.obterTendenciaCandidaturas(client, { tenantId, userId: recrutadorId, userRoles: ['recrutador'] }, 7),
+      );
+
+      const diaOntem = tendencia.find((dia) => dia.data === ontemBrt);
+      expect(diaOntem?.total).toBeGreaterThanOrEqual(1);
+
+      await adminPool.query('DELETE FROM application WHERE person_id = $1', [pessoaFronteira.rows[0].id]);
+      await adminPool.query('DELETE FROM person WHERE id = $1', [pessoaFronteira.rows[0].id]);
+    });
+  });
+
+  describe('obterFunilConsolidado', () => {
+    let vagaId: string;
+    let recrutadorId: string;
+    let outroStaffId: string;
+    let personTriagemId: string;
+    let personEntrevistaId: string;
+    let personAntigaId: string;
+
+    beforeAll(async () => {
+      const vaga = await adminPool.query<{ id: string }>(
+        `INSERT INTO job (tenant_id, requisition_id, titulo, seo_slug, publicado_em) VALUES ($1, $2, 'Vaga Funil Agregado', 'vaga-funil-agregado-0018', now()) RETURNING id`,
+        [tenantId, requisitionId],
+      );
+      vagaId = vaga.rows[0].id;
+
+      const staff = await adminPool.query<{ id: string }>(
+        `INSERT INTO user_account (tenant_id, email) VALUES ($1, 'recrutador-funil-agregado@empresa-018.example') RETURNING id`,
+        [tenantId],
+      );
+      recrutadorId = staff.rows[0].id;
+
+      const outroStaff = await adminPool.query<{ id: string }>(
+        `INSERT INTO user_account (tenant_id, email) VALUES ($1, 'outro-recrutador-funil-agregado@empresa-018.example') RETURNING id`,
+        [tenantId],
+      );
+      outroStaffId = outroStaff.rows[0].id;
+      await adminPool.query(`INSERT INTO job_recrutador (job_id, tenant_id, staff_id) VALUES ($1, $2, $3)`, [
+        vagaId,
+        tenantId,
+        recrutadorId,
+      ]);
+
+      const p1 = await adminPool.query<{ id: string }>(
+        `INSERT INTO person (cpf_hash, cpf_encriptado, nome, email_principal)
+         VALUES ('hash-funil-agregado-001', '{"ciphertext":"x","iv":"y","authTag":"z","wrappedDek":"w"}', 'Fátima Funil', 'fatima.funil@example.com')
+         RETURNING id`,
+      );
+      personTriagemId = p1.rows[0].id;
+      await adminPool.query(
+        `INSERT INTO application (tenant_id, job_id, person_id, etapa_funil) VALUES ($1, $2, $3, 'triagem')`,
+        [tenantId, vagaId, personTriagemId],
+      );
+
+      const p2 = await adminPool.query<{ id: string }>(
+        `INSERT INTO person (cpf_hash, cpf_encriptado, nome, email_principal)
+         VALUES ('hash-funil-agregado-002', '{"ciphertext":"x","iv":"y","authTag":"z","wrappedDek":"w"}', 'Gustavo Funil', 'gustavo.funil@example.com')
+         RETURNING id`,
+      );
+      personEntrevistaId = p2.rows[0].id;
+      await adminPool.query(
+        `INSERT INTO application (tenant_id, job_id, person_id, etapa_funil) VALUES ($1, $2, $3, 'entrevista')`,
+        [tenantId, vagaId, personEntrevistaId],
+      );
+
+      // Candidatura "antiga" (criado_em manualmente no passado) -- prova
+      // que a janela de 30 dias a exclui mas 'tudo' a inclui.
+      const p3 = await adminPool.query<{ id: string }>(
+        `INSERT INTO person (cpf_hash, cpf_encriptado, nome, email_principal)
+         VALUES ('hash-funil-agregado-003', '{"ciphertext":"x","iv":"y","authTag":"z","wrappedDek":"w"}', 'Helena Antiga', 'helena.antiga@example.com')
+         RETURNING id`,
+      );
+      personAntigaId = p3.rows[0].id;
+      await adminPool.query(
+        `INSERT INTO application (tenant_id, job_id, person_id, etapa_funil, criado_em) VALUES ($1, $2, $3, 'triagem', now() - interval '60 days')`,
+        [tenantId, vagaId, personAntigaId],
+      );
+    });
+
+    afterAll(async () => {
+      await adminPool.query('DELETE FROM application WHERE job_id = $1', [vagaId]);
+      await adminPool.query('DELETE FROM person WHERE id = ANY($1)', [
+        [personTriagemId, personEntrevistaId, personAntigaId],
+      ]);
+      await adminPool.query('DELETE FROM job_recrutador WHERE job_id = $1', [vagaId]);
+      await adminPool.query('DELETE FROM user_account WHERE id = ANY($1)', [[recrutadorId, outroStaffId]]);
+      await adminPool.query('DELETE FROM job WHERE id = $1', [vagaId]);
+    });
+
+    it('devolve um item por etapa de ORDEM_ETAPAS, nessa ordem, com total e conversao', async () => {
+      const ctx = new TenantContext(appPool);
+      const service = new JobService(new RequisitionService(), new JobRecrutadorService());
+
+      const funil = await ctx.run(tenantId, (client) =>
+        service.obterFunilConsolidado(client, { tenantId, userId: recrutadorId, userRoles: ['recrutador'] }, '30d'),
+      );
+
+      expect(funil.map((item) => item.etapa)).toEqual(['triagem', 'entrevista']);
+      expect(funil[0].total).toBeGreaterThanOrEqual(1);
+      expect(funil[0].conversao).toBeNull();
+      expect(funil[1].total).toBeGreaterThanOrEqual(1);
+    });
+
+    it('janela 30d exclui candidatura mais antiga que 30 dias', async () => {
+      const ctx = new TenantContext(appPool);
+      const service = new JobService(new RequisitionService(), new JobRecrutadorService());
+
+      const funil30d = await ctx.run(tenantId, (client) =>
+        service.obterFunilConsolidado(client, { tenantId, userId: recrutadorId, userRoles: ['recrutador'] }, '30d'),
+      );
+      const funilTudo = await ctx.run(tenantId, (client) =>
+        service.obterFunilConsolidado(client, { tenantId, userId: recrutadorId, userRoles: ['recrutador'] }, 'tudo'),
+      );
+
+      const triagem30d = funil30d.find((item) => item.etapa === 'triagem')!.total;
+      const triagemTudo = funilTudo.find((item) => item.etapa === 'triagem')!.total;
+      expect(triagemTudo).toBe(triagem30d + 1);
+    });
+
+    it('recrutador sem a vaga atribuída não vê nada dela no funil agregado', async () => {
+      const ctx = new TenantContext(appPool);
+      const service = new JobService(new RequisitionService(), new JobRecrutadorService());
+
+      const funil = await ctx.run(tenantId, (client) =>
+        service.obterFunilConsolidado(
+          client,
+          { tenantId, userId: outroStaffId, userRoles: ['recrutador'] },
+          'tudo',
+        ),
+      );
+
+      expect(funil.every((item) => item.total === 0)).toBe(true);
+    });
+  });
 
   describe('editar', () => {
     it('atualiza titulo, descricao e habilidadesExigidas da vaga', async () => {

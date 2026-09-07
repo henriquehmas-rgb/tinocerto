@@ -202,6 +202,16 @@ const ALLOWLIST: Record<string, string> = {
     'GET /v1/jobs/dashboard-metrics não opera sobre um :id de vaga específica -- agrega métricas sobre ' +
     'TODAS as vagas visíveis ao requisitante. JobService.obterMetricas já recebe userId/userRoles e filtra ' +
     'internamente (mesmo padrão de JobController.list acima); não há um único jobId para checar posse contra.',
+  'JobController.dashboardTendencia':
+    'GET /v1/jobs/dashboard-tendencia não opera sobre um :id de vaga específica -- agrega a série diária ' +
+    'de candidaturas sobre TODAS as vagas visíveis ao requisitante. JobService.obterTendenciaCandidaturas já ' +
+    'recebe userId/userRoles e filtra internamente (mesmo padrão de JobController.dashboardMetrics acima); ' +
+    'não há um único jobId para checar posse contra.',
+  'JobController.funilAgregado':
+    'GET /v1/jobs/funil-agregado não opera sobre um :id de vaga específica -- agrega o funil de ' +
+    'conversão sobre TODAS as vagas visíveis ao requisitante, com filtro de janela de tempo. ' +
+    'JobService.obterFunilConsolidado já recebe userId/userRoles e filtra internamente (mesmo padrão de ' +
+    'JobController.dashboardMetrics/dashboardTendencia acima); não há um único jobId para checar posse contra.',
   'PlatformApplicationController.list':
     'GET /v1/applications (Plataforma API, prefixo v1/applications mas classe distinta de ' +
     'ApplicationController -- ver comentário em platform-application.controller.ts) é autenticada via ' +

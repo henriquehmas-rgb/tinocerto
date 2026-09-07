@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Logger, Param, Patch, Post, Req, UseGuards, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Logger, Param, Patch, Post, Query, Req, UseGuards, NotFoundException } from '@nestjs/common';
 import { ArrayNotEmpty, IsArray, IsNotEmpty, IsOptional, IsString, IsUUID, ValidateIf } from 'class-validator';
 import { Request } from 'express';
 import { TenantContext } from '../database/tenant-context';
@@ -124,6 +124,38 @@ export class JobController {
   async dashboardMetrics(@Req() req: RequestWithAuthContext) {
     return this.tenantContext.run(req.tenantId, (client) =>
       this.jobService.obterMetricas(client, { tenantId: req.tenantId, userId: req.userId, userRoles: req.userRoles }),
+    );
+  }
+
+  @Get('dashboard-tendencia')
+  @CerbosCheck('job', 'read')
+  async dashboardTendencia(@Req() req: RequestWithAuthContext, @Query('dias') diasRaw?: string) {
+    const dias = diasRaw === undefined ? 30 : Number(diasRaw);
+    if (!Number.isInteger(dias) || dias < 1 || dias > 90) {
+      throw new BadRequestException('dias deve ser um inteiro entre 1 e 90');
+    }
+    return this.tenantContext.run(req.tenantId, (client) =>
+      this.jobService.obterTendenciaCandidaturas(
+        client,
+        { tenantId: req.tenantId, userId: req.userId, userRoles: req.userRoles },
+        dias,
+      ),
+    );
+  }
+
+  @Get('funil-agregado')
+  @CerbosCheck('job', 'read')
+  async funilAgregado(@Req() req: RequestWithAuthContext, @Query('janela') janelaRaw?: string) {
+    const janela = janelaRaw ?? '30d';
+    if (janela !== '30d' && janela !== '90d' && janela !== 'tudo') {
+      throw new BadRequestException("janela deve ser '30d', '90d' ou 'tudo'");
+    }
+    return this.tenantContext.run(req.tenantId, (client) =>
+      this.jobService.obterFunilConsolidado(
+        client,
+        { tenantId: req.tenantId, userId: req.userId, userRoles: req.userRoles },
+        janela,
+      ),
     );
   }
   @Post()
