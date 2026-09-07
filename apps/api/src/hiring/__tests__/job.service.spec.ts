@@ -690,6 +690,17 @@ describe('JobService', () => {
       expect(metricas.candidaturasEmAndamento).toBe(1);
       expect(metricas.porEstagio).toEqual({ triagem: 1 });
     });
+
+    it('ordena porEstagio por ORDEM_ETAPAS, não pela ordem do banco', async () => {
+      const ctx = new TenantContext(appPool);
+      const service = new JobService(new RequisitionService(), new JobRecrutadorService());
+
+      const metricas = await ctx.run(tenantId, (client) =>
+        service.obterMetricas(client, { tenantId, userId: adminId, userRoles: ['admin_tenant'] }),
+      );
+
+      expect(Object.keys(metricas.porEstagio)).toEqual(['triagem', 'entrevista']);
+    });
   });
 
 

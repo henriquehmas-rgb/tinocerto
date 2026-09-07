@@ -340,12 +340,25 @@ export class JobService {
     const estagioParams = somenteRecrutador ? [input.tenantId, input.userId] : [input.tenantId];
     const estagioResult = await client.query<{ etapa_funil: string; total: string }>(estagioQuery, estagioParams);
 
-    const porEstagio: Record<string, number> = {};
+    const totalPorEtapa: Record<string, number> = {};
     let candidaturasEmAndamento = 0;
     for (const row of estagioResult.rows) {
       const total = Number(row.total);
-      porEstagio[row.etapa_funil] = total;
+      totalPorEtapa[row.etapa_funil] = total;
       candidaturasEmAndamento += total;
+    }
+
+    // Object.entries/for..in preservam a ordem de inserção para chaves
+    // string não-numéricas (ordenação garantida pelo spec ECMAScript) --
+    // por isso inserir na ordem de ORDEM_ETAPAS primeiro, e só depois
+    // qualquer etapa fora dela, é suficiente para fixar a ordem que o
+    // Dashboard itera.
+    const porEstagio: Record<string, number> = {};
+    for (const etapa of ORDEM_ETAPAS) {
+      if (etapa in totalPorEtapa) porEstagio[etapa] = totalPorEtapa[etapa];
+    }
+    for (const etapa of Object.keys(totalPorEtapa)) {
+      if (!(etapa in porEstagio)) porEstagio[etapa] = totalPorEtapa[etapa];
     }
 
     return {
