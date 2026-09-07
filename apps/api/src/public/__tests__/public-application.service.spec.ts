@@ -185,7 +185,7 @@ describe('PublicApplicationService', () => {
   });
 
   it('dispara e inicia um assessment automaticamente quando a vaga tem instrumento configurado', async () => {
-    const org = await adminPool.query<{ id: string }>(
+    await adminPool.query<{ id: string }>(
       `INSERT INTO org_unit (tenant_id, tipo, nome, materialized_path) VALUES ($1, 'empresa', 'Matriz Assessment', 'matriz-assessment') RETURNING id`,
       [tenantId],
     );

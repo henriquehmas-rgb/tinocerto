@@ -384,7 +384,7 @@ describe('AdherenceService', () => {
       const service = new AdherenceService(personService);
       const spy = jest.spyOn(personService, 'habilidadesEmLote');
 
-      const mapa = await ctx.run(tenantId, (client) =>
+      await ctx.run(tenantId, (client) =>
         service.porCandidaturasDaVaga(client, {
           jobId: vagaComHabilidadesId,
           candidatos: [
