@@ -39,6 +39,26 @@ dashboardMetrics:
           application/json:
             schema: { $ref: '../components/schemas/hiring.yaml#/schemas/DashboardMetricas' }
 
+dashboardTendencia:
+  get:
+    operationId: getJobDashboardTendencia
+    summary: Série diária de candidaturas recebidas nos últimos N dias (um item por dia, dias sem candidatura vêm com total 0), filtrada por posse quando aplicável.
+    x-tinocerto-auth: session-only
+    parameters:
+      - name: dias
+        in: query
+        schema: { type: integer, minimum: 1, maximum: 90, default: 30 }
+    responses:
+      '200':
+        description: Série diária de candidaturas, ordenada por data ascendente.
+        content:
+          application/json:
+            schema:
+              type: array
+              items: { $ref: '../components/schemas/hiring.yaml#/schemas/TendenciaCandidaturasDia' }
+      '400':
+        description: Parâmetro dias inválido (não é um inteiro entre 1 e 90).
+
 publish:
   post:
     operationId: publishJob

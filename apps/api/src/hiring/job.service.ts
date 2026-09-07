@@ -94,6 +94,11 @@ export interface DashboardMetricas {
   porEstagio: Record<string, number>;
 }
 
+export interface TendenciaCandidaturasDia {
+  data: string;
+  total: number;
+}
+
 @Injectable()
 export class JobService {
   private readonly outbox = new OutboxService();
@@ -367,6 +372,57 @@ export class JobService {
       candidaturasEmAndamento,
       porEstagio,
     };
+  }
+
+  async obterTendenciaCandidaturas(
+    client: PoolClient,
+    input: ListarJobsInput,
+    dias: number,
+  ): Promise<TendenciaCandidaturasDia[]> {
+    const somenteRecrutador = !input.userRoles.some((papel) => PAPEIS_COM_ACESSO_TOTAL.includes(papel));
+
+    // generate_series com bounds em timestamp (não date) evita qualquer
+    // ambiguidade de overload do Postgres; to_char formata a data como
+    // texto simples direto no SQL para não depender de como o driver `pg`
+    // (ou o fuso do processo Node) interpretaria um valor DATE de volta.
+    const query = somenteRecrutador
+      ? `SELECT
+           to_char(gs.dia, 'YYYY-MM-DD') AS data,
+           COALESCE(cnt.total, 0)::text AS total
+         FROM generate_series(
+                date_trunc('day', now()) - ($2::int - 1) * interval '1 day',
+                date_trunc('day', now()),
+                interval '1 day'
+              ) AS gs(dia)
+         LEFT JOIN (
+           SELECT date_trunc('day', a.criado_em) AS dia, COUNT(*) AS total
+           FROM application a
+           JOIN job_recrutador jr ON jr.job_id = a.job_id AND jr.tenant_id = a.tenant_id
+           WHERE a.tenant_id = $1 AND jr.staff_id = $3
+             AND a.criado_em >= date_trunc('day', now()) - ($2::int - 1) * interval '1 day'
+           GROUP BY 1
+         ) cnt ON cnt.dia = gs.dia
+         ORDER BY gs.dia ASC`
+      : `SELECT
+           to_char(gs.dia, 'YYYY-MM-DD') AS data,
+           COALESCE(cnt.total, 0)::text AS total
+         FROM generate_series(
+                date_trunc('day', now()) - ($2::int - 1) * interval '1 day',
+                date_trunc('day', now()),
+                interval '1 day'
+              ) AS gs(dia)
+         LEFT JOIN (
+           SELECT date_trunc('day', criado_em) AS dia, COUNT(*) AS total
+           FROM application
+           WHERE tenant_id = $1
+             AND criado_em >= date_trunc('day', now()) - ($2::int - 1) * interval '1 day'
+           GROUP BY 1
+         ) cnt ON cnt.dia = gs.dia
+         ORDER BY gs.dia ASC`;
+    const params = somenteRecrutador ? [input.tenantId, dias, input.userId] : [input.tenantId, dias];
+    const result = await client.query<{ data: string; total: string }>(query, params);
+
+    return result.rows.map((row) => ({ data: row.data, total: Number(row.total) }));
   }
 
   async editar(client: PoolClient, input: EditarJobInput): Promise<void> {

@@ -189,6 +189,13 @@ schemas:
         additionalProperties:
           type: integer
 
+  TendenciaCandidaturasDia:
+    type: object
+    required: [data, total]
+    properties:
+      data: { type: string, format: date, description: 'Dia no formato YYYY-MM-DD.' }
+      total: { type: integer, description: Total de candidaturas recebidas naquele dia. }
+
   EditarJobRequest:
     type: object
     properties:

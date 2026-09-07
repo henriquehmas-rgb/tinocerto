@@ -703,6 +703,120 @@ describe('JobService', () => {
     });
   });
 
+  describe('obterTendenciaCandidaturas', () => {
+    let vagaId: string;
+    let recrutadorId: string;
+    let outroRecrutadorId: string;
+    const personIds: string[] = [];
+
+    beforeAll(async () => {
+      const vaga = await adminPool.query<{ id: string }>(
+        `INSERT INTO job (tenant_id, requisition_id, titulo, seo_slug, publicado_em) VALUES ($1, $2, 'Vaga Tendência', 'vaga-tendencia-0018', now()) RETURNING id`,
+        [tenantId, requisitionId],
+      );
+      vagaId = vaga.rows[0].id;
+
+      const staff = await adminPool.query<{ id: string }>(
+        `INSERT INTO user_account (tenant_id, email) VALUES ($1, 'recrutador-tendencia@empresa-018.example') RETURNING id`,
+        [tenantId],
+      );
+      recrutadorId = staff.rows[0].id;
+      const outroStaff = await adminPool.query<{ id: string }>(
+        `INSERT INTO user_account (tenant_id, email) VALUES ($1, 'outro-recrutador-tendencia@empresa-018.example') RETURNING id`,
+        [tenantId],
+      );
+      outroRecrutadorId = outroStaff.rows[0].id;
+      await adminPool.query(`INSERT INTO job_recrutador (job_id, tenant_id, staff_id) VALUES ($1, $2, $3)`, [
+        vagaId,
+        tenantId,
+        recrutadorId,
+      ]);
+
+      // Duas candidaturas HOJE (criado_em = now(), default da coluna) e
+      // nenhuma ontem -- prova tanto a contagem quanto o dia com total 0.
+      for (let i = 0; i < 2; i++) {
+        const person = await adminPool.query<{ id: string }>(
+          `INSERT INTO person (cpf_hash, cpf_encriptado, nome, email_principal)
+           VALUES ($1, '{"ciphertext":"x","iv":"y","authTag":"z","wrappedDek":"w"}', $2, $3)
+           RETURNING id`,
+          [`hash-tendencia-${i}`, `Pessoa Tendência ${i}`, `pessoa.tendencia.${i}@example.com`],
+        );
+        personIds.push(person.rows[0].id);
+        await adminPool.query(
+          `INSERT INTO application (tenant_id, job_id, person_id, etapa_funil) VALUES ($1, $2, $3, 'triagem')`,
+          [tenantId, vagaId, person.rows[0].id],
+        );
+      }
+    });
+
+    afterAll(async () => {
+      await adminPool.query('DELETE FROM application WHERE job_id = $1', [vagaId]);
+      await adminPool.query('DELETE FROM person WHERE id = ANY($1)', [personIds]);
+      await adminPool.query('DELETE FROM job_recrutador WHERE job_id = $1', [vagaId]);
+      await adminPool.query('DELETE FROM user_account WHERE id = ANY($1)', [[recrutadorId, outroRecrutadorId]]);
+      await adminPool.query('DELETE FROM job WHERE id = $1', [vagaId]);
+    });
+
+    it('devolve um item por dia do intervalo, com total 0 nos dias sem candidatura', async () => {
+      const ctx = new TenantContext(appPool);
+      const service = new JobService(new RequisitionService(), new JobRecrutadorService());
+
+      const tendencia = await ctx.run(tenantId, (client) =>
+        service.obterTendenciaCandidaturas(client, { tenantId, userId: recrutadorId, userRoles: ['recrutador'] }, 7),
+      );
+
+      expect(tendencia).toHaveLength(7);
+      const hojeStr = new Date().toISOString().slice(0, 10);
+      const hoje = tendencia.find((dia) => dia.data === hojeStr);
+      expect(hoje?.total).toBe(2);
+      expect(tendencia.every((dia) => typeof dia.data === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dia.data))).toBe(true);
+      expect(tendencia.every((dia) => Number.isInteger(dia.total))).toBe(true);
+    });
+
+    it('ordena os dias em ordem ascendente terminando hoje', async () => {
+      const ctx = new TenantContext(appPool);
+      const service = new JobService(new RequisitionService(), new JobRecrutadorService());
+
+      const tendencia = await ctx.run(tenantId, (client) =>
+        service.obterTendenciaCandidaturas(client, { tenantId, userId: recrutadorId, userRoles: ['recrutador'] }, 7),
+      );
+
+      const datas = tendencia.map((dia) => dia.data);
+      expect(datas).toEqual([...datas].sort());
+      expect(datas[datas.length - 1]).toBe(new Date().toISOString().slice(0, 10));
+    });
+
+    it('recrutador sem a vaga atribuída não vê as candidaturas dela na tendência', async () => {
+      const ctx = new TenantContext(appPool);
+      const service = new JobService(new RequisitionService(), new JobRecrutadorService());
+
+      const tendencia = await ctx.run(tenantId, (client) =>
+        service.obterTendenciaCandidaturas(
+          client,
+          { tenantId, userId: outroRecrutadorId, userRoles: ['recrutador'] },
+          7,
+        ),
+      );
+
+      expect(tendencia.reduce((soma, dia) => soma + dia.total, 0)).toBe(0);
+    });
+
+    it('admin_tenant vê o tenant inteiro, sem depender de job_recrutador', async () => {
+      const ctx = new TenantContext(appPool);
+      const service = new JobService(new RequisitionService(), new JobRecrutadorService());
+
+      const tendencia = await ctx.run(tenantId, (client) =>
+        service.obterTendenciaCandidaturas(
+          client,
+          { tenantId, userId: '00000000-0000-0000-0000-000000000098', userRoles: ['admin_tenant'] },
+          7,
+        ),
+      );
+
+      const hojeStr = new Date().toISOString().slice(0, 10);
+      expect(tendencia.find((dia) => dia.data === hojeStr)?.total).toBeGreaterThanOrEqual(2);
+    });
+  });
 
   describe('editar', () => {
     it('atualiza titulo, descricao e habilidadesExigidas da vaga', async () => {
