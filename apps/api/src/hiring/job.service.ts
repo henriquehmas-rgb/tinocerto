@@ -390,16 +390,16 @@ export class JobService {
            to_char(gs.dia, 'YYYY-MM-DD') AS data,
            COALESCE(cnt.total, 0)::text AS total
          FROM generate_series(
-                date_trunc('day', now()) - ($2::int - 1) * interval '1 day',
-                date_trunc('day', now()),
+                date_trunc('day', now() AT TIME ZONE 'America/Sao_Paulo') - ($2::int - 1) * interval '1 day',
+                date_trunc('day', now() AT TIME ZONE 'America/Sao_Paulo'),
                 interval '1 day'
               ) AS gs(dia)
          LEFT JOIN (
-           SELECT date_trunc('day', a.criado_em) AS dia, COUNT(*) AS total
+           SELECT date_trunc('day', a.criado_em AT TIME ZONE 'America/Sao_Paulo') AS dia, COUNT(*) AS total
            FROM application a
            JOIN job_recrutador jr ON jr.job_id = a.job_id AND jr.tenant_id = a.tenant_id
            WHERE a.tenant_id = $1 AND jr.staff_id = $3
-             AND a.criado_em >= date_trunc('day', now()) - ($2::int - 1) * interval '1 day'
+             AND a.criado_em >= date_trunc('day', now() AT TIME ZONE 'America/Sao_Paulo') - ($2::int - 1) * interval '1 day'
            GROUP BY 1
          ) cnt ON cnt.dia = gs.dia
          ORDER BY gs.dia ASC`
@@ -407,15 +407,15 @@ export class JobService {
            to_char(gs.dia, 'YYYY-MM-DD') AS data,
            COALESCE(cnt.total, 0)::text AS total
          FROM generate_series(
-                date_trunc('day', now()) - ($2::int - 1) * interval '1 day',
-                date_trunc('day', now()),
+                date_trunc('day', now() AT TIME ZONE 'America/Sao_Paulo') - ($2::int - 1) * interval '1 day',
+                date_trunc('day', now() AT TIME ZONE 'America/Sao_Paulo'),
                 interval '1 day'
               ) AS gs(dia)
          LEFT JOIN (
-           SELECT date_trunc('day', criado_em) AS dia, COUNT(*) AS total
+           SELECT date_trunc('day', criado_em AT TIME ZONE 'America/Sao_Paulo') AS dia, COUNT(*) AS total
            FROM application
            WHERE tenant_id = $1
-             AND criado_em >= date_trunc('day', now()) - ($2::int - 1) * interval '1 day'
+             AND criado_em >= date_trunc('day', now() AT TIME ZONE 'America/Sao_Paulo') - ($2::int - 1) * interval '1 day'
            GROUP BY 1
          ) cnt ON cnt.dia = gs.dia
          ORDER BY gs.dia ASC`;

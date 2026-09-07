@@ -766,7 +766,10 @@ describe('JobService', () => {
       );
 
       expect(tendencia).toHaveLength(7);
-      const hojeStr = new Date().toISOString().slice(0, 10);
+      const hojeResult = await adminPool.query<{ hoje: string }>(
+        `SELECT to_char(now() AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM-DD') AS hoje`,
+      );
+      const hojeStr = hojeResult.rows[0].hoje;
       const hoje = tendencia.find((dia) => dia.data === hojeStr);
       expect(hoje?.total).toBe(2);
       expect(tendencia.every((dia) => typeof dia.data === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dia.data))).toBe(true);
@@ -813,7 +816,10 @@ describe('JobService', () => {
         ),
       );
 
-      const hojeStr = new Date().toISOString().slice(0, 10);
+      const hojeResult = await adminPool.query<{ hoje: string }>(
+        `SELECT to_char(now() AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM-DD') AS hoje`,
+      );
+      const hojeStr = hojeResult.rows[0].hoje;
       expect(tendencia.find((dia) => dia.data === hojeStr)?.total).toBeGreaterThanOrEqual(2);
     });
   });
