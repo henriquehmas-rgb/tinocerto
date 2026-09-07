@@ -149,5 +149,6 @@ describe('PainelPage (Dashboard)', () => {
     render(<PainelPage />);
 
     expect(await screen.findByText('7')).toBeInTheDocument();
+    expect(screen.queryByText('falhou')).not.toBeInTheDocument();
   });
 });
