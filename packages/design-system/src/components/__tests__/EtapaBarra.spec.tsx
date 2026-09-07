@@ -38,7 +38,7 @@ describe("EtapaBarra", () => {
 
     const barras = container.querySelectorAll("[data-testid=\"etapa-barra-fill\"]");
     barras.forEach((barra) => {
-      expect((barra as HTMLElement).style.width).not.toContain("NaN");
+      expect((barra as HTMLElement).style.width).toBe("0%");
     });
   });
 
