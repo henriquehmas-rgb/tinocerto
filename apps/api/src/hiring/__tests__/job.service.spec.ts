@@ -832,6 +832,7 @@ describe('JobService', () => {
   describe('obterFunilConsolidado', () => {
     let vagaId: string;
     let recrutadorId: string;
+    let outroStaffId: string;
     let personTriagemId: string;
     let personEntrevistaId: string;
     let personAntigaId: string;
@@ -848,6 +849,12 @@ describe('JobService', () => {
         [tenantId],
       );
       recrutadorId = staff.rows[0].id;
+
+      const outroStaff = await adminPool.query<{ id: string }>(
+        `INSERT INTO user_account (tenant_id, email) VALUES ($1, 'outro-recrutador-funil-agregado@empresa-018.example') RETURNING id`,
+        [tenantId],
+      );
+      outroStaffId = outroStaff.rows[0].id;
       await adminPool.query(`INSERT INTO job_recrutador (job_id, tenant_id, staff_id) VALUES ($1, $2, $3)`, [
         vagaId,
         tenantId,
@@ -896,7 +903,7 @@ describe('JobService', () => {
         [personTriagemId, personEntrevistaId, personAntigaId],
       ]);
       await adminPool.query('DELETE FROM job_recrutador WHERE job_id = $1', [vagaId]);
-      await adminPool.query('DELETE FROM user_account WHERE id = $1', [recrutadorId]);
+      await adminPool.query('DELETE FROM user_account WHERE id = ANY($1)', [[recrutadorId, outroStaffId]]);
       await adminPool.query('DELETE FROM job WHERE id = $1', [vagaId]);
     });
 
@@ -933,21 +940,16 @@ describe('JobService', () => {
     it('recrutador sem a vaga atribuída não vê nada dela no funil agregado', async () => {
       const ctx = new TenantContext(appPool);
       const service = new JobService(new RequisitionService(), new JobRecrutadorService());
-      const outroStaff = await adminPool.query<{ id: string }>(
-        `INSERT INTO user_account (tenant_id, email) VALUES ($1, 'outro-recrutador-funil-agregado@empresa-018.example') RETURNING id`,
-        [tenantId],
-      );
 
       const funil = await ctx.run(tenantId, (client) =>
         service.obterFunilConsolidado(
           client,
-          { tenantId, userId: outroStaff.rows[0].id, userRoles: ['recrutador'] },
+          { tenantId, userId: outroStaffId, userRoles: ['recrutador'] },
           'tudo',
         ),
       );
 
       expect(funil.every((item) => item.total === 0)).toBe(true);
-      await adminPool.query('DELETE FROM user_account WHERE id = $1', [outroStaff.rows[0].id]);
     });
   });
 
