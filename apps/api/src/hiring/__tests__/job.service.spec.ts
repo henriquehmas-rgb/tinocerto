@@ -827,6 +827,43 @@ describe('JobService', () => {
       const hojeStr = hojeResult.rows[0].hoje;
       expect(tendencia.find((dia) => dia.data === hojeStr)?.total).toBeGreaterThanOrEqual(2);
     });
+
+    it('candidatura das 22h BRT (01h UTC do dia seguinte) aparece no bucket do dia correto, nao do dia seguinte', async () => {
+      const ctx = new TenantContext(appPool);
+      const service = new JobService(new RequisitionService(), new JobRecrutadorService());
+
+      // 22h BRT de "ontem" = 01h UTC de "hoje" -- se o bucket fosse calculado
+      // em UTC (o bug que a Task 2 corrigiu), essa candidatura apareceria no
+      // dia de HOJE em vez do dia de ONTEM (BRT), que e o bucket correto.
+      const pessoaFronteira = await adminPool.query<{ id: string }>(
+        `INSERT INTO person (cpf_hash, cpf_encriptado, nome, email_principal)
+         VALUES ('hash-tendencia-fronteira', '{"ciphertext":"x","iv":"y","authTag":"z","wrappedDek":"w"}', 'Pessoa Fronteira', 'pessoa.fronteira@example.com')
+         RETURNING id`,
+      );
+      const criadoEmFronteira = await adminPool.query<{ criado_em_brt: string; ontem_brt: string }>(
+        `SELECT
+           (date_trunc('day', now() AT TIME ZONE 'America/Sao_Paulo') - interval '1 day' + interval '22 hours')
+             AT TIME ZONE 'America/Sao_Paulo' AS criado_em_brt,
+           to_char(date_trunc('day', now() AT TIME ZONE 'America/Sao_Paulo') - interval '1 day', 'YYYY-MM-DD') AS ontem_brt`,
+      );
+      const criadoEm = criadoEmFronteira.rows[0].criado_em_brt;
+      const ontemBrt = criadoEmFronteira.rows[0].ontem_brt;
+
+      await adminPool.query(
+        `INSERT INTO application (tenant_id, job_id, person_id, etapa_funil, criado_em) VALUES ($1, $2, $3, 'triagem', $4)`,
+        [tenantId, vagaId, pessoaFronteira.rows[0].id, criadoEm],
+      );
+
+      const tendencia = await ctx.run(tenantId, (client) =>
+        service.obterTendenciaCandidaturas(client, { tenantId, userId: recrutadorId, userRoles: ['recrutador'] }, 7),
+      );
+
+      const diaOntem = tendencia.find((dia) => dia.data === ontemBrt);
+      expect(diaOntem?.total).toBeGreaterThanOrEqual(1);
+
+      await adminPool.query('DELETE FROM application WHERE person_id = $1', [pessoaFronteira.rows[0].id]);
+      await adminPool.query('DELETE FROM person WHERE id = $1', [pessoaFronteira.rows[0].id]);
+    });
   });
 
   describe('obterFunilConsolidado', () => {

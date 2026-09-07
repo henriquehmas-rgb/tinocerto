@@ -23,17 +23,25 @@ export default function FunilAgregadoPage() {
   const [erro, setErro] = useState<string | null>(null);
 
   useEffect(() => {
+    let cancelado = false;
     setFunil(null);
+    setErro(null);
     staffPanelClient
       .obterFunilConsolidado(janela)
-      .then(setFunil)
+      .then((dados) => {
+        if (!cancelado) setFunil(dados);
+      })
       .catch((e: unknown) => {
+        if (cancelado) return;
         if (isErroDeAutenticacao(e)) {
           router.push('/staff/entrar');
           return;
         }
         setErro((e as Error).message);
       });
+    return () => {
+      cancelado = true;
+    };
   }, [janela, router]);
 
   const semCandidaturas = funil !== null && funil.every((item) => item.total === 0);

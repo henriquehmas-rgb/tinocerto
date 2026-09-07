@@ -81,4 +81,52 @@ describe('FunilAgregadoPage', () => {
 
     await waitFor(() => expect(pushMock).toHaveBeenCalledWith('/staff/entrar'));
   });
+
+  it('limpa o erro anterior ao trocar de janela com sucesso (achado I2 da revisão final)', async () => {
+    mockarPerfil();
+    vi.mocked(staffPanelClient.obterFunilConsolidado)
+      .mockRejectedValueOnce(new Error('falha de rede'))
+      .mockResolvedValueOnce([
+        { etapa: 'triagem', total: 10, conversao: null },
+        { etapa: 'entrevista', total: 4, conversao: 40 },
+      ]);
+
+    render(<FunilAgregadoPage />);
+
+    expect(await screen.findByText('falha de rede')).toBeInTheDocument();
+
+    screen.getByRole('button', { name: '90 dias' }).click();
+
+    await screen.findByText('Triagem');
+    expect(screen.queryByText('falha de rede')).not.toBeInTheDocument();
+  });
+
+  it('ignora resposta de uma janela anterior que chega depois da janela atual (achado I3 da revisão final)', async () => {
+    mockarPerfil();
+    let resolverPrimeira: (valor: unknown) => void = () => {};
+    const primeiraChamada = new Promise((resolve) => {
+      resolverPrimeira = resolve;
+    });
+    vi.mocked(staffPanelClient.obterFunilConsolidado)
+      .mockReturnValueOnce(primeiraChamada as never)
+      .mockResolvedValueOnce([
+        { etapa: 'triagem', total: 1, conversao: null },
+        { etapa: 'entrevista', total: 1, conversao: 100 },
+      ]);
+
+    render(<FunilAgregadoPage />);
+
+    screen.getByRole('button', { name: '90 dias' }).click();
+
+    await screen.findByText('Triagem');
+
+    resolverPrimeira([
+      { etapa: 'triagem', total: 999, conversao: null },
+      { etapa: 'entrevista', total: 999, conversao: 100 },
+    ]);
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(screen.queryByText('999')).not.toBeInTheDocument();
+  });
 });
