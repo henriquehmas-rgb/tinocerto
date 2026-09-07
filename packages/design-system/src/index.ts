@@ -34,3 +34,7 @@ export { Paginacao } from './components/Paginacao';
 export type { PaginacaoProps } from './components/Paginacao';
 export { TabelaDensa } from './components/TabelaDensa';
 export type { TabelaDensaProps, ColunaTabela } from './components/TabelaDensa';
+export { Sparkline } from './components/Sparkline';
+export type { SparklineProps, SparklinePonto } from './components/Sparkline';
+export { EtapaBarra } from './components/EtapaBarra';
+export type { EtapaBarraProps, EtapaBarraItem } from './components/EtapaBarra';

@@ -8,9 +8,20 @@ function acharItem(grupos: ReturnType<typeof montarGrupos>, label: string) {
 }
 
 describe('montarGrupos', () => {
-  it('devolve os grupos Operação e Plataforma', () => {
+  it('devolve os grupos Operação, Análise e Plataforma, nessa ordem', () => {
     const grupos = montarGrupos('/staff/painel');
-    expect(grupos.map((g) => g.rotulo)).toEqual(['Operação', 'Plataforma']);
+    expect(grupos.map((g) => g.rotulo)).toEqual(['Operação', 'Análise', 'Plataforma']);
+  });
+
+  it('Análise tem Dashboard e Funil agregado', () => {
+    const grupos = montarGrupos('/staff/painel');
+    const analise = grupos.find((g) => g.rotulo === 'Análise')!;
+    expect(analise.itens.map((i) => i.label)).toEqual(['Dashboard', 'Funil agregado']);
+  });
+
+  it('acende Funil agregado no caminho exato', () => {
+    expect(acharItem(montarGrupos('/staff/painel/analise/funil'), 'Funil agregado').ativo).toBe(true);
+    expect(acharItem(montarGrupos('/staff/painel'), 'Funil agregado').ativo).toBe(false);
   });
 
   it('acende Dashboard apenas no caminho exato', () => {
