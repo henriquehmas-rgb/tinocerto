@@ -1,4 +1,4 @@
-import { LayoutDashboard, Briefcase, Settings } from 'lucide-react';
+import { LayoutDashboard, Briefcase, Settings, TrendingUp } from 'lucide-react';
 import type { PanelNavGrupo } from '@tinocerto/design-system';
 
 export interface ContadoresNav {
@@ -23,6 +23,18 @@ export function montarGrupos(pathname: string, contadores?: ContadoresNav): Pane
       rotulo: 'Operação',
       itens: [
         {
+          href: '/staff/painel/vagas',
+          label: 'Vagas',
+          icone: Briefcase,
+          contador: contadores?.vagasAtivas,
+          ativo: vagasAtivo,
+        },
+      ],
+    },
+    {
+      rotulo: 'Análise',
+      itens: [
+        {
           href: '/staff/painel',
           label: 'Dashboard',
           icone: LayoutDashboard,
@@ -30,11 +42,10 @@ export function montarGrupos(pathname: string, contadores?: ContadoresNav): Pane
           ativo: pathname === '/staff/painel',
         },
         {
-          href: '/staff/painel/vagas',
-          label: 'Vagas',
-          icone: Briefcase,
-          contador: contadores?.vagasAtivas,
-          ativo: vagasAtivo,
+          href: '/staff/painel/analise/funil',
+          label: 'Funil agregado',
+          icone: TrendingUp,
+          ativo: cobre('/staff/painel/analise/funil', pathname),
         },
       ],
     },
