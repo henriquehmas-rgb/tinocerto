@@ -179,6 +179,19 @@ export interface ImpactoAdversoRow {
   calculadoEm: string;
 }
 
+export interface TendenciaCandidaturasDia {
+  data: string;
+  total: number;
+}
+
+export type JanelaFunilAgregado = '30d' | '90d' | 'tudo';
+
+export interface EtapaFunilAgregado {
+  etapa: string;
+  total: number;
+  conversao: number | null;
+}
+
 export const staffPanelClient = {
   async listarVagas(): Promise<VagaResumo[]> {
     const response = await staffAuthClient.authenticatedFetch('/v1/jobs');
@@ -259,6 +272,16 @@ export const staffPanelClient = {
   async obterMetricas(): Promise<DashboardMetricas> {
     const response = await staffAuthClient.authenticatedFetch('/v1/jobs/dashboard-metrics');
     return tratarResposta(response, 'Não foi possível carregar as métricas');
+  },
+
+  async obterTendenciaCandidaturas(dias = 30): Promise<TendenciaCandidaturasDia[]> {
+    const response = await staffAuthClient.authenticatedFetch(`/v1/jobs/dashboard-tendencia?dias=${dias}`);
+    return tratarResposta(response, 'Não foi possível carregar a tendência de candidaturas');
+  },
+
+  async obterFunilConsolidado(janela: JanelaFunilAgregado = '30d'): Promise<EtapaFunilAgregado[]> {
+    const response = await staffAuthClient.authenticatedFetch(`/v1/jobs/funil-agregado?janela=${janela}`);
+    return tratarResposta(response, 'Não foi possível carregar o funil agregado');
   },
 
   async obterRoteiroEntrevista(jobId: string): Promise<RoteiroEntrevista | null> {
