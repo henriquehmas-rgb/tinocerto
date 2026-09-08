@@ -20,6 +20,19 @@ export interface VagaCompleta {
   recrutadorIds: string[];
   instrumentVersionId: string | null;
 }
+
+export interface RequisitionResumo {
+  id: string;
+  titulo: string;
+  status: 'aberta' | 'aprovada' | 'fechada';
+}
+
+export interface MembroEquipe {
+  id: string;
+  email: string;
+  papeis: string[];
+}
+
 export interface InstrumentoAtivo {  id: string;  nome: string;  versao: number;}
 
 export interface PerfilStaff {
@@ -196,6 +209,16 @@ export const staffPanelClient = {
   async listarVagas(): Promise<VagaResumo[]> {
     const response = await staffAuthClient.authenticatedFetch('/v1/jobs');
     return tratarResposta(response, 'Não foi possível carregar as vagas');
+  },
+
+  async listarRequisicoes(): Promise<RequisitionResumo[]> {
+    const response = await staffAuthClient.authenticatedFetch('/v1/requisitions');
+    return tratarResposta(response, 'Não foi possível carregar as requisições');
+  },
+
+  async listarEquipe(): Promise<MembroEquipe[]> {
+    const response = await staffAuthClient.authenticatedFetch('/v1/staff');
+    return tratarResposta(response, 'Não foi possível carregar a equipe');
   },
 
   async obterVaga(jobId: string): Promise<VagaCompleta> {

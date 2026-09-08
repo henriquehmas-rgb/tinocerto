@@ -15,6 +15,14 @@ export interface LoginResult {
   mfaHabilitado: boolean;
 }
 
+export const PAPEIS_ELEGIVEIS_PARA_VAGA = ['admin_tenant', 'recrutador', 'gestor_vaga'];
+
+export interface MembroEquipe {
+  id: string;
+  email: string;
+  papeis: string[];
+}
+
 @Injectable()
 export class StaffAccountService {
   constructor(private readonly passwordService: PasswordService) {}
@@ -91,6 +99,29 @@ export class StaffAccountService {
       throw new UnauthorizedException(`Usuário ${userId} não encontrado no tenant ${tenantId}`);
     }
     return { email: result.rows[0].email, razaoSocial: result.rows[0].razao_social };
+  }
+
+  // Equipe elegível para ser atribuída como recrutador de uma vaga -- os
+  // mesmos três papéis que a regra "gestao-vaga" do Cerbos libera
+  // (cerbos/policies/resource_job.yaml). `entrevistador`/`psicologo_
+  // responsavel`/etc. não são candidatos a "recrutador de vaga", mesmo
+  // sendo staff ativo. HAVING com o operador de overlap de array (&&)
+  // filtra "tem pelo menos um papel elegível" sem descartar os OUTROS
+  // papéis que a pessoa também tenha -- array_agg() sempre agrega TODOS
+  // os papéis reais, o filtro só decide quem entra na lista.
+  async listarEquipe(client: PoolClient, tenantId: string): Promise<MembroEquipe[]> {
+    const result = await client.query<{ id: string; email: string; papeis: string[] }>(
+      `SELECT ua.id, ua.email, array_agg(r.nome ORDER BY r.nome) AS papeis
+       FROM user_account ua
+       JOIN role_assignment ra ON ra.user_id = ua.id AND ra.tenant_id = ua.tenant_id
+       JOIN role r ON r.id = ra.role_id
+       WHERE ua.tenant_id = $1 AND ua.status = 'ativo'
+       GROUP BY ua.id, ua.email
+       HAVING array_agg(r.nome) && $2::text[]
+       ORDER BY ua.email`,
+      [tenantId, PAPEIS_ELEGIVEIS_PARA_VAGA],
+    );
+    return result.rows;
   }
 
   // Task 7: MfaService.gerarSetup/gerarBackupCodes cifram o segredo/códigos

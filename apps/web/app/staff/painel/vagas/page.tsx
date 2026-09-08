@@ -3,11 +3,12 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Card, Button, Badge, EmptyState } from '@tinocerto/design-system';
+import { Table, Button, Badge, EmptyState, type TableColumn } from '@tinocerto/design-system';
 import { Briefcase } from 'lucide-react';
 import { PainelShell } from '../../../../components/painel-shell';
 import { staffPanelClient, VagaResumo } from '../../../../lib/staff-panel-client';
 import { isErroDeAutenticacao } from '../../../../lib/staff-auth-client';
+import { idadeRelativa } from '../../../../lib/funil-formatacao';
 
 export default function VagasPage() {
   const router = useRouter();
@@ -29,6 +30,29 @@ export default function VagasPage() {
       .catch(tratarFalha)
       .finally(() => setCarregando(false));
   }, [router]);
+
+  const colunas: TableColumn<VagaResumo>[] = [
+    {
+      header: 'Título',
+      render: (vaga) => (
+        <Link href={`/staff/painel/vagas/${vaga.id}`} className="font-ui text-sm font-medium text-text">
+          {vaga.titulo}
+        </Link>
+      ),
+    },
+    {
+      header: 'Status',
+      render: (vaga) => (vaga.publicadoEm ? <Badge tone="sucesso">Publicada</Badge> : <Badge tone="neutro">Rascunho</Badge>),
+    },
+    {
+      header: 'Candidaturas',
+      render: (vaga) => `${vaga.contagemCandidaturas} candidatura(s)`,
+    },
+    {
+      header: 'Criada em',
+      render: (vaga) => idadeRelativa(vaga.criadoEm, new Date()),
+    },
+  ];
 
   return (
     <PainelShell
@@ -52,21 +76,7 @@ export default function VagasPage() {
           }
         />
       )}
-      <div className="flex flex-col gap-2">
-        {vagas.map((vaga) => (
-          <Card key={vaga.id}>
-            <div className="flex items-center justify-between gap-2">
-              <div>
-                <Link href={`/staff/painel/vagas/${vaga.id}`} className="font-ui text-sm font-medium text-text">
-                  {vaga.titulo}
-                </Link>
-                <p className="font-ui text-xs text-text-secondary">{vaga.contagemCandidaturas} candidatura(s)</p>
-              </div>
-              {vaga.publicadoEm ? <Badge tone="sucesso">Publicada</Badge> : <Badge tone="neutro">Rascunho</Badge>}
-            </div>
-          </Card>
-        ))}
-      </div>
+      {vagas.length > 0 && <Table columns={colunas} rows={vagas} />}
     </PainelShell>
   );
 }

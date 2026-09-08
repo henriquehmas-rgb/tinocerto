@@ -150,4 +150,79 @@ describe('StaffAccountService', () => {
 
     await adminPool.query('DELETE FROM user_account WHERE id = $1', [novoUserId]);
   });
+
+  describe('listarEquipe', () => {
+    let recrutadorId: string;
+    let gestorId: string;
+    let entrevistadorId: string;
+    let inativoId: string;
+    let multiPapelId: string;
+
+    beforeAll(async () => {
+      async function criarUsuario(email: string, status = 'ativo') {
+        const user = await adminPool.query<{ id: string }>(
+          `INSERT INTO user_account (tenant_id, email, status) VALUES ($1, $2, $3) RETURNING id`,
+          [tenantId, email, status],
+        );
+        return user.rows[0].id;
+      }
+      async function atribuirPapel(userId: string, papel: string) {
+        const role = await adminPool.query<{ id: string }>(
+          `SELECT id FROM role WHERE nome = $1 AND tenant_id IS NULL`,
+          [papel],
+        );
+        await adminPool.query(
+          `INSERT INTO role_assignment (user_id, tenant_id, role_id, scope_path) VALUES ($1, $2, $3, 'raiz')`,
+          [userId, tenantId, role.rows[0].id],
+        );
+      }
+
+      recrutadorId = await criarUsuario('recrutador@staff-list-test.com');
+      await atribuirPapel(recrutadorId, 'recrutador');
+
+      gestorId = await criarUsuario('gestor@staff-list-test.com');
+      await atribuirPapel(gestorId, 'gestor_vaga');
+
+      entrevistadorId = await criarUsuario('entrevistador@staff-list-test.com');
+      await atribuirPapel(entrevistadorId, 'entrevistador');
+
+      inativoId = await criarUsuario('inativo@staff-list-test.com', 'inativo');
+      await atribuirPapel(inativoId, 'recrutador');
+
+      multiPapelId = await criarUsuario('multi@staff-list-test.com');
+      await atribuirPapel(multiPapelId, 'recrutador');
+      await atribuirPapel(multiPapelId, 'entrevistador');
+    });
+
+    afterAll(async () => {
+      const ids = [recrutadorId, gestorId, entrevistadorId, inativoId, multiPapelId];
+      await adminPool.query('DELETE FROM role_assignment WHERE user_id = ANY($1)', [ids]);
+      await adminPool.query('DELETE FROM user_account WHERE id = ANY($1)', [ids]);
+    });
+
+    it('lista só contas ativas com pelo menos um papel elegível, ordenadas por e-mail', async () => {
+      const ctx = new TenantContext(appPool);
+      const service = new StaffAccountService(new PasswordService());
+
+      const equipe = await ctx.run(tenantId, (client) => service.listarEquipe(client, tenantId));
+
+      const emails = equipe.map((m) => m.email);
+      expect(emails).toContain('recrutador@staff-list-test.com');
+      expect(emails).toContain('gestor@staff-list-test.com');
+      expect(emails).toContain('multi@staff-list-test.com');
+      expect(emails).not.toContain('entrevistador@staff-list-test.com');
+      expect(emails).not.toContain('inativo@staff-list-test.com');
+      expect(emails).toEqual([...emails].sort());
+    });
+
+    it('devolve todos os papéis do usuário, não só os elegíveis', async () => {
+      const ctx = new TenantContext(appPool);
+      const service = new StaffAccountService(new PasswordService());
+
+      const equipe = await ctx.run(tenantId, (client) => service.listarEquipe(client, tenantId));
+
+      const multi = equipe.find((m) => m.email === 'multi@staff-list-test.com');
+      expect(multi?.papeis.sort()).toEqual(['entrevistador', 'recrutador']);
+    });
+  });
 });

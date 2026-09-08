@@ -1,15 +1,9 @@
 apiVersion: api.cerbos.dev/v1
 resourcePolicy:
-  resource: "requisition"
+  resource: "staff"
   version: "default"
   scope: ""
   rules:
-    # Regra DENY universal de isolamento de tenant -- mesmo padrão
-    # estrutural fechado na Fase 0 (Task 10, 4 rodadas de fix). Cobre
-    # QUALQUER regra ALLOW deste resource, presente ou futura, via
-    # deny-overrides do Cerbos -- não repetir condição de tenant em cada
-    # ALLOW individualmente (foi exatamente essa duplicação que deixou
-    # uma regra desprotegida na Fase 0).
     - name: "bloqueio-tenant-diferente"
       actions: ["*"]
       effect: EFFECT_DENY
@@ -25,12 +19,7 @@ resourcePolicy:
               size(request.resource.attr.tenant_id) > 0 &&
               request.principal.attr.tenant_id == request.resource.attr.tenant_id)
 
-    - name: "gestao-requisicao"
-      actions: ["create", "read", "update"]
+    - name: "listagem-equipe"
+      actions: ["list"]
       effect: EFFECT_ALLOW
       roles: ["admin_tenant", "recrutador", "gestor_vaga"]
-
-    - name: "aprovacao-requisicao"
-      actions: ["approve"]
-      effect: EFFECT_ALLOW
-      roles: ["admin_tenant"]

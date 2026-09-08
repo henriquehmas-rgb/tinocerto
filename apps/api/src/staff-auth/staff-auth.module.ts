@@ -3,6 +3,7 @@ import { Pool } from 'pg';
 import { DatabaseModule } from '../database/database.module';
 import { DatabaseService } from '../database/database.service';
 import { StaffAuthController } from './staff-auth.controller';
+import { StaffController } from './staff.controller';
 import { StaffOnboardingService } from './staff-onboarding.service';
 import { StaffAccountService } from './staff-account.service';
 import { StaffTokenService } from './staff-token.service';
@@ -16,7 +17,7 @@ import { IpRateLimitGuard } from '../security/ip-rate-limit.guard';
 
 @Module({
   imports: [DatabaseModule],
-  controllers: [StaffAuthController],
+  controllers: [StaffAuthController, StaffController],
   providers: [
     StaffOnboardingService,
     StaffAccountService,

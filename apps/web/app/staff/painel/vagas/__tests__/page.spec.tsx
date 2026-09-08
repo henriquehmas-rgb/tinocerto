@@ -33,6 +33,10 @@ describe('VagasPage', () => {
     await waitFor(() => expect(screen.getByText('Engenheiro de Dados')).toBeInTheDocument());
     expect(screen.getByText('4 candidatura(s)')).toBeInTheDocument();
     expect(screen.getByText('Rascunho')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Engenheiro de Dados' })).toHaveAttribute(
+      'href',
+      '/staff/painel/vagas/1',
+    );
   });
 
   it('mostra estado vazio com CTA quando não há vagas', async () => {
@@ -63,5 +67,23 @@ describe('VagasPage', () => {
     render(<VagasPage />);
 
     await waitFor(() => expect(pushMock).toHaveBeenCalledWith('/staff/entrar'));
+  });
+
+  it('mostra a idade relativa da vaga na coluna Criada em', async () => {
+    const ontem = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    vi.mocked(staffPanelClient.listarVagas).mockResolvedValue([
+      { id: '1', titulo: 'Engenheiro de Dados', publicadoEm: null, criadoEm: ontem, contagemCandidaturas: 4 },
+    ]);
+    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue({
+      userId: 'u1',
+      tenantId: 't1',
+      roles: ['admin_tenant'],
+      email: 'ana@empresa.example',
+      razaoSocial: 'Empresa Exemplo Ltda',
+    });
+
+    render(<VagasPage />);
+
+    await waitFor(() => expect(screen.getByText('há 1 dia')).toBeInTheDocument());
   });
 });
