@@ -33,6 +33,10 @@ describe('VagasPage', () => {
     await waitFor(() => expect(screen.getByText('Engenheiro de Dados')).toBeInTheDocument());
     expect(screen.getByText('4 candidatura(s)')).toBeInTheDocument();
     expect(screen.getByText('Rascunho')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Engenheiro de Dados' })).toHaveAttribute(
+      'href',
+      '/staff/painel/vagas/1',
+    );
   });
 
   it('mostra estado vazio com CTA quando não há vagas', async () => {

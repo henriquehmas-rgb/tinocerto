@@ -66,6 +66,23 @@ describe('EditarVagaPage', () => {
     expect(screen.getByLabelText('carla@empresa.example')).not.toBeChecked();
   });
 
+  it('desabilita o checkbox do próprio usuário logado, para não permitir se auto-remover como recrutador (achado Importante da revisão final)', async () => {
+    vi.mocked(staffPanelClient.obterVaga).mockResolvedValue(vagaBase);
+    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue({ ...PERFIL_MOCK, userId: 'r1' });
+
+    render(<EditarVagaPage />);
+
+    // exact: false porque este checkbox é o do próprio usuário logado --
+    // o rótulo real inclui o sufixo " (você)" (ver souEu no page.tsx), então
+    // o texto completo do <label> não é mais exatamente "ana@empresa.example".
+    const meuCheckbox = await screen.findByLabelText('ana@empresa.example', { exact: false });
+    expect(meuCheckbox).toBeDisabled();
+    expect(meuCheckbox).toBeChecked();
+
+    const outroCheckbox = screen.getByLabelText('bruno@empresa.example');
+    expect(outroCheckbox).not.toBeDisabled();
+  });
+
   it('não chama atribuirRecrutadores quando o campo de recrutadores não é alterado ao salvar', async () => {
     vi.mocked(staffPanelClient.obterVaga).mockResolvedValue(vagaBase);
     vi.mocked(staffPanelClient.editarVaga).mockResolvedValue(undefined);

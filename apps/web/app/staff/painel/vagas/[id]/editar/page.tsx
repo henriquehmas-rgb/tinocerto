@@ -23,6 +23,7 @@ export default function EditarVagaPage() {
   const [instrumentVersionId, setInstrumentVersionId] = useState('');
   const [instrumentos, setInstrumentos] = useState<InstrumentoAtivo[]>([]);
   const [erro, setErro] = useState<string | null>(null);
+  const [meuUserId, setMeuUserId] = useState<string | null>(null);
   const [sugestaoDescricao, setSugestaoDescricao] = useState<JobDescriptionSuggestion | null>(null);
   const [erroSugestao, setErroSugestao] = useState<string | null>(null);
   const [gerandoSugestao, setGerandoSugestao] = useState(false);
@@ -47,6 +48,10 @@ export default function EditarVagaPage() {
   );
 
   useEffect(() => {
+    staffPanelClient
+      .obterPerfil()
+      .then((perfil) => setMeuUserId(perfil.userId))
+      .catch(() => {});
     staffPanelClient.obterInstrumentosAtivos().then(setInstrumentos).catch(() => {});
     staffPanelClient.listarEquipe().then(setEquipe).catch((e: unknown) => {
       console.error('Falha ao carregar a equipe para Editar vaga:', e);
@@ -189,17 +194,21 @@ export default function EditarVagaPage() {
         </Field>
         <fieldset className="flex flex-col gap-2">
           <legend className="font-ui text-sm text-text">Recrutadores</legend>
-          {equipe.map((membro) => (
-            <label key={membro.id} className="flex items-center gap-2 font-ui text-sm text-text-secondary">
-              <input
-                type="checkbox"
-                checked={recrutadorIds.has(membro.id)}
-                onChange={() => alternarRecrutador(membro.id)}
-                disabled={carregamentoFalhou}
-              />
-              {membro.email}
-            </label>
-          ))}
+          {equipe.map((membro) => {
+            const souEu = membro.id === meuUserId;
+            return (
+              <label key={membro.id} className="flex items-center gap-2 font-ui text-sm text-text-secondary">
+                <input
+                  type="checkbox"
+                  checked={recrutadorIds.has(membro.id)}
+                  onChange={() => alternarRecrutador(membro.id)}
+                  disabled={carregamentoFalhou || souEu}
+                />
+                {membro.email}
+                {souEu && ' (você)'}
+              </label>
+            );
+          })}
         </fieldset>
         <label className="flex flex-col gap-1 font-ui text-sm">
           Instrumento de assessment

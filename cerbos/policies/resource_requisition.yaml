@@ -28,7 +28,7 @@ resourcePolicy:
     - name: "gestao-requisicao"
       actions: ["create", "read", "update"]
       effect: EFFECT_ALLOW
-      roles: ["admin_tenant", "recrutador"]
+      roles: ["admin_tenant", "recrutador", "gestor_vaga"]
 
     - name: "aprovacao-requisicao"
       actions: ["approve"]
