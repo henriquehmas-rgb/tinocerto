@@ -40,7 +40,7 @@ const PERFIL_MOCK = {
   userId: 'u1',
   tenantId: 't1',
   roles: ['admin_tenant'],
-  email: 'ana@empresa.example',
+  email: 'staff-logado@empresa.example',
   razaoSocial: 'Empresa Exemplo Ltda',
 };
 
@@ -111,6 +111,31 @@ describe('EditarVagaPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Salvar' }));
 
     await waitFor(() => expect(staffPanelClient.editarVaga).toHaveBeenCalled());
+    expect(staffPanelClient.atribuirRecrutadores).not.toHaveBeenCalled();
+  });
+
+  it('não perde recrutadores mesmo se a equipe carregar ANTES de obterVaga falhar (corrida real entre as duas promises)', async () => {
+    // obterVaga fica pendente de propósito (nunca resolve nem rejeita
+    // durante o teste) -- simula o instante em que listarEquipe() já
+    // terminou mas obterVaga() ainda não, provando que os checkboxes
+    // ficam habilitados ANTES do carregamento ser marcado como falho.
+    vi.mocked(staffPanelClient.obterVaga).mockReturnValue(new Promise(() => {}));
+    vi.mocked(staffPanelClient.editarVaga).mockResolvedValue(undefined);
+
+    render(<EditarVagaPage />);
+
+    // listarEquipe já resolveu (mock padrão do beforeEach) -- o checkbox
+    // aparece e, sem a guarda de segurança, estaria habilitado aqui.
+    const checkboxCarla = await screen.findByLabelText('carla@empresa.example');
+    expect(checkboxCarla).not.toBeDisabled();
+
+    fireEvent.click(checkboxCarla);
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar' }));
+
+    await waitFor(() => expect(staffPanelClient.editarVaga).toHaveBeenCalled());
+    // O carregamento de obterVaga nunca terminou (ainda pendente), então
+    // recrutadorIdsIniciaisRef.current continua null -- atribuirRecrutadores
+    // NUNCA deve ser chamado aqui, mesmo com um checkbox marcado.
     expect(staffPanelClient.atribuirRecrutadores).not.toHaveBeenCalled();
   });
 

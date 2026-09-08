@@ -48,7 +48,9 @@ export default function EditarVagaPage() {
 
   useEffect(() => {
     staffPanelClient.obterInstrumentosAtivos().then(setInstrumentos).catch(() => {});
-    staffPanelClient.listarEquipe().then(setEquipe).catch(() => {});
+    staffPanelClient.listarEquipe().then(setEquipe).catch((e: unknown) => {
+      console.error('Falha ao carregar a equipe para Editar vaga:', e);
+    });
     staffPanelClient
       .obterVaga(params.id)
       .then((vaga) => {
