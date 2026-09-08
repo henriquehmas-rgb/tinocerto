@@ -18,7 +18,7 @@ describe('staffPanelClient.obterResumoCandidatoAtual', () => {
   it('retorna null quando o backend responde 200 com corpo vazio (nenhum rascunho aplicado ainda)', async () => {
     // Reproduz o comportamento real do NestJS/Express: quando o handler
     // retorna `null`, o ExpressAdapter chama `response.send()` sem corpo
-    // nenhum (nem os 4 bytes de "null") -- por isso o teste usa uma
+    // nenhum (nem os 4 bytes de null) -- por isso o teste usa uma
     // `Response` real com corpo vazio, e não um mock que devolveria um
     // objeto JS já parseado (o que nunca exercitaria o bug de
     // `SyntaxError: Unexpected end of JSON input` do `response.json()`).
@@ -138,7 +138,7 @@ describe('staffPanelClient.listarRequisicoes', () => {
 
     const requisicoes = await staffPanelClient.listarRequisicoes();
 
-    expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining('/v1/requisitions'), expect.anything());
+    expect(global.fetch).toHaveBeenCalledWith(expect.stringMatching(/\/v1\/requisitions$/), expect.anything());
     expect(requisicoes).toEqual([{ id: 'req-1', titulo: 'Inicial', status: 'aprovada' }]);
   });
 });
@@ -164,7 +164,7 @@ describe('staffPanelClient.listarEquipe', () => {
 
     const equipe = await staffPanelClient.listarEquipe();
 
-    expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining('/v1/staff'), expect.anything());
+    expect(global.fetch).toHaveBeenCalledWith(expect.stringMatching(/\/v1\/staff$/), expect.anything());
     expect(equipe).toEqual([{ id: 'u1', email: 'ana@empresa.example', papeis: ['recrutador'] }]);
   });
 });
