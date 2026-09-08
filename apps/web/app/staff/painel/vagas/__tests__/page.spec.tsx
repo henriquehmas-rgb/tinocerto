@@ -64,4 +64,22 @@ describe('VagasPage', () => {
 
     await waitFor(() => expect(pushMock).toHaveBeenCalledWith('/staff/entrar'));
   });
+
+  it('mostra a idade relativa da vaga na coluna Criada em', async () => {
+    const ontem = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    vi.mocked(staffPanelClient.listarVagas).mockResolvedValue([
+      { id: '1', titulo: 'Engenheiro de Dados', publicadoEm: null, criadoEm: ontem, contagemCandidaturas: 4 },
+    ]);
+    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue({
+      userId: 'u1',
+      tenantId: 't1',
+      roles: ['admin_tenant'],
+      email: 'ana@empresa.example',
+      razaoSocial: 'Empresa Exemplo Ltda',
+    });
+
+    render(<VagasPage />);
+
+    await waitFor(() => expect(screen.getByText('há 1 dia')).toBeInTheDocument());
+  });
 });
