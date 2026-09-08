@@ -13,10 +13,17 @@ vi.mock('../../../../../../../lib/staff-panel-client', () => ({
     obterVaga: vi.fn(),
     obterPerfil: vi.fn(),
     obterInstrumentosAtivos: vi.fn(),
+    listarEquipe: vi.fn(),
     gerarSugestaoDescricao: vi.fn(),
     aplicarSugestaoDescricao: vi.fn(),
   },
 }));
+
+const EQUIPE = [
+  { id: 'r1', email: 'ana@empresa.example', papeis: ['recrutador'] },
+  { id: 'r2', email: 'bruno@empresa.example', papeis: ['recrutador'] },
+  { id: 'r3', email: 'carla@empresa.example', papeis: ['admin_tenant'] },
+];
 
 const vagaBase = {
   id: 'job-1',
@@ -41,40 +48,31 @@ describe('EditarVagaPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(staffPanelClient.obterInstrumentosAtivos).mockResolvedValue([]);
+    vi.mocked(staffPanelClient.listarEquipe).mockResolvedValue(EQUIPE);
+    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue(PERFIL_MOCK);
   });
 
   it('pré-preenche o formulário com os dados atuais da vaga', async () => {
     vi.mocked(staffPanelClient.obterVaga).mockResolvedValue(vagaBase);
-    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue({
-      userId: 'u1',
-      tenantId: 't1',
-      roles: ['admin_tenant'],
-      email: 'ana@empresa.example',
-      razaoSocial: 'Empresa Exemplo Ltda',
-    });
 
     render(<EditarVagaPage />);
 
     await waitFor(() => expect(screen.getByLabelText('Título')).toHaveValue('Engenheiro de Dados'));
     expect(screen.getByLabelText('Descrição')).toHaveValue('Descrição da vaga');
-    expect(screen.getByLabelText('Habilidades exigidas (separadas por vírgula)')).toHaveValue('SQL, Python');
-    expect(screen.getByLabelText('IDs dos recrutadores (separados por vírgula)')).toHaveValue('r1, r2');
+    expect(screen.getByText('SQL')).toBeInTheDocument();
+    expect(screen.getByText('Python')).toBeInTheDocument();
+    expect(screen.getByLabelText('ana@empresa.example')).toBeChecked();
+    expect(screen.getByLabelText('bruno@empresa.example')).toBeChecked();
+    expect(screen.getByLabelText('carla@empresa.example')).not.toBeChecked();
   });
 
   it('não chama atribuirRecrutadores quando o campo de recrutadores não é alterado ao salvar', async () => {
     vi.mocked(staffPanelClient.obterVaga).mockResolvedValue(vagaBase);
     vi.mocked(staffPanelClient.editarVaga).mockResolvedValue(undefined);
-    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue({
-      userId: 'u1',
-      tenantId: 't1',
-      roles: ['admin_tenant'],
-      email: 'ana@empresa.example',
-      razaoSocial: 'Empresa Exemplo Ltda',
-    });
 
     render(<EditarVagaPage />);
 
-    await waitFor(() => expect(screen.getByLabelText('IDs dos recrutadores (separados por vírgula)')).toHaveValue('r1, r2'));
+    await waitFor(() => expect(screen.getByLabelText('ana@empresa.example')).toBeChecked());
     fireEvent.click(screen.getByRole('button', { name: 'Salvar' }));
 
     await waitFor(() => expect(staffPanelClient.editarVaga).toHaveBeenCalled());
@@ -86,37 +84,26 @@ describe('EditarVagaPage', () => {
     vi.mocked(staffPanelClient.obterVaga).mockResolvedValue(vagaBase);
     vi.mocked(staffPanelClient.editarVaga).mockResolvedValue(undefined);
     vi.mocked(staffPanelClient.atribuirRecrutadores).mockResolvedValue(undefined);
-    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue({
-      userId: 'u1',
-      tenantId: 't1',
-      roles: ['admin_tenant'],
-      email: 'ana@empresa.example',
-      razaoSocial: 'Empresa Exemplo Ltda',
-    });
 
     render(<EditarVagaPage />);
 
-    await waitFor(() => expect(screen.getByLabelText('IDs dos recrutadores (separados por vírgula)')).toHaveValue('r1, r2'));
-    fireEvent.change(screen.getByLabelText('IDs dos recrutadores (separados por vírgula)'), {
-      target: { value: 'r1, r2, r3' },
-    });
+    await waitFor(() => expect(screen.getByLabelText('carla@empresa.example')).not.toBeChecked());
+    fireEvent.click(screen.getByLabelText('carla@empresa.example'));
     fireEvent.click(screen.getByRole('button', { name: 'Salvar' }));
 
     await waitFor(() =>
-      expect(staffPanelClient.atribuirRecrutadores).toHaveBeenCalledWith('job-1', ['r1', 'r2', 'r3']),
+      expect(staffPanelClient.atribuirRecrutadores).toHaveBeenCalledWith(
+        'job-1',
+        expect.arrayContaining(['r1', 'r2', 'r3']),
+      ),
     );
+    const chamada = vi.mocked(staffPanelClient.atribuirRecrutadores).mock.calls[0][1];
+    expect(chamada).toHaveLength(3);
   });
 
   it('não chama atribuirRecrutadores quando o carregamento inicial da vaga falha (não perde ninguém por segurança)', async () => {
     vi.mocked(staffPanelClient.obterVaga).mockRejectedValue(new Error('Vaga não encontrada'));
     vi.mocked(staffPanelClient.editarVaga).mockResolvedValue(undefined);
-    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue({
-      userId: 'u1',
-      tenantId: 't1',
-      roles: ['admin_tenant'],
-      email: 'ana@empresa.example',
-      razaoSocial: 'Empresa Exemplo Ltda',
-    });
 
     render(<EditarVagaPage />);
 
@@ -127,42 +114,26 @@ describe('EditarVagaPage', () => {
     expect(staffPanelClient.atribuirRecrutadores).not.toHaveBeenCalled();
   });
 
-  it('mostra erro e desabilita o campo de recrutadores quando o carregamento inicial da vaga falha por motivo genérico', async () => {
+  it('mostra erro e desabilita os checkboxes de recrutadores quando o carregamento inicial da vaga falha por motivo genérico', async () => {
     vi.mocked(staffPanelClient.obterVaga).mockRejectedValue(new Error('Erro de rede'));
-    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue({
-      userId: 'u1',
-      tenantId: 't1',
-      roles: ['admin_tenant'],
-      email: 'ana@empresa.example',
-      razaoSocial: 'Empresa Exemplo Ltda',
-    });
 
     render(<EditarVagaPage />);
 
     await waitFor(() => expect(screen.getByText('Erro de rede')).toBeInTheDocument());
-    expect(screen.getByLabelText('IDs dos recrutadores (separados por vírgula)')).toBeDisabled();
+    await screen.findByLabelText('ana@empresa.example');
+    expect(screen.getByLabelText('ana@empresa.example')).toBeDisabled();
   });
 
   it('não deixa a submissão passar batido sem tentar atribuir recrutadores digitados, quando o carregamento inicial falhou', async () => {
     vi.mocked(staffPanelClient.obterVaga).mockRejectedValue(new Error('Erro de rede'));
     vi.mocked(staffPanelClient.editarVaga).mockResolvedValue(undefined);
-    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue({
-      userId: 'u1',
-      tenantId: 't1',
-      roles: ['admin_tenant'],
-      email: 'ana@empresa.example',
-      razaoSocial: 'Empresa Exemplo Ltda',
-    });
 
     render(<EditarVagaPage />);
 
     await waitFor(() => expect(screen.getByText('Erro de rede')).toBeInTheDocument());
-    const campoRecrutadores = screen.getByLabelText('IDs dos recrutadores (separados por vírgula)');
-    expect(campoRecrutadores).toBeDisabled();
+    await screen.findByLabelText('ana@empresa.example');
+    expect(screen.getByLabelText('ana@empresa.example')).toBeDisabled();
 
-    // Como o campo está desabilitado, o usuário não consegue digitar nele --
-    // mesmo assim, garantimos que submeter não chama atribuirRecrutadores
-    // silenciosamente com um valor que pareça ter sido confirmado.
     fireEvent.click(screen.getByRole('button', { name: 'Salvar' }));
     await waitFor(() => expect(staffPanelClient.editarVaga).toHaveBeenCalled());
     expect(staffPanelClient.atribuirRecrutadores).not.toHaveBeenCalled();
@@ -170,13 +141,6 @@ describe('EditarVagaPage', () => {
 
   it('redireciona para /staff/entrar quando o carregamento da vaga falha por sessão ausente', async () => {
     vi.mocked(staffPanelClient.obterVaga).mockRejectedValue(new Error('Usuário não autenticado'));
-    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue({
-      userId: 'u1',
-      tenantId: 't1',
-      roles: ['admin_tenant'],
-      email: 'ana@empresa.example',
-      razaoSocial: 'Empresa Exemplo Ltda',
-    });
 
     render(<EditarVagaPage />);
     await waitFor(() => expect(pushMock).toHaveBeenCalledWith('/staff/entrar'));
@@ -185,13 +149,6 @@ describe('EditarVagaPage', () => {
   it('redireciona para /staff/entrar quando editarVaga falha por sessão expirada', async () => {
     vi.mocked(staffPanelClient.obterVaga).mockResolvedValue(vagaBase);
     vi.mocked(staffPanelClient.editarVaga).mockRejectedValue(new Error('Sessão expirada, faça login novamente'));
-    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue({
-      userId: 'u1',
-      tenantId: 't1',
-      roles: ['admin_tenant'],
-      email: 'ana@empresa.example',
-      razaoSocial: 'Empresa Exemplo Ltda',
-    });
 
     render(<EditarVagaPage />);
     await waitFor(() => expect(screen.getByLabelText('Título')).toHaveValue('Engenheiro de Dados'));
@@ -202,13 +159,6 @@ describe('EditarVagaPage', () => {
   it('mostra erro quando editarVaga falha', async () => {
     vi.mocked(staffPanelClient.obterVaga).mockResolvedValue(vagaBase);
     vi.mocked(staffPanelClient.editarVaga).mockRejectedValue(new Error('Vaga não encontrada'));
-    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue({
-      userId: 'u1',
-      tenantId: 't1',
-      roles: ['admin_tenant'],
-      email: 'ana@empresa.example',
-      razaoSocial: 'Empresa Exemplo Ltda',
-    });
 
     render(<EditarVagaPage />);
     await waitFor(() => expect(screen.getByLabelText('Título')).toHaveValue('Engenheiro de Dados'));
@@ -218,25 +168,13 @@ describe('EditarVagaPage', () => {
 
   it('mostra o seletor de instrumento com as opcoes ativas e envia a selecao ao salvar', async () => {
     vi.mocked(staffPanelClient.obterVaga).mockResolvedValue({
-      id: 'job-1',
-      titulo: 'Vaga X',
-      descricao: 'Descricao',
-      habilidadesExigidas: [],
-      publicadoEm: null,
-      criadoEm: '2026-08-01T00:00:00Z',
-      recrutadorIds: [],
-      instrumentVersionId: null,
+      id: 'job-1', titulo: 'Vaga X', descricao: 'Descricao',
+      habilidadesExigidas: [], publicadoEm: null, criadoEm: '2026-08-01T00:00:00Z',
+      recrutadorIds: [], instrumentVersionId: null,
     });
     vi.mocked(staffPanelClient.obterInstrumentosAtivos).mockResolvedValue([
       { id: 'iv-1', nome: 'Perfil Comportamental Tinocerto', versao: 1 },
     ]);
-    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue({
-      userId: 'u1',
-      tenantId: 't1',
-      roles: ['admin_tenant'],
-      email: 'ana@empresa.example',
-      razaoSocial: 'Empresa Exemplo Ltda',
-    });
     vi.mocked(staffPanelClient.editarVaga).mockResolvedValue(undefined);
 
     render(<EditarVagaPage />);
@@ -256,23 +194,11 @@ describe('EditarVagaPage', () => {
   });
 
   it('selecionar Nenhum numa vaga que ja tinha instrumento envia instrumentVersionId: null', async () => {
-    // Cenario fim-a-fim que o usuario realmente reportaria: a vaga JA
-    // tinha um instrumento configurado, o usuario seleciona "Nenhum" no
-    // <select>, e o payload enviado precisa ser null explicito -- nao ''
-    // (o backend distingue "desvincular" de "campo nao enviado", e uma
-    // string vazia nao e nenhum dos dois).
     vi.mocked(staffPanelClient.obterVaga).mockResolvedValue({ ...vagaBase, instrumentVersionId: 'iv-1' });
     vi.mocked(staffPanelClient.obterInstrumentosAtivos).mockResolvedValue([
       { id: 'iv-1', nome: 'Perfil Comportamental Tinocerto', versao: 1 },
     ]);
     vi.mocked(staffPanelClient.editarVaga).mockResolvedValue(undefined);
-    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue({
-      userId: 'u1',
-      tenantId: 't1',
-      roles: ['admin_tenant'],
-      email: 'ana@empresa.example',
-      razaoSocial: 'Empresa Exemplo Ltda',
-    });
 
     render(<EditarVagaPage />);
 
@@ -291,22 +217,8 @@ describe('EditarVagaPage', () => {
   });
 
   it('nao envia instrumentVersionId (nem null, nem vazio) quando o carregamento inicial da vaga falha', async () => {
-    // Regressao: apos o fix anterior, instrumentVersionId passou a ser
-    // SEMPRE enviado -- correto quando a vaga carregou, mas perigoso se
-    // `obterVaga` falhar (rede, 500, vaga nao encontrada). Nesse caso o
-    // campo do formulario nunca foi preenchido com o valor real (fica em
-    // '' por padrao do useState), e enviar null desvincularia em silencio
-    // um instrumento que a vaga ja tinha, sem o usuario ter tocado nesse
-    // campo. Mesmo padrao do teste de recrutadorIds para esse cenario.
     vi.mocked(staffPanelClient.obterVaga).mockRejectedValue(new Error('Erro de rede'));
     vi.mocked(staffPanelClient.editarVaga).mockResolvedValue(undefined);
-    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue({
-      userId: 'u1',
-      tenantId: 't1',
-      roles: ['admin_tenant'],
-      email: 'ana@empresa.example',
-      razaoSocial: 'Empresa Exemplo Ltda',
-    });
 
     render(<EditarVagaPage />);
 
@@ -327,7 +239,6 @@ describe('EditarVagaPage', () => {
       recrutadorIds: [], instrumentVersionId: null,
     });
     vi.mocked(staffPanelClient.obterInstrumentosAtivos).mockResolvedValue([]);
-    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue(PERFIL_MOCK);
     vi.mocked(staffPanelClient.gerarSugestaoDescricao).mockResolvedValue({
       id: 'sug-1', jobId: 'job-1',
       textoOriginal: 'procuramos um rapaz esforçado',
@@ -352,7 +263,6 @@ describe('EditarVagaPage', () => {
       recrutadorIds: [], instrumentVersionId: null,
     });
     vi.mocked(staffPanelClient.obterInstrumentosAtivos).mockResolvedValue([]);
-    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue(PERFIL_MOCK);
     vi.mocked(staffPanelClient.gerarSugestaoDescricao).mockResolvedValue({
       id: 'sug-1', jobId: 'job-1',
       textoOriginal: 'procuramos um rapaz esforçado',
@@ -383,7 +293,6 @@ describe('EditarVagaPage', () => {
       recrutadorIds: [], instrumentVersionId: null,
     });
     vi.mocked(staffPanelClient.obterInstrumentosAtivos).mockResolvedValue([]);
-    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue(PERFIL_MOCK);
     vi.mocked(staffPanelClient.gerarSugestaoDescricao).mockResolvedValue({
       id: 'sug-1', jobId: 'job-1',
       textoOriginal: 'procuramos um rapaz esforcado',
@@ -407,7 +316,6 @@ describe('EditarVagaPage', () => {
       recrutadorIds: [], instrumentVersionId: null,
     });
     vi.mocked(staffPanelClient.obterInstrumentosAtivos).mockResolvedValue([]);
-    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue(PERFIL_MOCK);
     vi.mocked(staffPanelClient.gerarSugestaoDescricao).mockResolvedValue({
       id: 'sug-1', jobId: 'job-1',
       textoOriginal: 'procuramos um rapaz esforçado',
@@ -437,7 +345,6 @@ describe('EditarVagaPage', () => {
       recrutadorIds: [], instrumentVersionId: null,
     });
     vi.mocked(staffPanelClient.obterInstrumentosAtivos).mockResolvedValue([]);
-    vi.mocked(staffPanelClient.obterPerfil).mockResolvedValue(PERFIL_MOCK);
     vi.mocked(staffPanelClient.gerarSugestaoDescricao).mockRejectedValue(
       new Error('Geração por IA indisponível no momento, tente novamente.'),
     );
@@ -452,4 +359,21 @@ describe('EditarVagaPage', () => {
     );
   });
 
+  it('atualiza as habilidades exigidas via ChipsInput', async () => {
+    vi.mocked(staffPanelClient.obterVaga).mockResolvedValue(vagaBase);
+    vi.mocked(staffPanelClient.editarVaga).mockResolvedValue(undefined);
+
+    render(<EditarVagaPage />);
+
+    await screen.findByText('SQL');
+    fireEvent.click(screen.getByRole('button', { name: 'Remover Python' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar' }));
+
+    await waitFor(() =>
+      expect(staffPanelClient.editarVaga).toHaveBeenCalledWith(
+        'job-1',
+        expect.objectContaining({ habilidadesExigidas: ['SQL'] }),
+      ),
+    );
+  });
 });
