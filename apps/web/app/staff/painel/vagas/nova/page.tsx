@@ -11,7 +11,7 @@ export default function NovaVagaPage() {
   const router = useRouter();
   const [titulo, setTitulo] = useState('');
   const [requisitionId, setRequisitionId] = useState('');
-  const [requisicoes, setRequisicoes] = useState<RequisitionResumo[]>([]);
+  const [requisicoes, setRequisicoes] = useState<RequisitionResumo[] | null>(null);
   const [equipe, setEquipe] = useState<MembroEquipe[]>([]);
   const [recrutadorIds, setRecrutadorIds] = useState<Set<string>>(new Set());
   const [erro, setErro] = useState<string | null>(null);
@@ -34,7 +34,9 @@ export default function NovaVagaPage() {
         if (aprovadas.length === 1) setRequisitionId(aprovadas[0].id);
       })
       .catch(tratarFalha);
-    staffPanelClient.listarEquipe().then(setEquipe).catch(() => {});
+    staffPanelClient.listarEquipe().then(setEquipe).catch((e: unknown) => {
+      console.error('Falha ao carregar a equipe para Nova vaga:', e);
+    });
   }, [router]);
 
   function alternarRecrutador(id: string) {
@@ -84,7 +86,7 @@ export default function NovaVagaPage() {
         <Field label="Título" htmlFor="titulo-vaga">
           <Input id="titulo-vaga" value={titulo} onChange={(e) => setTitulo(e.target.value)} required />
         </Field>
-        {requisicoes.length === 0 ? (
+        {requisicoes === null ? null : requisicoes.length === 0 ? (
           <p className="font-ui text-sm text-text-secondary">
             Nenhuma requisição aprovada disponível. Abra e aprove uma requisição antes de criar a vaga.
           </p>
@@ -110,7 +112,7 @@ export default function NovaVagaPage() {
             </label>
           ))}
         </fieldset>
-        <Button type="submit" disabled={enviando || requisicoes.length === 0}>
+        <Button type="submit" disabled={enviando || requisicoes === null || requisicoes.length === 0}>
           {enviando ? 'Criando...' : 'Criar vaga'}
         </Button>
       </form>

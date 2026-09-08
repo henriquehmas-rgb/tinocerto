@@ -32,10 +32,28 @@ describe('NovaVagaPage', () => {
       userId: 'u1',
       tenantId: 't1',
       roles: ['recrutador'],
-      email: 'ana@empresa.example',
+      email: 'staff-logado@empresa.example',
       razaoSocial: 'Empresa Exemplo Ltda',
     });
     vi.mocked(staffPanelClient.listarEquipe).mockResolvedValue(EQUIPE);
+  });
+
+  it('não mostra o aviso de "nenhuma requisição aprovada" enquanto a busca ainda está em andamento (achado F1 da revisão)', async () => {
+    let resolverRequisicoes: (valor: unknown) => void = () => {};
+    const promessaRequisicoes = new Promise((resolve) => {
+      resolverRequisicoes = resolve;
+    });
+    vi.mocked(staffPanelClient.listarRequisicoes).mockReturnValue(promessaRequisicoes as never);
+
+    render(<NovaVagaPage />);
+
+    expect(screen.queryByText(/nenhuma requisição aprovada/i)).not.toBeInTheDocument();
+
+    resolverRequisicoes(UMA_REQUISICAO_APROVADA);
+    // findAllByText (não findByText): mesmo caso do BubbleSelect do Radix
+    // documentado nos outros testes deste arquivo -- duplica 'Requisição
+    // inicial' no DOM (span visível + <option> espelhado oculto).
+    await screen.findAllByText('Requisição inicial');
   });
 
   it('pré-seleciona a única requisição aprovada quando há só uma', async () => {
@@ -87,12 +105,7 @@ describe('NovaVagaPage', () => {
 
     render(<NovaVagaPage />);
 
-    // findAllByText (não findByText): 'ana@empresa.example' também é o
-    // e-mail do usuário logado (perfil mockado), exibido pela PainelShell no
-    // cabeçalho da navegação -- coincide com o e-mail do membro de equipe
-    // u1 nesta fixture, duplicando o texto no DOM. Barreira de espera, sem
-    // depender de quantos elementos batem.
-    await screen.findAllByText('ana@empresa.example');
+    await screen.findByText('ana@empresa.example');
     fireEvent.change(screen.getByLabelText('Título'), { target: { value: 'Engenheiro de Dados' } });
     fireEvent.click(screen.getByLabelText('bruno@empresa.example'));
     fireEvent.click(screen.getByRole('button', { name: 'Criar vaga' }));
